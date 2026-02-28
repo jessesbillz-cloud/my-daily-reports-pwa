@@ -111,6 +111,7 @@ const Jobs = {
         showToast('Job updated');
       } else {
         data.is_archived = false;
+        data.user_id = App.user.id;
         const { error } = await App.supabase.from('jobs').insert(data);
         if (error) throw error;
         showToast('Job created');

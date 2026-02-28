@@ -13,10 +13,12 @@ const App = {
 
 // ---------- Supabase config (localStorage) ----------
 const Config = {
+  DEFAULT_URL: 'https://wluvkmpncafugdbunlkw.supabase.co',
+  DEFAULT_KEY: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndsdXZrbXBuY2FmdWdkYnVubGt3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzIzMDU1MTUsImV4cCI6MjA4Nzg4MTUxNX0.HZpQ2xVGpf4EQ0BVDmIEuPqW5T_eNG5OqBNAqT03rH8',
   get() {
     return {
-      url: localStorage.getItem('mdr_sb_url') || '',
-      key: localStorage.getItem('mdr_sb_key') || '',
+      url: localStorage.getItem('mdr_sb_url') || Config.DEFAULT_URL,
+      key: localStorage.getItem('mdr_sb_key') || Config.DEFAULT_KEY,
     };
   },
   set(url, key) {
