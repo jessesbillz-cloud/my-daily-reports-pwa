@@ -460,52 +460,6 @@
                 </button>
               );
             })}
-
-            {/* Training Center */}
-            {tab === "jobs" && (
-              <div
-                onClick={() => {
-                  // TODO: Link to training content
-                  alert("Training Center coming soon");
-                }}
-                style={{
-                  background: C.card, border: `1px solid ${C.border}`,
-                  borderRadius: 12, padding: "16px 18px",
-                  marginTop: 20, cursor: "pointer",
-                  display: "flex", alignItems: "center", gap: 14,
-                }}
-              >
-                <div style={{
-                  width: 40, height: 40, borderRadius: 10,
-                  background: C.input, border: `1px solid ${C.border}`,
-                  display: "flex", alignItems: "center", justifyContent: "center",
-                  fontSize: 20, flexShrink: 0,
-                }}>🎓</div>
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontWeight: 600, fontSize: 15, color: C.text, marginBottom: 2 }}>
-                    Training Center
-                  </div>
-                  <div style={{ fontSize: 12, color: C.muted }}>
-                    Learn how to get the most out of My Daily Reports
-                  </div>
-                </div>
-                <span style={{ color: C.muted, fontSize: 18 }}>›</span>
-              </div>
-            )}
-          </div>
-
-          {/* Legal footer */}
-          <div style={{
-            textAlign: "center", padding: "24px 20px 32px",
-            color: C.muted, fontSize: 12,
-          }}>
-            <a href="#" onClick={(e) => { e.preventDefault(); alert("Terms of Service coming soon"); }}
-              style={{ color: C.muted, textDecoration: "none" }}
-            >Terms of Service</a>
-            <span style={{ margin: "0 8px" }}>•</span>
-            <a href="#" onClick={(e) => { e.preventDefault(); alert("Privacy Policy coming soon"); }}
-              style={{ color: C.muted, textDecoration: "none" }}
-            >Privacy Policy</a>
           </div>
         </div>
       );
