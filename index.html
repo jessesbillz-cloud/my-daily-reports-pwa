@@ -196,6 +196,55 @@
         if (!res.ok) return [];
         return await res.json();
       },
+
+      async createJob(jobData) {
+        const res = await fetch(
+          `${SUPABASE_URL}/rest/v1/jobs`,
+          {
+            method: "POST",
+            headers: this._headers(),
+            body: JSON.stringify(jobData),
+          }
+        );
+        if (!res.ok) {
+          const err = await res.json();
+          throw new Error(err.message || "Failed to create job");
+        }
+        return (await res.json())[0];
+      },
+
+      async uploadTemplate(userId, jobId, file) {
+        const ext = file.name.split(".").pop().toLowerCase();
+        const path = `${userId}/${jobId}/template.${ext}`;
+        const session = JSON.parse(localStorage.getItem("mdr_session") || "null");
+        const res = await fetch(
+          `${SUPABASE_URL}/storage/v1/object/report-source-docs/${path}`,
+          {
+            method: "POST",
+            headers: {
+              apikey: SUPABASE_ANON_KEY,
+              Authorization: `Bearer ${session?.access_token || SUPABASE_ANON_KEY}`,
+              "Content-Type": file.type || "application/octet-stream",
+            },
+            body: file,
+          }
+        );
+        if (!res.ok) throw new Error("Failed to upload template");
+        return path;
+      },
+
+      async createTemplate(templateData) {
+        const res = await fetch(
+          `${SUPABASE_URL}/rest/v1/templates`,
+          {
+            method: "POST",
+            headers: this._headers(),
+            body: JSON.stringify(templateData),
+          }
+        );
+        if (!res.ok) throw new Error("Failed to save template record");
+        return (await res.json())[0];
+      },
     };
 
     /* ─────────────────────────────────────────────
@@ -210,6 +259,437 @@
     };
 
     /* ─────────────────────────────────────────────
+       CREATE JOB — Section 3
+    ─────────────────────────────────────────────── */
+    function CreateJob({ user, onBack, onCreated }) {
+      const [jobName, setJobName] = useState("");
+      const [siteAddress, setSiteAddress] = useState("");
+      const [filenamePattern, setFilenamePattern] = useState("");
+      const [templateFile, setTemplateFile] = useState(null);
+      const [templateName, setTemplateName] = useState("");
+      const [schedule, setSchedule] = useState("");
+      const [selectedDays, setSelectedDays] = useState([]);
+      const [reminderEnabled, setReminderEnabled] = useState(false);
+      const [reminderTime, setReminderTime] = useState("5:00 PM");
+      const [reminderHours, setReminderHours] = useState(2);
+      const [saving, setSaving] = useState(false);
+      const [error, setError] = useState("");
+      const [dragOver, setDragOver] = useState(false);
+
+      const DAYS = ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"];
+      const DAY_MAP = { Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6, Sun: 0 };
+      const TIMES = ["12:00 PM","1:00 PM","2:00 PM","3:00 PM","4:00 PM","5:00 PM","6:00 PM","7:00 PM","8:00 PM","9:00 PM"];
+
+      const toggleDay = (day) => {
+        setSchedule("custom");
+        setSelectedDays(prev =>
+          prev.includes(day) ? prev.filter(d => d !== day) : [...prev, day]
+        );
+      };
+
+      const selectPreset = (preset) => {
+        if (preset === "weekly") {
+          setSchedule("weekly");
+          setSelectedDays([]);
+        } else if (preset === "as_needed") {
+          setSchedule("as_needed");
+          setSelectedDays([]);
+          setReminderEnabled(false);
+        } else {
+          setSchedule(preset);
+          setSelectedDays([]);
+        }
+      };
+
+      // Determine effective schedule for saving
+      const getEffectiveSchedule = () => {
+        if (schedule === "weekly" || schedule === "as_needed") return schedule;
+        if (selectedDays.length === 5 &&
+          ["Mon","Tue","Wed","Thu","Fri"].every(d => selectedDays.includes(d)) &&
+          !selectedDays.includes("Sat") && !selectedDays.includes("Sun")) return "daily_mf";
+        if (selectedDays.length === 7) return "daily_7";
+        if (selectedDays.length > 0) return "custom";
+        return schedule || "daily_mf";
+      };
+
+      const handleFile = (file) => {
+        const ext = file.name.split(".").pop().toLowerCase();
+        if (!["docx", "pdf"].includes(ext)) {
+          setError("Only .docx and .pdf files are supported");
+          return;
+        }
+        setTemplateFile(file);
+        setTemplateName(file.name.replace(/\.[^.]+$/, ""));
+        setError("");
+      };
+
+      const handleDrop = (e) => {
+        e.preventDefault();
+        setDragOver(false);
+        if (e.dataTransfer.files.length) handleFile(e.dataTransfer.files[0]);
+      };
+
+      const isValid = jobName.trim() && filenamePattern.trim() && (schedule || selectedDays.length > 0);
+
+      const handleCreate = async () => {
+        if (!isValid) return;
+        setSaving(true);
+        setError("");
+        try {
+          const effSchedule = getEffectiveSchedule();
+          const jobData = {
+            user_id: user.id,
+            name: jobName.trim(),
+            site_address: siteAddress.trim() || null,
+            report_filename_pattern: filenamePattern.trim(),
+            schedule: effSchedule,
+            schedule_days: effSchedule === "custom" ? selectedDays : [],
+            reminder_enabled: reminderEnabled,
+            reminder_time: reminderEnabled ? reminderTime : null,
+            reminder_hours_before: reminderEnabled ? reminderHours : null,
+          };
+          const job = await db.createJob(jobData);
+
+          // Upload template if provided
+          if (templateFile && job?.id) {
+            const ext = templateFile.name.split(".").pop().toLowerCase();
+            const storagePath = await db.uploadTemplate(user.id, job.id, templateFile);
+            await db.createTemplate({
+              user_id: user.id,
+              job_id: job.id,
+              name: templateName || templateFile.name,
+              original_filename: templateFile.name,
+              file_type: ext,
+              storage_path: storagePath,
+            });
+          }
+
+          onCreated();
+        } catch (e) {
+          setError(e.message);
+        } finally {
+          setSaving(false);
+        }
+      };
+
+      return (
+        <div style={{ minHeight: "100vh", background: C.bg, color: C.text }}>
+          {/* Header */}
+          <div style={{
+            display: "flex", alignItems: "center", gap: 12,
+            padding: "16px 20px",
+            borderBottom: `1px solid ${C.border}`,
+            background: C.card,
+          }}>
+            <button onClick={onBack} style={{
+              background: "none", border: "none", color: C.muted,
+              fontSize: 22, cursor: "pointer", padding: 0, lineHeight: 1,
+            }}>←</button>
+            <span style={{ fontWeight: 700, fontSize: 17 }}>New Job</span>
+          </div>
+
+          {/* Form */}
+          <div style={{ maxWidth: 500, margin: "0 auto", padding: "24px 20px" }}>
+
+            {/* Error */}
+            {error && (
+              <div style={{
+                background: "#2d1214", border: "1px solid #5c2023",
+                borderRadius: 8, padding: "10px 14px",
+                marginBottom: 16, color: C.error, fontSize: 13,
+              }}>{error}</div>
+            )}
+
+            {/* Job Name */}
+            <div style={{ marginBottom: 20 }}>
+              <label style={{
+                display: "block", color: C.light,
+                fontSize: 13, fontWeight: 600, marginBottom: 6,
+              }}>Job Name *</label>
+              <input
+                type="text"
+                placeholder="Oceanside District Office"
+                value={jobName}
+                onChange={(e) => setJobName(e.target.value)}
+                style={{
+                  width: "100%", padding: "12px 14px",
+                  background: C.input, border: `1px solid ${C.border}`,
+                  borderRadius: 10, color: C.text, fontSize: 15,
+                }}
+              />
+            </div>
+
+            {/* Site Address */}
+            <div style={{ marginBottom: 20 }}>
+              <label style={{
+                display: "block", color: C.light,
+                fontSize: 13, fontWeight: 600, marginBottom: 6,
+              }}>Site Address</label>
+              <input
+                type="text"
+                placeholder="2111 Mission Ave, Oceanside CA 92058"
+                value={siteAddress}
+                onChange={(e) => setSiteAddress(e.target.value)}
+                style={{
+                  width: "100%", padding: "12px 14px",
+                  background: C.input, border: `1px solid ${C.border}`,
+                  borderRadius: 10, color: C.text, fontSize: 15,
+                }}
+              />
+            </div>
+
+            {/* Report Filename Pattern */}
+            <div style={{ marginBottom: 20 }}>
+              <label style={{
+                display: "block", color: C.light,
+                fontSize: 13, fontWeight: 600, marginBottom: 6,
+              }}>Report Filename *</label>
+              <input
+                type="text"
+                placeholder="DR_##__Oceanside_District_Office"
+                value={filenamePattern}
+                onChange={(e) => setFilenamePattern(e.target.value)}
+                style={{
+                  width: "100%", padding: "12px 14px",
+                  background: C.input, border: `1px solid ${C.border}`,
+                  borderRadius: 10, color: C.text, fontSize: 15,
+                }}
+              />
+              <p style={{
+                fontSize: 12, color: C.muted, marginTop: 6, lineHeight: 1.5,
+              }}>
+                This is your naming convention for saved reports. Type it exactly how you want it.
+                The report number and date will be filled in automatically each time.
+                <br />
+                <span style={{ color: C.blue }}>
+                  Example: DR_##__Oceanside_District_Office → DR_354__Oceanside_District_Office_Feb_03_2026
+                </span>
+              </p>
+            </div>
+
+            {/* Template Upload */}
+            <div style={{ marginBottom: 20 }}>
+              <label style={{
+                display: "block", color: C.light,
+                fontSize: 13, fontWeight: 600, marginBottom: 6,
+              }}>Upload Template</label>
+
+              {!templateFile ? (
+                <div
+                  onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+                  onDragLeave={() => setDragOver(false)}
+                  onDrop={handleDrop}
+                  onClick={() => document.getElementById("file-input").click()}
+                  style={{
+                    border: `2px dashed ${dragOver ? C.orange : C.border}`,
+                    borderRadius: 12, padding: "32px 20px",
+                    textAlign: "center", cursor: "pointer",
+                    background: dragOver ? "#1f1a14" : C.input,
+                    transition: "all 0.2s",
+                  }}
+                >
+                  <div style={{ fontSize: 32, marginBottom: 8 }}>📄</div>
+                  <p style={{ color: C.light, fontSize: 14, fontWeight: 600, marginBottom: 4 }}>
+                    Drop your Word or PDF template here
+                  </p>
+                  <p style={{ color: C.muted, fontSize: 12 }}>
+                    or tap to browse • .docx or .pdf
+                  </p>
+                  <input
+                    id="file-input"
+                    type="file"
+                    accept=".docx,.pdf"
+                    style={{ display: "none" }}
+                    onChange={(e) => e.target.files[0] && handleFile(e.target.files[0])}
+                  />
+                </div>
+              ) : (
+                <div style={{
+                  background: C.input, border: `1px solid ${C.border}`,
+                  borderRadius: 12, padding: "14px 16px",
+                }}>
+                  <div style={{
+                    display: "flex", alignItems: "center", gap: 12, marginBottom: 12,
+                  }}>
+                    <div style={{ fontSize: 24 }}>📄</div>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontSize: 14, fontWeight: 600, color: C.text }}>
+                        {templateFile.name}
+                      </div>
+                      <div style={{ fontSize: 12, color: C.muted }}>
+                        {(templateFile.size / 1024).toFixed(0)} KB
+                      </div>
+                    </div>
+                    <button onClick={() => { setTemplateFile(null); setTemplateName(""); }} style={{
+                      background: "none", border: "none",
+                      color: "#ef4444", cursor: "pointer", fontSize: 18,
+                    }}>✕</button>
+                  </div>
+
+                  {/* Template Name */}
+                  <label style={{
+                    display: "block", color: C.muted,
+                    fontSize: 12, fontWeight: 600, marginBottom: 4,
+                  }}>Template Name</label>
+                  <input
+                    type="text"
+                    value={templateName}
+                    onChange={(e) => setTemplateName(e.target.value)}
+                    style={{
+                      width: "100%", padding: "10px 12px",
+                      background: C.bg, border: `1px solid ${C.border}`,
+                      borderRadius: 8, color: C.text, fontSize: 14,
+                    }}
+                  />
+                </div>
+              )}
+            </div>
+
+            {/* Report Frequency */}
+            <div style={{ marginBottom: 20 }}>
+              <label style={{
+                display: "block", color: C.light,
+                fontSize: 13, fontWeight: 600, marginBottom: 10,
+              }}>Report Frequency *</label>
+
+              {/* Day bubbles */}
+              <div style={{
+                display: "flex", gap: 6, marginBottom: 10, flexWrap: "wrap",
+              }}>
+                {DAYS.map((day) => {
+                  const active = selectedDays.includes(day);
+                  return (
+                    <button
+                      key={day}
+                      onClick={() => toggleDay(day)}
+                      style={{
+                        width: 44, height: 44, borderRadius: "50%",
+                        border: active ? `2px solid ${C.orange}` : `1px solid ${C.border}`,
+                        background: active ? C.orange : "transparent",
+                        color: active ? "#fff" : C.muted,
+                        fontWeight: 600, fontSize: 12,
+                        cursor: "pointer",
+                      }}
+                    >{day}</button>
+                  );
+                })}
+              </div>
+
+              {/* Presets */}
+              <div style={{ display: "flex", gap: 8 }}>
+                {[
+                  { key: "weekly", label: "Weekly" },
+                  { key: "as_needed", label: "As Needed" },
+                ].map(({ key, label }) => (
+                  <button
+                    key={key}
+                    onClick={() => selectPreset(key)}
+                    style={{
+                      padding: "8px 16px",
+                      borderRadius: 8,
+                      border: schedule === key ? `2px solid ${C.orange}` : `1px solid ${C.border}`,
+                      background: schedule === key ? C.orange : "transparent",
+                      color: schedule === key ? "#fff" : C.muted,
+                      fontWeight: 600, fontSize: 13,
+                      cursor: "pointer",
+                    }}
+                  >{label}</button>
+                ))}
+              </div>
+            </div>
+
+            {/* Reminder Settings — show if schedule is not as_needed */}
+            {schedule !== "as_needed" && (schedule || selectedDays.length > 0) && (
+              <div style={{
+                background: C.card, border: `1px solid ${C.border}`,
+                borderRadius: 12, padding: 16, marginBottom: 20,
+              }}>
+                <div style={{
+                  display: "flex", alignItems: "center", justifyContent: "space-between",
+                  marginBottom: reminderEnabled ? 14 : 0,
+                }}>
+                  <span style={{ fontSize: 14, fontWeight: 600, color: C.light }}>
+                    Report Reminder
+                  </span>
+                  <button
+                    onClick={() => setReminderEnabled(!reminderEnabled)}
+                    style={{
+                      width: 48, height: 28, borderRadius: 14,
+                      border: "none", cursor: "pointer",
+                      background: reminderEnabled ? C.orange : C.border,
+                      position: "relative",
+                      transition: "background 0.2s",
+                    }}
+                  >
+                    <div style={{
+                      width: 22, height: 22, borderRadius: "50%",
+                      background: "#fff", position: "absolute", top: 3,
+                      left: reminderEnabled ? 23 : 3,
+                      transition: "left 0.2s",
+                    }} />
+                  </button>
+                </div>
+
+                {reminderEnabled && (
+                  <div style={{ display: "flex", gap: 10 }}>
+                    <div style={{ flex: 1 }}>
+                      <label style={{ display: "block", fontSize: 12, color: C.muted, marginBottom: 4 }}>
+                        Submit report by
+                      </label>
+                      <select
+                        value={reminderTime}
+                        onChange={(e) => setReminderTime(e.target.value)}
+                        style={{
+                          width: "100%", padding: "10px 12px",
+                          background: C.input, border: `1px solid ${C.border}`,
+                          borderRadius: 8, color: C.text, fontSize: 14,
+                        }}
+                      >
+                        {TIMES.map(t => <option key={t} value={t}>{t}</option>)}
+                      </select>
+                    </div>
+                    <div style={{ flex: 1 }}>
+                      <label style={{ display: "block", fontSize: 12, color: C.muted, marginBottom: 4 }}>
+                        Remind me before
+                      </label>
+                      <select
+                        value={reminderHours}
+                        onChange={(e) => setReminderHours(Number(e.target.value))}
+                        style={{
+                          width: "100%", padding: "10px 12px",
+                          background: C.input, border: `1px solid ${C.border}`,
+                          borderRadius: 8, color: C.text, fontSize: 14,
+                        }}
+                      >
+                        {[1,2,3,4,6].map(h => <option key={h} value={h}>{h} hour{h > 1 ? "s" : ""}</option>)}
+                      </select>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Create Job Button */}
+            <button
+              className="btn-orange"
+              onClick={handleCreate}
+              disabled={!isValid || saving}
+              style={{
+                width: "100%", padding: "14px 0",
+                background: isValid && !saving ? C.orange : C.border,
+                border: isValid && !saving ? `1px solid ${C.blue}` : `1px solid ${C.border}`,
+                borderRadius: 10, color: isValid && !saving ? "#fff" : C.muted,
+                fontSize: 16, fontWeight: 700,
+                cursor: isValid && !saving ? "pointer" : "default",
+                transition: "all 0.2s",
+              }}
+            >{saving ? "Creating..." : "Create Job"}</button>
+          </div>
+        </div>
+      );
+    }
+
+    /* ─────────────────────────────────────────────
        DASHBOARD — Section 2
     ─────────────────────────────────────────────── */
     function Dashboard({ user, onLogout }) {
@@ -219,6 +699,7 @@
       const [loadingJobs, setLoadingJobs] = useState(true);
       const [selectedJob, setSelectedJob] = useState(null);
       const [showSettings, setShowSettings] = useState(false);
+      const [showCreateJob, setShowCreateJob] = useState(false);
 
       // Load jobs from Supabase
       useEffect(() => {
@@ -267,7 +748,18 @@
         );
       };
 
-      // TODO: Section 3 will handle job detail view
+      // Show Create Job screen
+      if (showCreateJob) {
+        return (
+          <CreateJob
+            user={user}
+            onBack={() => setShowCreateJob(false)}
+            onCreated={() => { setShowCreateJob(false); loadJobs(); }}
+          />
+        );
+      }
+
+      // TODO: Section 4 will handle job detail view
       // For now, clicking a job just shows a placeholder
       if (selectedJob) {
         return (
@@ -425,10 +917,7 @@
             {tab === "jobs" && (
               <button
                 className="btn-orange"
-                onClick={() => {
-                  // TODO: Section 3 will open job creation wizard
-                  alert("Job creation coming in Section 3");
-                }}
+                onClick={() => setShowCreateJob(true)}
                 style={{
                   width: "100%", padding: "14px 0",
                   background: C.orange, border: `1px solid ${C.blue}`,
