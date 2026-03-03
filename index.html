@@ -24,34 +24,39 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.9/babel.min.js"></script>
 <script type="text/babel">
 const { useState, useEffect } = React;
-const SB_URL = "https://wluvkmpncafugdbunlkw.supabase.co";
-const SB_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndsdXZrbXBuY2FmdWdkYnVubGt3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzIzMDU1MTUsImV4cCI6MjA4Nzg4MTUxNX0.HZpQ2xVGpf4EQ0BVDmIEuPqW5T_eNG5OqBNAqT03rH8";
+const SB = "https://wluvkmpncafugdbunlkw.supabase.co";
+const AK = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndsdXZrbXBuY2FmdWdkYnVubGt3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzIzMDU1MTUsImV4cCI6MjA4Nzg4MTUxNX0.HZpQ2xVGpf4EQ0BVDmIEuPqW5T_eNG5OqBNAqT03rH8";
+const BASE_URL = "https://jessesbillz-cloud.github.io/my-daily-reports-pwa";
 const C = {bg:"#0f0f0f",card:"#1a1a1a",brd:"#333",inp:"#222",org:"#e8742a",orgH:"#d4691f",blu:"#5a8fc0",txt:"#fff",mut:"#888",lt:"#ccc",err:"#ef4444",ok:"#22c55e"};
 
-// Auth
 const auth = {
-  _h(){const h={"Content-Type":"application/json",apikey:SB_KEY,Authorization:`Bearer ${SB_KEY}`};const s=JSON.parse(localStorage.getItem("mdr_s")||"null");if(s?.access_token)h.Authorization=`Bearer ${s.access_token}`;return h;},
-  async up(e,p,n){const r=await fetch(`${SB_URL}/auth/v1/signup`,{method:"POST",headers:this._h(),body:JSON.stringify({email:e,password:p,data:{full_name:n}})});const d=await r.json();if(d.error)throw new Error(d.error.message||"Signup failed");if(d.access_token)localStorage.setItem("mdr_s",JSON.stringify(d));return d;},
-  async in(e,p){const r=await fetch(`${SB_URL}/auth/v1/token?grant_type=password`,{method:"POST",headers:this._h(),body:JSON.stringify({email:e,password:p})});const d=await r.json();if(d.error)throw new Error(d.error_description||"Login failed");if(d.access_token)localStorage.setItem("mdr_s",JSON.stringify(d));return d;},
-  async user(){const s=JSON.parse(localStorage.getItem("mdr_s")||"null");if(!s?.access_token)return null;const r=await fetch(`${SB_URL}/auth/v1/user`,{headers:this._h()});if(!r.ok){localStorage.removeItem("mdr_s");return null;}return await r.json();},
-  async out(){const s=JSON.parse(localStorage.getItem("mdr_s")||"null");if(s?.access_token)await fetch(`${SB_URL}/auth/v1/logout`,{method:"POST",headers:this._h()}).catch(()=>{});localStorage.removeItem("mdr_s");},
-  async ref(){const s=JSON.parse(localStorage.getItem("mdr_s")||"null");if(!s?.refresh_token)return null;const r=await fetch(`${SB_URL}/auth/v1/token?grant_type=refresh_token`,{method:"POST",headers:{"Content-Type":"application/json",apikey:SB_KEY},body:JSON.stringify({refresh_token:s.refresh_token})});const d=await r.json();if(d.access_token){localStorage.setItem("mdr_s",JSON.stringify(d));return d;}localStorage.removeItem("mdr_s");return null;},
+  _h(){const h={"Content-Type":"application/json",apikey:AK,Authorization:`Bearer ${AK}`};const s=JSON.parse(localStorage.getItem("mdr_s")||"null");if(s?.access_token)h.Authorization=`Bearer ${s.access_token}`;return h;},
+  async up(e,p,n){const r=await fetch(`${SB}/auth/v1/signup`,{method:"POST",headers:this._h(),body:JSON.stringify({email:e,password:p,data:{full_name:n}})});const d=await r.json();if(d.error)throw new Error(d.error.message||"Signup failed");if(d.access_token)localStorage.setItem("mdr_s",JSON.stringify(d));return d;},
+  async in(e,p){const r=await fetch(`${SB}/auth/v1/token?grant_type=password`,{method:"POST",headers:this._h(),body:JSON.stringify({email:e,password:p})});const d=await r.json();if(d.error)throw new Error(d.error_description||"Login failed");if(d.access_token)localStorage.setItem("mdr_s",JSON.stringify(d));return d;},
+  async user(){const s=JSON.parse(localStorage.getItem("mdr_s")||"null");if(!s?.access_token)return null;const r=await fetch(`${SB}/auth/v1/user`,{headers:this._h()});if(!r.ok){localStorage.removeItem("mdr_s");return null;}return await r.json();},
+  async out(){const s=JSON.parse(localStorage.getItem("mdr_s")||"null");if(s?.access_token)await fetch(`${SB}/auth/v1/logout`,{method:"POST",headers:this._h()}).catch(()=>{});localStorage.removeItem("mdr_s");},
+  async ref(){const s=JSON.parse(localStorage.getItem("mdr_s")||"null");if(!s?.refresh_token)return null;const r=await fetch(`${SB}/auth/v1/token?grant_type=refresh_token`,{method:"POST",headers:{"Content-Type":"application/json",apikey:AK},body:JSON.stringify({refresh_token:s.refresh_token})});const d=await r.json();if(d.access_token){localStorage.setItem("mdr_s",JSON.stringify(d));return d;}localStorage.removeItem("mdr_s");return null;},
 };
 
-// DB
 const db = {
-  _h(){const h={"Content-Type":"application/json",apikey:SB_KEY,Authorization:`Bearer ${SB_KEY}`,Prefer:"return=representation"};const s=JSON.parse(localStorage.getItem("mdr_s")||"null");if(s?.access_token)h.Authorization=`Bearer ${s.access_token}`;return h;},
-  async jobs(){const r=await fetch(`${SB_URL}/rest/v1/jobs?select=*&order=created_at.asc`,{headers:this._h()});if(!r.ok)throw new Error("Failed");return await r.json();},
-  async todayRpts(ids){if(!ids.length)return[];const t=new Date().toISOString().split("T")[0];const q=ids.map(i=>`"${i}"`).join(",");const r=await fetch(`${SB_URL}/rest/v1/reports?select=id,job_id,status,report_date&report_date=eq.${t}&job_id=in.(${q})`,{headers:this._h()});if(!r.ok)return[];return await r.json();},
-  async mkJob(d){const r=await fetch(`${SB_URL}/rest/v1/jobs`,{method:"POST",headers:this._h(),body:JSON.stringify(d)});if(!r.ok){const e=await r.json();throw new Error(e.message||"Failed");}return(await r.json())[0];},
-  async ulTpl(uid,jid,f){const ext=f.name.split(".").pop().toLowerCase();const p=`${uid}/${jid}/template.${ext}`;const s=JSON.parse(localStorage.getItem("mdr_s")||"null");const r=await fetch(`${SB_URL}/storage/v1/object/report-source-docs/${p}`,{method:"POST",headers:{apikey:SB_KEY,Authorization:`Bearer ${s?.access_token||SB_KEY}`,"Content-Type":f.type||"application/octet-stream"},body:f});if(!r.ok)throw new Error("Upload failed");return p;},
-  async mkTpl(d){const r=await fetch(`${SB_URL}/rest/v1/templates`,{method:"POST",headers:this._h(),body:JSON.stringify(d)});if(!r.ok)throw new Error("Template save failed");return(await r.json())[0];},
+  _h(){const h={"Content-Type":"application/json",apikey:AK,Authorization:`Bearer ${AK}`,Prefer:"return=representation"};const s=JSON.parse(localStorage.getItem("mdr_s")||"null");if(s?.access_token)h.Authorization=`Bearer ${s.access_token}`;return h;},
+  async jobs(){const r=await fetch(`${SB}/rest/v1/jobs?select=*&order=created_at.asc`,{headers:this._h()});if(!r.ok)throw new Error("Failed");return await r.json();},
+  async todayRpts(ids){if(!ids.length)return[];const t=new Date().toISOString().split("T")[0];const q=ids.map(i=>`"${i}"`).join(",");const r=await fetch(`${SB}/rest/v1/reports?select=id,job_id,status,report_date&report_date=eq.${t}&job_id=in.(${q})`,{headers:this._h()});if(!r.ok)return[];return await r.json();},
+  async mkJob(d){const r=await fetch(`${SB}/rest/v1/jobs`,{method:"POST",headers:this._h(),body:JSON.stringify(d)});if(!r.ok){const e=await r.json();throw new Error(e.message||"Failed");}return(await r.json())[0];},
+  async ulTpl(uid,jid,f){const ext=f.name.split(".").pop().toLowerCase();const p=`${uid}/${jid}/template.${ext}`;const s=JSON.parse(localStorage.getItem("mdr_s")||"null");const r=await fetch(`${SB}/storage/v1/object/report-source-docs/${p}`,{method:"POST",headers:{apikey:AK,Authorization:`Bearer ${s?.access_token||AK}`,"Content-Type":f.type||"application/octet-stream"},body:f});if(!r.ok)throw new Error("Upload failed");return p;},
+  async mkTpl(d){const r=await fetch(`${SB}/rest/v1/templates`,{method:"POST",headers:this._h(),body:JSON.stringify(d)});if(!r.ok)throw new Error("Template save failed");return(await r.json())[0];},
+  // Profile
+  async getProfile(uid){const r=await fetch(`${SB}/rest/v1/profiles?id=eq.${uid}&select=*`,{headers:this._h()});if(!r.ok)return null;const rows=await r.json();return rows[0]||null;},
+  async mkProfile(d){const r=await fetch(`${SB}/rest/v1/profiles`,{method:"POST",headers:this._h(),body:JSON.stringify(d)});if(!r.ok){const e=await r.json();throw new Error(e.message||"Profile failed");}return(await r.json())[0];},
+  async getProfileBySlug(slug){const r=await fetch(`${SB}/rest/v1/profiles?slug=eq.${encodeURIComponent(slug)}&select=*`,{headers:this._h()});if(!r.ok)return null;const rows=await r.json();return rows[0]||null;},
 };
+
+function makeSlug(name){return name.toLowerCase().replace(/[^a-z0-9\s-]/g,"").replace(/\s+/g,"-").replace(/-+/g,"-").replace(/^-|-$/g,"");}
 
 const SL={daily_mf:"Daily M-F",daily_7:"Daily 7 Days",weekly:"Weekly",as_needed:"As Needed",custom:"Custom"};
 
 /* ═══ CREATE JOB ═══ */
-function CreateJob({user,onBack,onCreated}){
+function CreateJob({user,profile,onBack,onCreated}){
   const [jn,setJn]=useState("");
   const [addr,setAddr]=useState("");
   const [fp,setFp]=useState("");
@@ -62,6 +67,7 @@ function CreateJob({user,onBack,onCreated}){
   const [remOn,setRemOn]=useState(false);
   const [remT,setRemT]=useState("5:00 PM");
   const [remH,setRemH]=useState(2);
+  const [schedEnabled,setSchedEnabled]=useState(false);
   const [saving,setSaving]=useState(false);
   const [err,setErr]=useState("");
   const [drag,setDrag]=useState(false);
@@ -77,11 +83,15 @@ function CreateJob({user,onBack,onCreated}){
   const doFile=(f)=>{const e=f.name.split(".").pop().toLowerCase();if(!["docx","pdf"].includes(e)){setErr("Only .docx and .pdf");return;}setTf(f);setTn(f.name.replace(/\.[^.]+$/,""));setErr("");};
   const ok=jn.trim()&&fp.trim()&&(sched||days.length>0);
 
+  const projectSlug=()=>jn.trim().replace(/\s+/g,"-").replace(/[^a-zA-Z0-9-]/g,"");
+
   const create=async()=>{
     if(!ok)return;setSaving(true);setErr("");
     try{
       const es=effSch();
-      const job=await db.mkJob({user_id:user.id,name:jn.trim(),site_address:addr.trim()||null,report_filename_pattern:fp.trim(),schedule:es,schedule_days:es==="custom"?days:[],reminder_enabled:remOn,reminder_time:remOn?remT:null,reminder_hours_before:remOn?remH:null});
+      const pSlug=projectSlug();
+      const schedUrl=schedEnabled&&profile?.slug?`${BASE_URL}/schedule.html?i=${profile.slug}&project=${pSlug}`:"";
+      const job=await db.mkJob({user_id:user.id,name:jn.trim(),site_address:addr.trim()||null,report_filename_pattern:fp.trim(),schedule:es,schedule_days:es==="custom"?days:[],reminder_enabled:remOn,reminder_time:remOn?remT:null,reminder_hours_before:remOn?remH:null,scheduling_enabled:schedEnabled,scheduling_url:schedUrl||null});
       if(tf&&job?.id){const ext=tf.name.split(".").pop().toLowerCase();const sp=await db.ulTpl(user.id,job.id,tf);await db.mkTpl({user_id:user.id,job_id:job.id,name:tn||tf.name,original_filename:tf.name,file_type:ext,storage_path:sp});}
       onCreated();
     }catch(e){setErr(e.message);}finally{setSaving(false);}
@@ -156,6 +166,23 @@ function CreateJob({user,onBack,onCreated}){
           </div>
         )}
 
+        {/* Enable Scheduling */}
+        <div style={{marginBottom:24,background:C.inp,border:`1px solid ${C.brd}`,borderRadius:12,padding:16}}>
+          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+            <div>
+              <span style={{fontSize:14,fontWeight:600,color:C.lt}}>Enable Scheduling</span>
+              <div style={{fontSize:12,color:C.mut,marginTop:2}}>Contractors can request inspections online</div>
+            </div>
+            <button onClick={()=>setSchedEnabled(!schedEnabled)} style={{width:48,height:28,borderRadius:14,border:"none",cursor:"pointer",background:schedEnabled?C.org:C.brd,position:"relative"}}><div style={{width:22,height:22,borderRadius:"50%",background:"#fff",position:"absolute",top:3,left:schedEnabled?23:3,transition:"left 0.2s"}}/></button>
+          </div>
+          {schedEnabled&&jn.trim()&&profile?.slug&&(
+            <div style={{marginTop:12,background:C.bg,border:`1px solid ${C.brd}`,borderRadius:8,padding:"10px 12px"}}>
+              <div style={{fontSize:11,color:C.blu,fontWeight:600,marginBottom:4}}>SCHEDULING URL:</div>
+              <div style={{fontSize:12,color:C.lt,wordBreak:"break-all"}}>{BASE_URL}/schedule.html?i={profile.slug}&project={projectSlug()}</div>
+            </div>
+          )}
+        </div>
+
         <button className="btn-o" onClick={create} disabled={!ok||saving} style={{width:"100%",padding:"14px 0",background:ok?C.org:C.brd,border:ok?`1px solid ${C.blu}`:`1px solid ${C.brd}`,borderRadius:10,color:"#fff",fontSize:16,fontWeight:700,cursor:ok&&!saving?"pointer":"default",opacity:saving?0.7:1}}>{saving?"Creating...":"Create Job"}</button>
       </div>
     </div>
@@ -172,15 +199,36 @@ function Dashboard({user,onLogout}){
   const [showNew,setShowNew]=useState(false);
   const [showDD,setShowDD]=useState(false);
   const [showArch,setShowArch]=useState(false);
+  const [profile,setProfile]=useState(null);
+  const [copied,setCopied]=useState(false);
 
-  useEffect(()=>{load();},[]);
+  useEffect(()=>{load();loadProfile();},[]);
+
   const load=async()=>{setLoading(true);try{const a=await db.jobs();setJobs(a);const ids=a.filter(j=>!j.is_archived).map(j=>j.id);if(ids.length)setRpts(await db.todayRpts(ids));}catch(e){console.error(e);}finally{setLoading(false);}};
+
+  const loadProfile=async()=>{
+    let p=await db.getProfile(user.id);
+    if(!p){
+      // Auto-create profile from user metadata
+      const name=user?.user_metadata?.full_name||user?.email?.split("@")[0]||"inspector";
+      let slug=makeSlug(name);
+      // Check if slug exists, add number if needed
+      const existing=await db.getProfileBySlug(slug);
+      if(existing)slug=slug+"-"+Math.floor(Math.random()*999);
+      try{p=await db.mkProfile({id:user.id,full_name:name,slug:slug});}catch(e){console.error("Profile create failed:",e);}
+    }
+    setProfile(p);
+  };
+
   const act=jobs.filter(j=>!j.is_archived);
   const arch=jobs.filter(j=>j.is_archived);
   const stat=(id,sc)=>{if(sc==="as_needed")return"none";const r=rpts.find(r=>r.job_id===id);if(!r)return"due";return r.status==="submitted"?"submitted":"working";};
   const dot=(s)=>{if(s==="none")return null;const c=s==="submitted"?C.ok:s==="working"?C.org:"#ef4444";return<div style={{width:10,height:10,borderRadius:"50%",background:c,flexShrink:0}}/>;};
 
-  if(showNew)return<CreateJob user={user} onBack={()=>setShowNew(false)} onCreated={()=>{setShowNew(false);load();}}/>;
+  const hubUrl=profile?.slug?`${BASE_URL}/hub.html?i=${profile.slug}`:"";
+  const copyUrl=()=>{navigator.clipboard.writeText(hubUrl);setCopied(true);setTimeout(()=>setCopied(false),2000);};
+
+  if(showNew)return<CreateJob user={user} profile={profile} onBack={()=>setShowNew(false)} onCreated={()=>{setShowNew(false);load();}}/>;
 
   if(selJob)return(
     <div style={{minHeight:"100vh",background:C.bg,color:C.txt}}>
@@ -193,6 +241,13 @@ function Dashboard({user,onLogout}){
         <div style={{background:C.card,border:`1px solid ${C.brd}`,borderRadius:12,padding:24}}>
           <p style={{fontWeight:600,color:C.org,marginBottom:8}}>Job: {selJob.name}</p>
           <p style={{color:C.mut,fontSize:13}}>Section 4 builds the 3-section layout here (Today's Report / Working Copies / Submitted Reports).</p>
+          {selJob.scheduling_enabled&&selJob.scheduling_url&&(
+            <div style={{marginTop:16,background:C.inp,border:`1px solid ${C.brd}`,borderRadius:8,padding:"12px"}}>
+              <div style={{fontSize:12,color:C.blu,fontWeight:600,marginBottom:4}}>SCHEDULING URL:</div>
+              <div style={{fontSize:12,color:C.lt,wordBreak:"break-all",marginBottom:8}}>{selJob.scheduling_url}</div>
+              <button onClick={()=>{navigator.clipboard.writeText(selJob.scheduling_url);}} style={{background:C.org,color:"#fff",border:"none",borderRadius:6,padding:"6px 14px",fontSize:12,fontWeight:600,cursor:"pointer"}}>Copy URL</button>
+            </div>
+          )}
         </div>
       </div>
     </div>
@@ -222,6 +277,21 @@ function Dashboard({user,onLogout}){
         </div>
       )}
 
+      {/* Scheduling Hub URL */}
+      {hubUrl&&(
+        <div style={{padding:"12px 20px",borderBottom:`1px solid ${C.brd}`}}>
+          <div style={{background:C.card,border:`1px solid ${C.brd}`,borderRadius:10,padding:"14px 16px"}}>
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:8}}>
+              <span style={{fontSize:13,fontWeight:700,color:C.blu}}>YOUR SCHEDULING PAGE</span>
+              <button onClick={copyUrl} style={{background:C.org,color:"#fff",border:"none",borderRadius:6,padding:"5px 12px",fontSize:11,fontWeight:700,cursor:"pointer"}}>{copied?"✅ Copied!":"📋 Copy URL"}</button>
+            </div>
+            <div style={{fontSize:12,color:C.lt,wordBreak:"break-all"}}>{hubUrl}</div>
+            <div style={{fontSize:11,color:C.mut,marginTop:6}}>Share this link with your GCs and contractors</div>
+          </div>
+        </div>
+      )}
+
+      {/* Job dropdown */}
       <div style={{padding:"12px 20px",position:"relative"}} data-d>
         <button onClick={()=>setShowDD(!showDD)} style={{width:"100%",display:"flex",alignItems:"center",justifyContent:"space-between",padding:"12px 16px",background:C.card,border:`1px solid ${showDD?C.org:C.brd}`,borderRadius:10,cursor:"pointer",color:C.txt}}>
           <span style={{fontSize:15,fontWeight:600}}>Select a Job</span>
@@ -297,7 +367,21 @@ function App(){
     if(pw.length<6){setErr("Password must be at least 6 characters");return;}
     setLd(true);
     try{
-      if(mode==="signup"){const d=await auth.up(em,pw,fn.trim());if(d.access_token){const u=await auth.user();if(u?.id){setUser(u);return;}}setMsg("Account created! Check email to confirm, then sign in.");setMode("login");setPw("");}
+      if(mode==="signup"){
+        const d=await auth.up(em,pw,fn.trim());
+        if(d.access_token){
+          const u=await auth.user();
+          if(u?.id){
+            // Auto-create profile with slug
+            const slug=makeSlug(fn.trim());
+            const existing=await db.getProfileBySlug(slug);
+            const finalSlug=existing?slug+"-"+Math.floor(Math.random()*999):slug;
+            try{await db.mkProfile({id:u.id,full_name:fn.trim(),slug:finalSlug});}catch(e){console.error("Profile:",e);}
+            setUser(u);return;
+          }
+        }
+        setMsg("Account created! Check email to confirm, then sign in.");setMode("login");setPw("");
+      }
       else{await auth.in(em,pw);const u=await auth.user();if(u?.id)setUser(u);}
     }catch(e){setErr(e.message);}finally{setLd(false);}
   };
