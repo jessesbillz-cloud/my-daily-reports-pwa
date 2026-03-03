@@ -1,0 +1,490 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="theme-color" content="#0f0f0f" />
+  <title>My Daily Reports</title>
+  <link rel="manifest" href="manifest.json" />
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #0f0f0f;
+      color: #ffffff;
+      min-height: 100vh;
+      -webkit-font-smoothing: antialiased;
+    }
+    #root { min-height: 100vh; }
+
+    /* Focus styles */
+    input:focus {
+      border-color: #e8742a !important;
+      outline: none;
+    }
+
+    /* Button hover */
+    .btn-orange:hover:not(:disabled) { background: #d4691f !important; }
+    .btn-outline:hover { border-color: #888 !important; color: #ccc !important; }
+
+    /* Transitions */
+    button, input { transition: all 0.2s ease; }
+
+    /* Scrollbar */
+    ::-webkit-scrollbar { width: 6px; }
+    ::-webkit-scrollbar-track { background: #0f0f0f; }
+    ::-webkit-scrollbar-thumb { background: #333; border-radius: 3px; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.9/babel.min.js"></script>
+
+  <script type="text/babel">
+    const { useState, useEffect } = React;
+
+    /* ─────────────────────────────────────────────
+       CONFIG
+    ─────────────────────────────────────────────── */
+    const SUPABASE_URL = "https://wluvkmpncafugdbunlkw.supabase.co";
+    const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndsdXZrbXBuY2FmdWdkYnVubGt3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzIzMDU1MTUsImV4cCI6MjA4Nzg4MTUxNX0.HZpQ2xVGpf4EQ0BVDmIEuPqW5T_eNG5OqBNAqT03rH8";
+
+    const C = {
+      bg: "#0f0f0f",
+      card: "#1a1a1a",
+      border: "#333",
+      input: "#222",
+      orange: "#e8742a",
+      orangeHover: "#d4691f",
+      blue: "#5a8fc0",
+      text: "#ffffff",
+      muted: "#888888",
+      light: "#cccccc",
+      error: "#ef4444",
+      success: "#22c55e",
+    };
+
+    /* ─────────────────────────────────────────────
+       SUPABASE AUTH CLIENT
+    ─────────────────────────────────────────────── */
+    const supabase = {
+      _headers() {
+        const h = {
+          "Content-Type": "application/json",
+          apikey: SUPABASE_ANON_KEY,
+          Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+        };
+        const session = JSON.parse(localStorage.getItem("mdr_session") || "null");
+        if (session?.access_token) {
+          h.Authorization = `Bearer ${session.access_token}`;
+        }
+        return h;
+      },
+
+      async signUp(email, password) {
+        const res = await fetch(`${SUPABASE_URL}/auth/v1/signup`, {
+          method: "POST",
+          headers: this._headers(),
+          body: JSON.stringify({ email, password }),
+        });
+        const data = await res.json();
+        if (data.error) throw new Error(data.error.message || data.msg || "Signup failed");
+        if (data.access_token) {
+          localStorage.setItem("mdr_session", JSON.stringify(data));
+        }
+        return data;
+      },
+
+      async signIn(email, password) {
+        const res = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=password`, {
+          method: "POST",
+          headers: this._headers(),
+          body: JSON.stringify({ email, password }),
+        });
+        const data = await res.json();
+        if (data.error) throw new Error(data.error_description || data.msg || "Login failed");
+        if (data.access_token) {
+          localStorage.setItem("mdr_session", JSON.stringify(data));
+        }
+        return data;
+      },
+
+      async getUser() {
+        const session = JSON.parse(localStorage.getItem("mdr_session") || "null");
+        if (!session?.access_token) return null;
+        const res = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
+          headers: this._headers(),
+        });
+        if (!res.ok) {
+          localStorage.removeItem("mdr_session");
+          return null;
+        }
+        return await res.json();
+      },
+
+      async signOut() {
+        const session = JSON.parse(localStorage.getItem("mdr_session") || "null");
+        if (session?.access_token) {
+          await fetch(`${SUPABASE_URL}/auth/v1/logout`, {
+            method: "POST",
+            headers: this._headers(),
+          }).catch(() => {});
+        }
+        localStorage.removeItem("mdr_session");
+      },
+
+      async refreshSession() {
+        const session = JSON.parse(localStorage.getItem("mdr_session") || "null");
+        if (!session?.refresh_token) return null;
+        const res = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=refresh_token`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            apikey: SUPABASE_ANON_KEY,
+          },
+          body: JSON.stringify({ refresh_token: session.refresh_token }),
+        });
+        const data = await res.json();
+        if (data.access_token) {
+          localStorage.setItem("mdr_session", JSON.stringify(data));
+          return data;
+        }
+        localStorage.removeItem("mdr_session");
+        return null;
+      },
+    };
+
+
+    /* ─────────────────────────────────────────────
+       DASHBOARD (placeholder — replaced in Section 2)
+    ─────────────────────────────────────────────── */
+    function Dashboard({ user, onLogout }) {
+      return (
+        <div style={{ minHeight: "100vh", background: C.bg, color: C.text }}>
+          {/* Header */}
+          <div style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            padding: "16px 20px",
+            borderBottom: `1px solid ${C.border}`,
+            background: C.card,
+          }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+              <div style={{
+                width: 36, height: 36, borderRadius: 8,
+                background: C.orange,
+                display: "flex", alignItems: "center", justifyContent: "center",
+                fontWeight: 700, fontSize: 16, color: "#fff",
+              }}>M</div>
+              <span style={{ fontWeight: 700, fontSize: 18 }}>My Daily Reports</span>
+            </div>
+            <button
+              className="btn-outline"
+              onClick={onLogout}
+              style={{
+                background: "transparent",
+                border: `1px solid ${C.border}`,
+                color: C.muted,
+                padding: "8px 16px",
+                borderRadius: 8,
+                cursor: "pointer",
+                fontSize: 14,
+              }}
+            >Sign Out</button>
+          </div>
+
+          {/* Body */}
+          <div style={{
+            maxWidth: 600, margin: "60px auto", padding: "0 20px", textAlign: "center",
+          }}>
+            <div style={{
+              width: 64, height: 64, borderRadius: 16,
+              background: C.orange,
+              display: "flex", alignItems: "center", justifyContent: "center",
+              margin: "0 auto 24px", fontSize: 28, fontWeight: 700,
+            }}>M</div>
+            <h1 style={{ fontSize: 24, fontWeight: 700, marginBottom: 8 }}>
+              Welcome to My Daily Reports
+            </h1>
+            <p style={{ color: C.muted, fontSize: 15, marginBottom: 8 }}>
+              Write reports while you walk the site
+            </p>
+            <p style={{ color: C.muted, fontSize: 13, marginBottom: 32 }}>
+              Signed in as {user?.email}
+            </p>
+
+            <div style={{
+              background: C.card,
+              border: `1px solid ${C.border}`,
+              borderRadius: 12,
+              padding: 24,
+              color: C.light, fontSize: 15,
+            }}>
+              <p style={{ marginBottom: 12, fontWeight: 600, color: C.success }}>
+                ✓ Section 1 Complete — Auth is working
+              </p>
+              <p style={{ color: C.muted, fontSize: 13 }}>
+                Section 2 will add the job dashboard and "+ New Job" button here.
+              </p>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+
+    /* ─────────────────────────────────────────────
+       AUTH SCREEN
+    ─────────────────────────────────────────────── */
+    function App() {
+      const [mode, setMode] = useState("login");
+      const [email, setEmail] = useState("");
+      const [password, setPassword] = useState("");
+      const [showPassword, setShowPassword] = useState(false);
+      const [loading, setLoading] = useState(false);
+      const [error, setError] = useState("");
+      const [message, setMessage] = useState("");
+      const [user, setUser] = useState(null);
+      const [checkingSession, setCheckingSession] = useState(true);
+
+      // Persistent login check
+      useEffect(() => {
+        (async () => {
+          try {
+            let u = await supabase.getUser();
+            if (!u) {
+              const refreshed = await supabase.refreshSession();
+              if (refreshed) u = await supabase.getUser();
+            }
+            if (u?.id) setUser(u);
+          } catch (e) {
+            console.error("Session check failed:", e);
+          } finally {
+            setCheckingSession(false);
+          }
+        })();
+      }, []);
+
+      const handleSubmit = async () => {
+        setError("");
+        setMessage("");
+        if (!email || !password) { setError("Enter your email and password"); return; }
+        if (password.length < 6) { setError("Password must be at least 6 characters"); return; }
+        setLoading(true);
+        try {
+          if (mode === "signup") {
+            const data = await supabase.signUp(email, password);
+            if (data.access_token) {
+              const u = await supabase.getUser();
+              if (u?.id) { setUser(u); return; }
+            }
+            setMessage("Check your email to confirm your account, then sign in.");
+            setMode("login");
+          } else {
+            await supabase.signIn(email, password);
+            const u = await supabase.getUser();
+            if (u?.id) setUser(u);
+          }
+        } catch (e) {
+          setError(e.message);
+        } finally {
+          setLoading(false);
+        }
+      };
+
+      const handleLogout = async () => {
+        await supabase.signOut();
+        setUser(null);
+        setEmail("");
+        setPassword("");
+      };
+
+      // Loading splash
+      if (checkingSession) {
+        return (
+          <div style={{
+            minHeight: "100vh", background: C.bg,
+            display: "flex", alignItems: "center", justifyContent: "center",
+            color: C.muted, fontSize: 15,
+          }}>
+            <div style={{ textAlign: "center" }}>
+              <div style={{
+                width: 48, height: 48, borderRadius: 12,
+                background: C.orange,
+                display: "flex", alignItems: "center", justifyContent: "center",
+                margin: "0 auto 16px", fontSize: 22, fontWeight: 700, color: "#fff",
+              }}>M</div>
+              Loading...
+            </div>
+          </div>
+        );
+      }
+
+      // Logged in
+      if (user) return <Dashboard user={user} onLogout={handleLogout} />;
+
+      // Auth form
+      return (
+        <div style={{
+          minHeight: "100vh", background: C.bg,
+          display: "flex", alignItems: "center", justifyContent: "center",
+          padding: 20,
+        }}>
+          <div style={{
+            width: "100%", maxWidth: 420,
+            background: C.card,
+            border: `1px solid ${C.border}`,
+            borderRadius: 16, padding: 32,
+          }}>
+            {/* Logo placeholder */}
+            <div style={{
+              width: 48, height: 48, borderRadius: 12,
+              background: C.orange,
+              display: "flex", alignItems: "center", justifyContent: "center",
+              margin: "0 auto 20px", fontSize: 22, fontWeight: 700, color: "#fff",
+            }}>M</div>
+
+            {/* Title */}
+            <h1 style={{
+              textAlign: "center", color: C.text,
+              fontSize: 24, fontWeight: 700, margin: "0 0 6px",
+            }}>My Daily Reports</h1>
+            <p style={{
+              textAlign: "center", color: C.muted,
+              fontSize: 14, margin: "0 0 28px",
+            }}>Sign in to access your reports and templates</p>
+
+            {/* Tab toggle */}
+            <div style={{
+              display: "flex", background: C.input,
+              borderRadius: 10, padding: 3, marginBottom: 24,
+            }}>
+              {["login", "signup"].map((m) => (
+                <button
+                  key={m}
+                  onClick={() => { setMode(m); setError(""); setMessage(""); }}
+                  style={{
+                    flex: 1, padding: "10px 0",
+                    border: "none", borderRadius: 8,
+                    cursor: "pointer", fontSize: 14, fontWeight: 600,
+                    background: mode === m ? C.orange : "transparent",
+                    color: mode === m ? "#fff" : C.muted,
+                  }}
+                >{m === "login" ? "Login" : "Sign Up"}</button>
+              ))}
+            </div>
+
+            {/* Error */}
+            {error && (
+              <div style={{
+                background: "#2d1214", border: "1px solid #5c2023",
+                borderRadius: 8, padding: "10px 14px",
+                marginBottom: 16, color: C.error, fontSize: 13,
+              }}>{error}</div>
+            )}
+
+            {/* Success message */}
+            {message && (
+              <div style={{
+                background: "#0f2918", border: "1px solid #1a4a2a",
+                borderRadius: 8, padding: "10px 14px",
+                marginBottom: 16, color: C.success, fontSize: 13,
+              }}>{message}</div>
+            )}
+
+            {/* Email */}
+            <div style={{ marginBottom: 16 }}>
+              <label style={{
+                display: "block", color: C.light,
+                fontSize: 13, fontWeight: 600, marginBottom: 6,
+              }}>Email</label>
+              <input
+                type="email"
+                placeholder="you@example.com"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && handleSubmit()}
+                style={{
+                  width: "100%", padding: "12px 14px",
+                  background: C.input, border: `1px solid ${C.border}`,
+                  borderRadius: 10, color: C.text, fontSize: 15,
+                }}
+              />
+            </div>
+
+            {/* Password */}
+            <div style={{ marginBottom: 24 }}>
+              <label style={{
+                display: "block", color: C.light,
+                fontSize: 13, fontWeight: 600, marginBottom: 6,
+              }}>Password</label>
+              <div style={{ position: "relative" }}>
+                <input
+                  type={showPassword ? "text" : "password"}
+                  placeholder="••••••••"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && handleSubmit()}
+                  style={{
+                    width: "100%", padding: "12px 48px 12px 14px",
+                    background: C.input, border: `1px solid ${C.border}`,
+                    borderRadius: 10, color: C.text, fontSize: 15,
+                  }}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  style={{
+                    position: "absolute", right: 12, top: "50%",
+                    transform: "translateY(-50%)",
+                    background: "none", border: "none",
+                    color: C.muted, cursor: "pointer",
+                    fontSize: 18, padding: 0, lineHeight: 1,
+                  }}
+                >{showPassword ? "🙈" : "👁"}</button>
+              </div>
+            </div>
+
+            {/* Submit */}
+            <button
+              className="btn-orange"
+              onClick={handleSubmit}
+              disabled={loading}
+              style={{
+                width: "100%", padding: "14px 0",
+                background: C.orange,
+                border: `1px solid ${C.blue}`,
+                borderRadius: 10, color: "#fff",
+                fontSize: 16, fontWeight: 700,
+                cursor: loading ? "wait" : "pointer",
+                opacity: loading ? 0.7 : 1,
+              }}
+            >{loading ? "Please wait..." : mode === "login" ? "Sign In" : "Create Account"}</button>
+
+            {/* Forgot password */}
+            {mode === "login" && (
+              <p style={{
+                textAlign: "center", marginTop: 16, marginBottom: 0,
+                color: C.muted, fontSize: 13,
+              }}>
+                <span
+                  style={{ cursor: "pointer", color: C.blue }}
+                  onClick={() => setMessage("Password reset coming soon.")}
+                >Forgot your password?</span>
+              </p>
+            )}
+          </div>
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+  </script>
+</body>
+</html>
