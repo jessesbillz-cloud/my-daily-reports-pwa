@@ -86,11 +86,11 @@
         return h;
       },
 
-      async signUp(email, password) {
+      async signUp(email, password, fullName) {
         const res = await fetch(`${SUPABASE_URL}/auth/v1/signup`, {
           method: "POST",
           headers: this._headers(),
-          body: JSON.stringify({ email, password }),
+          body: JSON.stringify({ email, password, data: { full_name: fullName } }),
         });
         const data = await res.json();
         if (data.error) throw new Error(data.error.message || data.msg || "Signup failed");
@@ -244,6 +244,7 @@
     ─────────────────────────────────────────────── */
     function App() {
       const [mode, setMode] = useState("login");
+      const [fullName, setFullName] = useState("");
       const [email, setEmail] = useState("");
       const [password, setPassword] = useState("");
       const [showPassword, setShowPassword] = useState(false);
@@ -274,18 +275,20 @@
       const handleSubmit = async () => {
         setError("");
         setMessage("");
+        if (mode === "signup" && !fullName.trim()) { setError("Enter your full name"); return; }
         if (!email || !password) { setError("Enter your email and password"); return; }
         if (password.length < 6) { setError("Password must be at least 6 characters"); return; }
         setLoading(true);
         try {
           if (mode === "signup") {
-            const data = await supabase.signUp(email, password);
+            const data = await supabase.signUp(email, password, fullName.trim());
             if (data.access_token) {
               const u = await supabase.getUser();
               if (u?.id) { setUser(u); return; }
             }
-            setMessage("Check your email to confirm your account, then sign in.");
+            setMessage("Account created! Check your email to confirm, then come back and sign in.");
             setMode("login");
+            setPassword("");
           } else {
             await supabase.signIn(email, password);
             const u = await supabase.getUser();
@@ -358,7 +361,7 @@
             <p style={{
               textAlign: "center", color: C.muted,
               fontSize: 14, margin: "0 0 28px",
-            }}>Sign in to access your reports and templates</p>
+            }}>{mode === "login" ? "Sign in to access your reports and templates" : "Create your account to get started"}</p>
 
             {/* Tab toggle */}
             <div style={{
@@ -396,6 +399,28 @@
                 borderRadius: 8, padding: "10px 14px",
                 marginBottom: 16, color: C.success, fontSize: 13,
               }}>{message}</div>
+            )}
+
+            {/* Full Name — signup only */}
+            {mode === "signup" && (
+              <div style={{ marginBottom: 16 }}>
+                <label style={{
+                  display: "block", color: C.light,
+                  fontSize: 13, fontWeight: 600, marginBottom: 6,
+                }}>Full Name</label>
+                <input
+                  type="text"
+                  placeholder="Jesse Saltzman"
+                  value={fullName}
+                  onChange={(e) => setFullName(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && handleSubmit()}
+                  style={{
+                    width: "100%", padding: "12px 14px",
+                    background: C.input, border: `1px solid ${C.border}`,
+                    borderRadius: 10, color: C.text, fontSize: 15,
+                  }}
+                />
+              </div>
             )}
 
             {/* Email */}
