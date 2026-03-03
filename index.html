@@ -161,16 +161,164 @@
 
 
     /* ─────────────────────────────────────────────
-       DASHBOARD (placeholder — replaced in Section 2)
+       SUPABASE DATA HELPERS
+    ─────────────────────────────────────────────── */
+    const db = {
+      _headers() {
+        const h = {
+          "Content-Type": "application/json",
+          apikey: SUPABASE_ANON_KEY,
+          Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+          Prefer: "return=representation",
+        };
+        const session = JSON.parse(localStorage.getItem("mdr_session") || "null");
+        if (session?.access_token) h.Authorization = `Bearer ${session.access_token}`;
+        return h;
+      },
+
+      async getJobs() {
+        const res = await fetch(
+          `${SUPABASE_URL}/rest/v1/jobs?select=*&order=created_at.asc`,
+          { headers: this._headers() }
+        );
+        if (!res.ok) throw new Error("Failed to load jobs");
+        return await res.json();
+      },
+
+      async getTodaysReports(jobIds) {
+        if (!jobIds.length) return [];
+        const today = new Date().toISOString().split("T")[0];
+        const ids = jobIds.map(id => `"${id}"`).join(",");
+        const res = await fetch(
+          `${SUPABASE_URL}/rest/v1/reports?select=id,job_id,status,report_date&report_date=eq.${today}&job_id=in.(${ids})`,
+          { headers: this._headers() }
+        );
+        if (!res.ok) return [];
+        return await res.json();
+      },
+    };
+
+    /* ─────────────────────────────────────────────
+       SCHEDULE LABELS
+    ─────────────────────────────────────────────── */
+    const SCHEDULE_LABELS = {
+      daily_mf: "Daily M-F",
+      daily_7: "Daily 7 Days",
+      weekly: "Weekly",
+      as_needed: "As Needed",
+      custom: "Custom",
+    };
+
+    /* ─────────────────────────────────────────────
+       DASHBOARD — Section 2
     ─────────────────────────────────────────────── */
     function Dashboard({ user, onLogout }) {
+      const [tab, setTab] = useState("jobs"); // "jobs" or "archive"
+      const [jobs, setJobs] = useState([]);
+      const [todaysReports, setTodaysReports] = useState([]);
+      const [loadingJobs, setLoadingJobs] = useState(true);
+      const [selectedJob, setSelectedJob] = useState(null);
+
+      // Load jobs from Supabase
+      useEffect(() => {
+        loadJobs();
+      }, []);
+
+      const loadJobs = async () => {
+        setLoadingJobs(true);
+        try {
+          const allJobs = await db.getJobs();
+          setJobs(allJobs);
+          // Get today's reports for status dots
+          const activeIds = allJobs.filter(j => !j.is_archived).map(j => j.id);
+          if (activeIds.length) {
+            const reports = await db.getTodaysReports(activeIds);
+            setTodaysReports(reports);
+          }
+        } catch (e) {
+          console.error("Failed to load jobs:", e);
+        } finally {
+          setLoadingJobs(false);
+        }
+      };
+
+      const activeJobs = jobs.filter(j => !j.is_archived);
+      const archivedJobs = jobs.filter(j => j.is_archived);
+      const displayJobs = tab === "jobs" ? activeJobs : archivedJobs;
+
+      // Check if a job has a submitted report today
+      const getJobStatus = (jobId, schedule) => {
+        if (schedule === "as_needed") return "none";
+        const report = todaysReports.find(r => r.job_id === jobId);
+        if (!report) return "due"; // red
+        if (report.status === "submitted") return "submitted"; // green
+        return "working"; // orange — working copy exists
+      };
+
+      const statusDot = (status) => {
+        if (status === "none") return null;
+        const color = status === "submitted" ? C.success : status === "working" ? C.orange : "#ef4444";
+        return (
+          <div style={{
+            width: 10, height: 10, borderRadius: "50%",
+            background: color, flexShrink: 0,
+          }} />
+        );
+      };
+
+      // TODO: Section 3 will handle job detail view
+      // For now, clicking a job just shows a placeholder
+      if (selectedJob) {
+        return (
+          <div style={{ minHeight: "100vh", background: C.bg, color: C.text }}>
+            {/* Header */}
+            <div style={{
+              display: "flex", alignItems: "center", gap: 12,
+              padding: "16px 20px",
+              borderBottom: `1px solid ${C.border}`,
+              background: C.card,
+            }}>
+              <button onClick={() => setSelectedJob(null)} style={{
+                background: "none", border: "none", color: C.muted,
+                fontSize: 22, cursor: "pointer", padding: 0, lineHeight: 1,
+              }}>←</button>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontWeight: 700, fontSize: 17 }}>{selectedJob.name}</div>
+                <div style={{ fontSize: 12, color: C.muted }}>
+                  {SCHEDULE_LABELS[selectedJob.schedule] || selectedJob.schedule}
+                </div>
+              </div>
+              <button style={{
+                background: "none", border: "none",
+                color: C.muted, fontSize: 18, cursor: "pointer",
+              }}>⚙️</button>
+            </div>
+
+            {/* Placeholder for Section 4 — Job Detail View */}
+            <div style={{
+              maxWidth: 600, margin: "40px auto", padding: "0 20px", textAlign: "center",
+            }}>
+              <div style={{
+                background: C.card, border: `1px solid ${C.border}`,
+                borderRadius: 12, padding: 24,
+              }}>
+                <p style={{ fontWeight: 600, color: C.orange, marginBottom: 8 }}>
+                  ✓ Section 2 Complete — Dashboard is working
+                </p>
+                <p style={{ color: C.muted, fontSize: 13 }}>
+                  Section 3 will add job creation. Section 4 will build the 3-section layout here (Today's Report / Working Copies / Submitted Reports).
+                </p>
+              </div>
+            </div>
+          </div>
+        );
+      }
+
       return (
         <div style={{ minHeight: "100vh", background: C.bg, color: C.text }}>
           {/* Header */}
           <div style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
+            display: "flex", alignItems: "center", justifyContent: "space-between",
             padding: "16px 20px",
             borderBottom: `1px solid ${C.border}`,
             background: C.card,
@@ -188,51 +336,130 @@
               className="btn-outline"
               onClick={onLogout}
               style={{
-                background: "transparent",
-                border: `1px solid ${C.border}`,
-                color: C.muted,
-                padding: "8px 16px",
-                borderRadius: 8,
-                cursor: "pointer",
-                fontSize: 14,
+                background: "transparent", border: `1px solid ${C.border}`,
+                color: C.muted, padding: "8px 16px",
+                borderRadius: 8, cursor: "pointer", fontSize: 14,
               }}
             >Sign Out</button>
           </div>
 
-          {/* Body */}
+          {/* Tab toggle: Jobs | Archive */}
           <div style={{
-            maxWidth: 600, margin: "60px auto", padding: "0 20px", textAlign: "center",
+            display: "flex", background: C.card,
+            borderBottom: `1px solid ${C.border}`,
+            padding: "0 20px",
           }}>
-            <div style={{
-              width: 64, height: 64, borderRadius: 16,
-              background: C.orange,
-              display: "flex", alignItems: "center", justifyContent: "center",
-              margin: "0 auto 24px", fontSize: 28, fontWeight: 700,
-            }}>M</div>
-            <h1 style={{ fontSize: 24, fontWeight: 700, marginBottom: 8 }}>
-              Welcome to My Daily Reports
-            </h1>
-            <p style={{ color: C.muted, fontSize: 15, marginBottom: 8 }}>
-              Write reports while you walk the site
-            </p>
-            <p style={{ color: C.muted, fontSize: 13, marginBottom: 32 }}>
-              Signed in as {user?.email}
-            </p>
+            {["jobs", "archive"].map((t) => (
+              <button
+                key={t}
+                onClick={() => setTab(t)}
+                style={{
+                  flex: 1, padding: "12px 0",
+                  background: "transparent", border: "none",
+                  borderBottom: tab === t ? `2px solid ${C.orange}` : "2px solid transparent",
+                  color: tab === t ? C.text : C.muted,
+                  fontWeight: 600, fontSize: 14,
+                  cursor: "pointer",
+                }}
+              >{t === "jobs" ? "Jobs" : "Archive"}</button>
+            ))}
+          </div>
 
-            <div style={{
-              background: C.card,
-              border: `1px solid ${C.border}`,
-              borderRadius: 12,
-              padding: 24,
-              color: C.light, fontSize: 15,
-            }}>
-              <p style={{ marginBottom: 12, fontWeight: 600, color: C.success }}>
-                ✓ Section 1 Complete — Auth is working
+          {/* Body */}
+          <div style={{ maxWidth: 600, margin: "0 auto", padding: "20px" }}>
+
+            {/* + New Job button */}
+            {tab === "jobs" && (
+              <button
+                className="btn-orange"
+                onClick={() => {
+                  // TODO: Section 3 will open job creation wizard
+                  alert("Job creation coming in Section 3");
+                }}
+                style={{
+                  width: "100%", padding: "14px 0",
+                  background: C.orange, border: `1px solid ${C.blue}`,
+                  borderRadius: 10, color: "#fff",
+                  fontSize: 16, fontWeight: 700,
+                  cursor: "pointer", marginBottom: 20,
+                }}
+              >+ New Job</button>
+            )}
+
+            {/* Loading */}
+            {loadingJobs && (
+              <p style={{ textAlign: "center", color: C.muted, padding: 40 }}>
+                Loading jobs...
               </p>
-              <p style={{ color: C.muted, fontSize: 13 }}>
-                Section 2 will add the job dashboard and "+ New Job" button here.
-              </p>
-            </div>
+            )}
+
+            {/* Empty state */}
+            {!loadingJobs && displayJobs.length === 0 && (
+              <div style={{
+                textAlign: "center", padding: "60px 20px",
+                color: C.muted,
+              }}>
+                <div style={{ fontSize: 48, marginBottom: 16 }}>
+                  {tab === "jobs" ? "📋" : "📦"}
+                </div>
+                <p style={{ fontSize: 16, fontWeight: 600, color: C.light, marginBottom: 6 }}>
+                  {tab === "jobs" ? "No jobs yet" : "No archived jobs"}
+                </p>
+                <p style={{ fontSize: 14 }}>
+                  {tab === "jobs"
+                    ? "Tap \"+ New Job\" to create your first project"
+                    : "Completed projects will appear here"
+                  }
+                </p>
+              </div>
+            )}
+
+            {/* Job cards */}
+            {!loadingJobs && displayJobs.map((job) => {
+              const status = getJobStatus(job.id, job.schedule);
+              return (
+                <button
+                  key={job.id}
+                  onClick={() => setSelectedJob(job)}
+                  style={{
+                    width: "100%", textAlign: "left",
+                    background: C.card, border: `1px solid ${C.border}`,
+                    borderRadius: 12, padding: "16px 18px",
+                    marginBottom: 10, cursor: "pointer",
+                    display: "flex", alignItems: "center", gap: 14,
+                  }}
+                >
+                  {/* Status dot */}
+                  {statusDot(status)}
+
+                  {/* Job info */}
+                  <div style={{ flex: 1 }}>
+                    <div style={{
+                      fontWeight: 600, fontSize: 16, color: C.text,
+                      marginBottom: 4,
+                    }}>{job.name}</div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <span style={{
+                        fontSize: 11, fontWeight: 600,
+                        background: C.input, border: `1px solid ${C.border}`,
+                        borderRadius: 6, padding: "2px 8px",
+                        color: C.muted,
+                      }}>
+                        {SCHEDULE_LABELS[job.schedule] || job.schedule}
+                      </span>
+                      {job.site_address && (
+                        <span style={{ fontSize: 12, color: C.muted }}>
+                          {job.site_address}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Chevron */}
+                  <span style={{ color: C.muted, fontSize: 18 }}>›</span>
+                </button>
+              );
+            })}
           </div>
         </div>
       );
