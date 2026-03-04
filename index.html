@@ -67,14 +67,6 @@ function CreateJob({user, onBack, onCreated}){
   const preset=(p)=>{setSched(p);setDays([]);if(p==="as_needed")setRemOn(false);};
   const effSch=()=>{if(sched==="weekly"||sched==="as_needed")return sched;if(days.length===5&&["Mon","Tue","Wed","Thu","Fri"].every(d=>days.includes(d))&&!days.includes("Sat")&&!days.includes("Sun"))return"daily_mf";if(days.length===7)return"daily_7";if(days.length>0)return"custom";return sched||"daily_mf";};
 
-  const readFileAsText=async(f)=>{
-    return new Promise((res)=>{
-      const r=new FileReader();
-      r.onload=()=>res(r.result);
-      r.readAsText(f);
-    });
-  };
-
   const readFileAsBase64=async(f)=>{
     return new Promise((res)=>{
       const r=new FileReader();
@@ -87,34 +79,13 @@ function CreateJob({user, onBack, onCreated}){
     setParsing(true);setErr("");setEditFields([]);setLockFields([]);
     try{
       const base64=await readFileAsBase64(f);
-      const mediaType=f.name.endsWith(".pdf")?"application/pdf":"application/vnd.openxmlformats-officedocument.wordprocessingml.document";
-      const resp=await fetch("https://api.anthropic.com/v1/messages",{
+      const resp=await fetch("https://wluvkmpncafugdbunlkw.supabase.co/functions/v1/parse-template",{
         method:"POST",
         headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({
-          model:"claude-sonnet-4-20250514",
-          max_tokens:1000,
-          messages:[{role:"user",content:[
-            {type:"document",source:{type:"base64",media_type:mediaType,data:base64}},
-            {type:"text",text:`Analyze this inspection report template. Find all fillable fields by looking for patterns like "Label:" or "Label: value" or form fields.
-
-For each field, determine if it CHANGES per report or STAYS THE SAME across reports.
-
-Fields that typically CHANGE per report: Date, Report Date, Inspection Date, Report Number, Report No, DR#, Notes, IOR Notes, Observations, Comments, Work Observed, Weather, Hours, Time In, Time Out, Temperature.
-
-Fields that typically STAY THE SAME: Project Name, Owner, Client, District, DSA File #, DSA App #, Contractor, Architect, Engineer, Inspector, IOR, Address, Location, Project No.
-
-Return ONLY valid JSON with no other text:
-{"editable":[{"name":"Date","value":"","autoFill":"date"},{"name":"IOR Notes","value":"","voiceEnabled":true}],"locked":[{"name":"Project Name","value":"Woodland Park MS"}]}
-
-autoFill can be "date" or "increment" (for report numbers). voiceEnabled=true for notes/observations fields. Include the current value if one exists in the template.`}
-          ]}]
-        })
+        body:JSON.stringify({file_base64:base64,file_name:f.name})
       });
-      const data=await resp.json();
-      const txt=data.content.map(i=>i.text||"").join("");
-      const clean=txt.replace(/```json|```/g,"").trim();
-      const parsed=JSON.parse(clean);
+      const parsed=await resp.json();
+      if(parsed.error)throw new Error(parsed.error);
       setEditFields(parsed.editable||[]);
       setLockFields(parsed.locked||[]);
     }catch(e){
