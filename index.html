@@ -12,9 +12,9 @@
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0f0f0f; color: #fff; min-height: 100vh; -webkit-font-smoothing: antialiased; }
     #root { min-height: 100vh; }
-    input:focus, select:focus { border-color: #e8742a !important; outline: none; }
+    input:focus, select:focus, textarea:focus { border-color: #e8742a !important; outline: none; }
     .btn-o:hover:not(:disabled) { background: #d4691f !important; }
-    button, input, select { transition: all 0.2s ease; }
+    button, input, select, textarea { transition: all 0.2s ease; }
   </style>
 </head>
 <body>
@@ -23,76 +23,120 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.9/babel.min.js"></script>
 <script type="text/babel">
-const { useState, useEffect } = React;
-const SB = "https://wluvkmpncafugdbunlkw.supabase.co";
-const AK = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndsdXZrbXBuY2FmdWdkYnVubGt3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzIzMDU1MTUsImV4cCI6MjA4Nzg4MTUxNX0.HZpQ2xVGpf4EQ0BVDmIEuPqW5T_eNG5OqBNAqT03rH8";
-const BASE_URL = "https://jessesbillz-cloud.github.io/my-daily-reports-pwa";
+const { useState, useEffect, useRef } = React;
+const SB_URL = "https://wluvkmpncafugdbunlkw.supabase.co";
+const SB_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndsdXZrbXBuY2FmdWdkYnVubGt3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzIzMDU1MTUsImV4cCI6MjA4Nzg4MTUxNX0.HZpQ2xVGpf4EQ0BVDmIEuPqW5T_eNG5OqBNAqT03rH8";
 const C = {bg:"#0f0f0f",card:"#1a1a1a",brd:"#333",inp:"#222",org:"#e8742a",orgH:"#d4691f",blu:"#5a8fc0",txt:"#fff",mut:"#888",lt:"#ccc",err:"#ef4444",ok:"#22c55e"};
-
-const auth = {
-  _h(){const h={"Content-Type":"application/json",apikey:AK,Authorization:`Bearer ${AK}`};const s=JSON.parse(localStorage.getItem("mdr_s")||"null");if(s?.access_token)h.Authorization=`Bearer ${s.access_token}`;return h;},
-  async up(e,p,n){const r=await fetch(`${SB}/auth/v1/signup`,{method:"POST",headers:this._h(),body:JSON.stringify({email:e,password:p,data:{full_name:n}})});const d=await r.json();if(d.error)throw new Error(d.error.message||"Signup failed");if(d.access_token)localStorage.setItem("mdr_s",JSON.stringify(d));return d;},
-  async in(e,p){const r=await fetch(`${SB}/auth/v1/token?grant_type=password`,{method:"POST",headers:this._h(),body:JSON.stringify({email:e,password:p})});const d=await r.json();if(d.error)throw new Error(d.error_description||"Login failed");if(d.access_token)localStorage.setItem("mdr_s",JSON.stringify(d));return d;},
-  async user(){const s=JSON.parse(localStorage.getItem("mdr_s")||"null");if(!s?.access_token)return null;const r=await fetch(`${SB}/auth/v1/user`,{headers:this._h()});if(!r.ok){localStorage.removeItem("mdr_s");return null;}return await r.json();},
-  async out(){const s=JSON.parse(localStorage.getItem("mdr_s")||"null");if(s?.access_token)await fetch(`${SB}/auth/v1/logout`,{method:"POST",headers:this._h()}).catch(()=>{});localStorage.removeItem("mdr_s");},
-  async ref(){const s=JSON.parse(localStorage.getItem("mdr_s")||"null");if(!s?.refresh_token)return null;const r=await fetch(`${SB}/auth/v1/token?grant_type=refresh_token`,{method:"POST",headers:{"Content-Type":"application/json",apikey:AK},body:JSON.stringify({refresh_token:s.refresh_token})});const d=await r.json();if(d.access_token){localStorage.setItem("mdr_s",JSON.stringify(d));return d;}localStorage.removeItem("mdr_s");return null;},
-};
-
-const db = {
-  _h(){const h={"Content-Type":"application/json",apikey:AK,Authorization:`Bearer ${AK}`,Prefer:"return=representation"};const s=JSON.parse(localStorage.getItem("mdr_s")||"null");if(s?.access_token)h.Authorization=`Bearer ${s.access_token}`;return h;},
-  async jobs(){const r=await fetch(`${SB}/rest/v1/jobs?select=*&order=created_at.asc`,{headers:this._h()});if(!r.ok)throw new Error("Failed");return await r.json();},
-  async todayRpts(ids){if(!ids.length)return[];const t=new Date().toISOString().split("T")[0];const q=ids.map(i=>`"${i}"`).join(",");const r=await fetch(`${SB}/rest/v1/reports?select=id,job_id,status,report_date&report_date=eq.${t}&job_id=in.(${q})`,{headers:this._h()});if(!r.ok)return[];return await r.json();},
-  async mkJob(d){const r=await fetch(`${SB}/rest/v1/jobs`,{method:"POST",headers:this._h(),body:JSON.stringify(d)});if(!r.ok){const e=await r.json();throw new Error(e.message||"Failed");}return(await r.json())[0];},
-  async ulTpl(uid,jid,f){const ext=f.name.split(".").pop().toLowerCase();const p=`${uid}/${jid}/template.${ext}`;const s=JSON.parse(localStorage.getItem("mdr_s")||"null");const r=await fetch(`${SB}/storage/v1/object/report-source-docs/${p}`,{method:"POST",headers:{apikey:AK,Authorization:`Bearer ${s?.access_token||AK}`,"Content-Type":f.type||"application/octet-stream"},body:f});if(!r.ok)throw new Error("Upload failed");return p;},
-  async mkTpl(d){const r=await fetch(`${SB}/rest/v1/templates`,{method:"POST",headers:this._h(),body:JSON.stringify(d)});if(!r.ok)throw new Error("Template save failed");return(await r.json())[0];},
-  // Profile
-  async getProfile(uid){const r=await fetch(`${SB}/rest/v1/profiles?id=eq.${uid}&select=*`,{headers:this._h()});if(!r.ok)return null;const rows=await r.json();return rows[0]||null;},
-  async mkProfile(d){const r=await fetch(`${SB}/rest/v1/profiles`,{method:"POST",headers:this._h(),body:JSON.stringify(d)});if(!r.ok){const e=await r.json();throw new Error(e.message||"Profile failed");}return(await r.json())[0];},
-  async getProfileBySlug(slug){const r=await fetch(`${SB}/rest/v1/profiles?slug=eq.${encodeURIComponent(slug)}&select=*`,{headers:this._h()});if(!r.ok)return null;const rows=await r.json();return rows[0]||null;},
-};
-
-function makeSlug(name){return name.toLowerCase().replace(/[^a-z0-9\s-]/g,"").replace(/\s+/g,"-").replace(/-+/g,"-").replace(/^-|-$/g,"");}
+const DEV_USER = {id:"dev-001",email:"saltzman.jesse@gmail.com",user_metadata:{full_name:"Jesse Saltzman"}};
 
 const SL={daily_mf:"Daily M-F",daily_7:"Daily 7 Days",weekly:"Weekly",as_needed:"As Needed",custom:"Custom"};
 
+// DB helpers
+const db = {
+  _h(){return{"Content-Type":"application/json",apikey:SB_KEY,Authorization:`Bearer ${SB_KEY}`,Prefer:"return=representation"};},
+  async jobs(){const r=await fetch(`${SB_URL}/rest/v1/jobs?select=*&order=created_at.asc`,{headers:this._h()});if(!r.ok)throw new Error("Failed");return await r.json();},
+  async todayRpts(ids){if(!ids.length)return[];const t=new Date().toISOString().split("T")[0];const q=ids.map(i=>`"${i}"`).join(",");const r=await fetch(`${SB_URL}/rest/v1/reports?select=id,job_id,status,report_date&report_date=eq.${t}&job_id=in.(${q})`,{headers:this._h()});if(!r.ok)return[];return await r.json();},
+  async mkJob(d){const r=await fetch(`${SB_URL}/rest/v1/jobs`,{method:"POST",headers:this._h(),body:JSON.stringify(d)});if(!r.ok){const e=await r.json();throw new Error(e.message||"Failed");}return(await r.json())[0];},
+  async ulTpl(uid,jid,f){const ext=f.name.split(".").pop().toLowerCase();const p=`${uid}/${jid}/template.${ext}`;const r=await fetch(`${SB_URL}/storage/v1/object/report-source-docs/${p}`,{method:"POST",headers:{apikey:SB_KEY,Authorization:`Bearer ${SB_KEY}`,"Content-Type":f.type||"application/octet-stream"},body:f});if(!r.ok)throw new Error("Upload failed");return p;},
+  async mkTpl(d){const r=await fetch(`${SB_URL}/rest/v1/templates`,{method:"POST",headers:this._h(),body:JSON.stringify(d)});if(!r.ok)throw new Error("Template save failed");return(await r.json())[0];},
+};
+
 /* ═══ CREATE JOB ═══ */
-function CreateJob({user,profile,onBack,onCreated}){
+function CreateJob({user, onBack, onCreated}){
   const [jn,setJn]=useState("");
   const [addr,setAddr]=useState("");
-  const [fp,setFp]=useState("");
   const [tf,setTf]=useState(null);
-  const [tn,setTn]=useState("");
   const [sched,setSched]=useState("");
   const [days,setDays]=useState([]);
   const [remOn,setRemOn]=useState(false);
   const [remT,setRemT]=useState("5:00 PM");
   const [remH,setRemH]=useState(2);
-  const [schedEnabled,setSchedEnabled]=useState(false);
+  const [schedOn,setSchedOn]=useState(false);
   const [saving,setSaving]=useState(false);
   const [err,setErr]=useState("");
   const [drag,setDrag]=useState(false);
+  const [parsing,setParsing]=useState(false);
+  const [editFields,setEditFields]=useState([]);
+  const [lockFields,setLockFields]=useState([]);
+  const [showLocked,setShowLocked]=useState(false);
 
   const DS=["Mon","Tue","Wed","Thu","Fri","Sat","Sun"];
   const TS=["12:00 PM","1:00 PM","2:00 PM","3:00 PM","4:00 PM","5:00 PM","6:00 PM","7:00 PM","8:00 PM","9:00 PM"];
 
-  useEffect(()=>{if(jn.trim())setFp(`DR_##__${jn.trim().replace(/\s+/g,"_")}`);else setFp("");},[jn]);
-
   const togDay=(d)=>{setSched("custom");setDays(p=>p.includes(d)?p.filter(x=>x!==d):[...p,d]);};
   const preset=(p)=>{setSched(p);setDays([]);if(p==="as_needed")setRemOn(false);};
   const effSch=()=>{if(sched==="weekly"||sched==="as_needed")return sched;if(days.length===5&&["Mon","Tue","Wed","Thu","Fri"].every(d=>days.includes(d))&&!days.includes("Sat")&&!days.includes("Sun"))return"daily_mf";if(days.length===7)return"daily_7";if(days.length>0)return"custom";return sched||"daily_mf";};
-  const doFile=(f)=>{const e=f.name.split(".").pop().toLowerCase();if(!["docx","pdf"].includes(e)){setErr("Only .docx and .pdf");return;}setTf(f);setTn(f.name.replace(/\.[^.]+$/,""));setErr("");};
-  const ok=jn.trim()&&fp.trim()&&(sched||days.length>0);
 
-  const projectSlug=()=>jn.trim().replace(/\s+/g,"-").replace(/[^a-zA-Z0-9-]/g,"");
+  const readFileAsText=async(f)=>{
+    return new Promise((res)=>{
+      const r=new FileReader();
+      r.onload=()=>res(r.result);
+      r.readAsText(f);
+    });
+  };
+
+  const readFileAsBase64=async(f)=>{
+    return new Promise((res)=>{
+      const r=new FileReader();
+      r.onload=()=>res(r.result.split(",")[1]);
+      r.readAsDataURL(f);
+    });
+  };
+
+  const parseFields=async(f)=>{
+    setParsing(true);setErr("");setEditFields([]);setLockFields([]);
+    try{
+      const base64=await readFileAsBase64(f);
+      const mediaType=f.name.endsWith(".pdf")?"application/pdf":"application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+      const resp=await fetch("https://api.anthropic.com/v1/messages",{
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({
+          model:"claude-sonnet-4-20250514",
+          max_tokens:1000,
+          messages:[{role:"user",content:[
+            {type:"document",source:{type:"base64",media_type:mediaType,data:base64}},
+            {type:"text",text:`Analyze this inspection report template. Find all fillable fields by looking for patterns like "Label:" or "Label: value" or form fields.
+
+For each field, determine if it CHANGES per report or STAYS THE SAME across reports.
+
+Fields that typically CHANGE per report: Date, Report Date, Inspection Date, Report Number, Report No, DR#, Notes, IOR Notes, Observations, Comments, Work Observed, Weather, Hours, Time In, Time Out, Temperature.
+
+Fields that typically STAY THE SAME: Project Name, Owner, Client, District, DSA File #, DSA App #, Contractor, Architect, Engineer, Inspector, IOR, Address, Location, Project No.
+
+Return ONLY valid JSON with no other text:
+{"editable":[{"name":"Date","value":"","autoFill":"date"},{"name":"IOR Notes","value":"","voiceEnabled":true}],"locked":[{"name":"Project Name","value":"Woodland Park MS"}]}
+
+autoFill can be "date" or "increment" (for report numbers). voiceEnabled=true for notes/observations fields. Include the current value if one exists in the template.`}
+          ]}]
+        })
+      });
+      const data=await resp.json();
+      const txt=data.content.map(i=>i.text||"").join("");
+      const clean=txt.replace(/```json|```/g,"").trim();
+      const parsed=JSON.parse(clean);
+      setEditFields(parsed.editable||[]);
+      setLockFields(parsed.locked||[]);
+    }catch(e){
+      console.error("Parse error:",e);
+      setErr("Could not parse template fields. You can still create the job and configure fields later.");
+    }finally{setParsing(false);}
+  };
+
+  const doFile=(f)=>{const e=f.name.split(".").pop().toLowerCase();if(!["docx","pdf"].includes(e)){setErr("Only .docx and .pdf");return;}setTf(f);setErr("");parseFields(f);};
+
+  const moveToLocked=(name)=>{const f=editFields.find(x=>x.name===name);if(f){setEditFields(p=>p.filter(x=>x.name!==name));setLockFields(p=>[...p,{...f,autoFill:undefined,voiceEnabled:undefined}]);}};
+  const moveToEditable=(name)=>{const f=lockFields.find(x=>x.name===name);if(f){setLockFields(p=>p.filter(x=>x.name!==name));setEditFields(p=>[...p,f]);}};
+
+  const ok=jn.trim()&&(sched||days.length>0);
 
   const create=async()=>{
     if(!ok)return;setSaving(true);setErr("");
     try{
       const es=effSch();
-      const pSlug=projectSlug();
-      const schedUrl=schedEnabled&&profile?.slug?`${BASE_URL}/schedule.html?i=${profile.slug}&project=${pSlug}`:"";
-      const job=await db.mkJob({user_id:user.id,name:jn.trim(),site_address:addr.trim()||null,report_filename_pattern:fp.trim(),schedule:es,schedule_days:es==="custom"?days:[],reminder_enabled:remOn,reminder_time:remOn?remT:null,reminder_hours_before:remOn?remH:null,scheduling_enabled:schedEnabled,scheduling_url:schedUrl||null});
-      if(tf&&job?.id){const ext=tf.name.split(".").pop().toLowerCase();const sp=await db.ulTpl(user.id,job.id,tf);await db.mkTpl({user_id:user.id,job_id:job.id,name:tn||tf.name,original_filename:tf.name,file_type:ext,storage_path:sp});}
+      const fnPattern=tf?tf.name.replace(/\.[^.]+$/,""):`DR_##__${jn.trim().replace(/\s+/g,"_")}`;
+      const job=await db.mkJob({user_id:user.id,name:jn.trim(),site_address:addr.trim()||null,report_filename_pattern:fnPattern,schedule:es,schedule_days:es==="custom"?days:[],reminder_enabled:remOn,reminder_time:remOn?remT:null,reminder_hours_before:remOn?remH:null,scheduling_enabled:schedOn,field_config:{editable:editFields,locked:lockFields}});
+      if(tf&&job?.id){const ext=tf.name.split(".").pop().toLowerCase();const sp=await db.ulTpl(user.id,job.id,tf);await db.mkTpl({user_id:user.id,job_id:job.id,name:tf.name,original_filename:tf.name,file_type:ext,storage_path:sp});}
       onCreated();
     }catch(e){setErr(e.message);}finally{setSaving(false);}
   };
@@ -113,12 +157,6 @@ function CreateJob({user,profile,onBack,onCreated}){
         <div style={{marginBottom:20}}><label style={ls}>Site Address</label><input type="text" placeholder="2111 Mission Ave, Oceanside CA 92058" value={addr} onChange={e=>setAddr(e.target.value)} style={fs}/></div>
 
         <div style={{marginBottom:20}}>
-          <label style={ls}>Report Filename *</label>
-          <input type="text" placeholder="DR_##__Oceanside_District_Office" value={fp} onChange={e=>setFp(e.target.value)} style={fs}/>
-          <p style={{fontSize:12,color:C.mut,marginTop:6,lineHeight:1.5}}>Auto-generated from job name. Edit if needed. ## = report number.<br/><span style={{color:C.blu}}>Preview: {fp?fp.replace("##","354")+"_Feb_03_2026.docx":"..."}</span></p>
-        </div>
-
-        <div style={{marginBottom:20}}>
           <label style={ls}>Upload Template</label>
           {!tf?(
             <div onDragOver={e=>{e.preventDefault();setDrag(true);}} onDragLeave={()=>setDrag(false)} onDrop={e=>{e.preventDefault();setDrag(false);if(e.dataTransfer.files.length)doFile(e.dataTransfer.files[0]);}} onClick={()=>document.getElementById("fi").click()}
@@ -130,16 +168,74 @@ function CreateJob({user,profile,onBack,onCreated}){
             </div>
           ):(
             <div style={{background:C.inp,border:`1px solid ${C.brd}`,borderRadius:12,padding:"14px 16px"}}>
-              <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:12}}>
+              <div style={{display:"flex",alignItems:"center",gap:12}}>
                 <div style={{fontSize:24}}>📄</div>
                 <div style={{flex:1}}><div style={{fontSize:14,fontWeight:600,color:C.txt}}>{tf.name}</div><div style={{fontSize:12,color:C.mut}}>{(tf.size/1024).toFixed(0)} KB</div></div>
-                <button onClick={()=>{setTf(null);setTn("");}} style={{background:"none",border:"none",color:"#ef4444",cursor:"pointer",fontSize:18}}>✕</button>
+                <button onClick={()=>{setTf(null);setEditFields([]);setLockFields([]);}} style={{background:"none",border:"none",color:"#ef4444",cursor:"pointer",fontSize:18}}>✕</button>
               </div>
-              <label style={{display:"block",color:C.mut,fontSize:12,fontWeight:600,marginBottom:4}}>Template Name</label>
-              <input type="text" value={tn} onChange={e=>setTn(e.target.value)} style={{width:"100%",padding:"10px 12px",background:C.bg,border:`1px solid ${C.brd}`,borderRadius:8,color:C.txt,fontSize:14}}/>
             </div>
           )}
         </div>
+
+        {/* FIELD PARSING RESULTS */}
+        {parsing&&(
+          <div style={{background:C.inp,border:`1px solid ${C.brd}`,borderRadius:12,padding:"20px",marginBottom:20,textAlign:"center"}}>
+            <div style={{fontSize:24,marginBottom:8}}>🔍</div>
+            <p style={{color:C.lt,fontSize:14,fontWeight:600}}>Analyzing template fields...</p>
+            <p style={{color:C.mut,fontSize:12,marginTop:4}}>AI is detecting fillable fields in your document</p>
+          </div>
+        )}
+
+        {!parsing&&(editFields.length>0||lockFields.length>0)&&(
+          <div style={{marginBottom:20}}>
+            {/* EDITABLE FIELDS */}
+            <div style={{background:C.inp,border:`1px solid ${C.brd}`,borderRadius:12,overflow:"hidden",marginBottom:10}}>
+              <div style={{padding:"12px 16px",borderBottom:`1px solid ${C.brd}`,background:"rgba(232,116,42,0.1)"}}>
+                <div style={{fontWeight:700,fontSize:14,color:C.org}}>Editable Fields ({editFields.length})</div>
+                <div style={{fontSize:12,color:C.mut,marginTop:2}}>You'll fill these for each report</div>
+              </div>
+              <div style={{padding:8,maxHeight:200,overflowY:"auto"}}>
+                {editFields.map(f=>(
+                  <div key={f.name} style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"10px 12px",background:C.card,border:`1px solid ${C.brd}`,borderRadius:8,marginBottom:6}}>
+                    <div style={{display:"flex",alignItems:"center",gap:8,flex:1,flexWrap:"wrap"}}>
+                      <span style={{fontSize:14,fontWeight:600,color:C.txt}}>{f.name}</span>
+                      {f.autoFill==="date"&&<span style={{fontSize:10,fontWeight:700,background:"rgba(90,143,192,0.2)",color:C.blu,padding:"2px 6px",borderRadius:4}}>Auto-Date</span>}
+                      {f.autoFill==="increment"&&<span style={{fontSize:10,fontWeight:700,background:"rgba(90,143,192,0.2)",color:C.blu,padding:"2px 6px",borderRadius:4}}>Auto-#</span>}
+                      {f.voiceEnabled&&<span style={{fontSize:10,fontWeight:700,background:"rgba(34,197,94,0.2)",color:C.ok,padding:"2px 6px",borderRadius:4}}>🎤 Voice</span>}
+                    </div>
+                    <button onClick={()=>moveToLocked(f.name)} style={{background:"none",border:`1px solid ${C.brd}`,borderRadius:6,padding:"4px 8px",color:C.mut,fontSize:11,cursor:"pointer",whiteSpace:"nowrap"}}>→ Lock</button>
+                  </div>
+                ))}
+                {editFields.length===0&&<div style={{padding:12,textAlign:"center",color:C.mut,fontSize:13}}>No editable fields detected</div>}
+              </div>
+            </div>
+
+            {/* LOCKED FIELDS (collapsible) */}
+            <div style={{background:C.inp,border:`1px solid ${C.brd}`,borderRadius:12,overflow:"hidden"}}>
+              <button onClick={()=>setShowLocked(!showLocked)} style={{width:"100%",display:"flex",alignItems:"center",justifyContent:"space-between",padding:"12px 16px",background:"none",border:"none",cursor:"pointer"}}>
+                <div>
+                  <div style={{fontWeight:700,fontSize:14,color:C.mut,textAlign:"left"}}>Locked Fields ({lockFields.length})</div>
+                  <div style={{fontSize:12,color:C.mut,marginTop:2,textAlign:"left"}}>Same value every report</div>
+                </div>
+                <span style={{color:C.mut,fontSize:14,transform:showLocked?"rotate(180deg)":"none",transition:"transform 0.2s"}}>▼</span>
+              </button>
+              {showLocked&&(
+                <div style={{padding:8,borderTop:`1px solid ${C.brd}`,maxHeight:200,overflowY:"auto"}}>
+                  {lockFields.map(f=>(
+                    <div key={f.name} style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"10px 12px",background:C.card,border:`1px solid ${C.brd}`,borderRadius:8,marginBottom:6}}>
+                      <div>
+                        <span style={{fontSize:14,fontWeight:600,color:C.lt}}>{f.name}</span>
+                        {f.value&&<span style={{fontSize:12,color:C.mut,marginLeft:8}}>({f.value})</span>}
+                      </div>
+                      <button onClick={()=>moveToEditable(f.name)} style={{background:"none",border:`1px solid ${C.brd}`,borderRadius:6,padding:"4px 8px",color:C.mut,fontSize:11,cursor:"pointer",whiteSpace:"nowrap"}}>→ Edit</button>
+                    </div>
+                  ))}
+                  {lockFields.length===0&&<div style={{padding:12,textAlign:"center",color:C.mut,fontSize:13}}>No locked fields</div>}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
 
         <div style={{marginBottom:20}}>
           <label style={{...ls,marginBottom:10}}>Report Frequency *</label>
@@ -166,19 +262,18 @@ function CreateJob({user,profile,onBack,onCreated}){
           </div>
         )}
 
-        {/* Enable Scheduling */}
         <div style={{marginBottom:24,background:C.inp,border:`1px solid ${C.brd}`,borderRadius:12,padding:16}}>
-          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
-            <div>
-              <span style={{fontSize:14,fontWeight:600,color:C.lt}}>Enable Scheduling</span>
-              <div style={{fontSize:12,color:C.mut,marginTop:2}}>Contractors can request inspections online</div>
+          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:schedOn?14:0}}>
+            <div style={{display:"flex",alignItems:"center",gap:10}}>
+              <span style={{fontSize:18}}>📅</span>
+              <span style={{fontSize:14,fontWeight:600,color:C.lt}}>Inspection Scheduling</span>
             </div>
-            <button onClick={()=>setSchedEnabled(!schedEnabled)} style={{width:48,height:28,borderRadius:14,border:"none",cursor:"pointer",background:schedEnabled?C.org:C.brd,position:"relative"}}><div style={{width:22,height:22,borderRadius:"50%",background:"#fff",position:"absolute",top:3,left:schedEnabled?23:3,transition:"left 0.2s"}}/></button>
+            <button onClick={()=>setSchedOn(!schedOn)} style={{width:48,height:28,borderRadius:14,border:"none",cursor:"pointer",background:schedOn?C.org:C.brd,position:"relative"}}><div style={{width:22,height:22,borderRadius:"50%",background:"#fff",position:"absolute",top:3,left:schedOn?23:3,transition:"left 0.2s"}}/></button>
           </div>
-          {schedEnabled&&jn.trim()&&profile?.slug&&(
-            <div style={{marginTop:12,background:C.bg,border:`1px solid ${C.brd}`,borderRadius:8,padding:"10px 12px"}}>
-              <div style={{fontSize:11,color:C.blu,fontWeight:600,marginBottom:4}}>SCHEDULING URL:</div>
-              <div style={{fontSize:12,color:C.lt,wordBreak:"break-all"}}>{BASE_URL}/schedule.html?i={profile.slug}&project={projectSlug()}</div>
+          {schedOn&&(
+            <div style={{background:C.bg,border:`1px solid ${C.brd}`,borderRadius:8,padding:"12px 14px"}}>
+              <p style={{fontSize:13,color:C.lt,lineHeight:1.5}}>Let your GC and subs request inspections through a shared calendar.</p>
+              <p style={{fontSize:12,color:C.blu,marginTop:8,fontWeight:600}}>You'll set up the calendar link and team contacts on the job dashboard after creating this job.</p>
             </div>
           )}
         </div>
@@ -189,8 +284,43 @@ function CreateJob({user,profile,onBack,onCreated}){
   );
 }
 
+/* ═══ ARCHIVED JOBS (Full Screen) ═══ */
+function ArchivedJobs({jobs, onBack, onSelect}){
+  return(
+    <div style={{minHeight:"100vh",background:C.bg,color:C.txt}}>
+      <div style={{display:"flex",alignItems:"center",gap:12,padding:"16px 20px",borderBottom:`1px solid ${C.brd}`,background:C.card}}>
+        <button onClick={onBack} style={{background:"none",border:"none",color:C.mut,fontSize:22,cursor:"pointer",padding:0,lineHeight:1}}>←</button>
+        <span style={{fontWeight:700,fontSize:17}}>Archived Jobs</span>
+        <span style={{fontSize:13,color:C.mut,marginLeft:"auto"}}>{jobs.length} job{jobs.length!==1?"s":""}</span>
+      </div>
+      <div style={{maxWidth:600,margin:"0 auto",padding:"20px"}}>
+        {jobs.length===0&&(
+          <div style={{textAlign:"center",padding:"60px 20px",color:C.mut}}>
+            <div style={{fontSize:48,marginBottom:16}}>📁</div>
+            <p style={{fontSize:16,fontWeight:600,color:C.lt,marginBottom:6}}>No archived jobs</p>
+            <p style={{fontSize:14}}>Completed projects will appear here</p>
+          </div>
+        )}
+        {jobs.map(j=>(
+          <button key={j.id} onClick={()=>onSelect(j)} style={{width:"100%",textAlign:"left",background:C.card,border:`1px solid ${C.brd}`,borderRadius:12,padding:"16px 18px",marginBottom:10,cursor:"pointer",display:"flex",alignItems:"center",gap:14}}>
+            <div style={{fontSize:20}}>📁</div>
+            <div style={{flex:1}}>
+              <div style={{fontWeight:600,fontSize:16,color:C.txt,marginBottom:4}}>{j.name}</div>
+              <div style={{display:"flex",alignItems:"center",gap:8}}>
+                <span style={{fontSize:11,fontWeight:600,background:C.inp,border:`1px solid ${C.brd}`,borderRadius:6,padding:"2px 8px",color:C.mut}}>{SL[j.schedule]||j.schedule}</span>
+                {j.site_address&&<span style={{fontSize:12,color:C.mut}}>{j.site_address}</span>}
+              </div>
+            </div>
+            <span style={{color:C.mut,fontSize:18}}>›</span>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 /* ═══ DASHBOARD ═══ */
-function Dashboard({user,onLogout}){
+function Dashboard({user, onLogout}){
   const [jobs,setJobs]=useState([]);
   const [rpts,setRpts]=useState([]);
   const [loading,setLoading]=useState(true);
@@ -199,36 +329,26 @@ function Dashboard({user,onLogout}){
   const [showNew,setShowNew]=useState(false);
   const [showDD,setShowDD]=useState(false);
   const [showArch,setShowArch]=useState(false);
-  const [profile,setProfile]=useState(null);
-  const [copied,setCopied]=useState(false);
+  const [showCal,setShowCal]=useState(false);
 
-  useEffect(()=>{load();loadProfile();},[]);
-
+  useEffect(()=>{load();},[]);
   const load=async()=>{setLoading(true);try{const a=await db.jobs();setJobs(a);const ids=a.filter(j=>!j.is_archived).map(j=>j.id);if(ids.length)setRpts(await db.todayRpts(ids));}catch(e){console.error(e);}finally{setLoading(false);}};
-
-  const loadProfile=async()=>{
-    let p=await db.getProfile(user.id);
-    if(!p){
-      // Auto-create profile from user metadata
-      const name=user?.user_metadata?.full_name||user?.email?.split("@")[0]||"inspector";
-      let slug=makeSlug(name);
-      // Check if slug exists, add number if needed
-      const existing=await db.getProfileBySlug(slug);
-      if(existing)slug=slug+"-"+Math.floor(Math.random()*999);
-      try{p=await db.mkProfile({id:user.id,full_name:name,slug:slug});}catch(e){console.error("Profile create failed:",e);}
-    }
-    setProfile(p);
-  };
-
   const act=jobs.filter(j=>!j.is_archived);
   const arch=jobs.filter(j=>j.is_archived);
+  const top3=act.slice(0,3);
   const stat=(id,sc)=>{if(sc==="as_needed")return"none";const r=rpts.find(r=>r.job_id===id);if(!r)return"due";return r.status==="submitted"?"submitted":"working";};
   const dot=(s)=>{if(s==="none")return null;const c=s==="submitted"?C.ok:s==="working"?C.org:"#ef4444";return<div style={{width:10,height:10,borderRadius:"50%",background:c,flexShrink:0}}/>;};
 
-  const hubUrl=profile?.slug?`${BASE_URL}/hub.html?i=${profile.slug}`:"";
-  const copyUrl=()=>{navigator.clipboard.writeText(hubUrl);setCopied(true);setTimeout(()=>setCopied(false),2000);};
+  const doShare=async()=>{
+    const url=window.location.href;
+    const text="My Daily Reports — Voice-to-PDF inspection reports";
+    if(navigator.share){try{await navigator.share({title:"My Daily Reports",text,url});}catch(e){}}
+    else{try{await navigator.clipboard.writeText(url);alert("Link copied!");}catch(e){alert("Could not copy link.");}}
+  };
 
-  if(showNew)return<CreateJob user={user} profile={profile} onBack={()=>setShowNew(false)} onCreated={()=>{setShowNew(false);load();}}/>;
+  // Sub-screens
+  if(showNew)return<CreateJob user={user} onBack={()=>setShowNew(false)} onCreated={()=>{setShowNew(false);load();}}/>;
+  if(showArch)return<ArchivedJobs jobs={arch} onBack={()=>setShowArch(false)} onSelect={(j)=>{setSelJob(j);setShowArch(false);}}/>;
 
   if(selJob)return(
     <div style={{minHeight:"100vh",background:C.bg,color:C.txt}}>
@@ -240,14 +360,7 @@ function Dashboard({user,onLogout}){
       <div style={{maxWidth:600,margin:"40px auto",padding:"0 20px",textAlign:"center"}}>
         <div style={{background:C.card,border:`1px solid ${C.brd}`,borderRadius:12,padding:24}}>
           <p style={{fontWeight:600,color:C.org,marginBottom:8}}>Job: {selJob.name}</p>
-          <p style={{color:C.mut,fontSize:13}}>Section 4 builds the 3-section layout here (Today's Report / Working Copies / Submitted Reports).</p>
-          {selJob.scheduling_enabled&&selJob.scheduling_url&&(
-            <div style={{marginTop:16,background:C.inp,border:`1px solid ${C.brd}`,borderRadius:8,padding:"12px"}}>
-              <div style={{fontSize:12,color:C.blu,fontWeight:600,marginBottom:4}}>SCHEDULING URL:</div>
-              <div style={{fontSize:12,color:C.lt,wordBreak:"break-all",marginBottom:8}}>{selJob.scheduling_url}</div>
-              <button onClick={()=>{navigator.clipboard.writeText(selJob.scheduling_url);}} style={{background:C.org,color:"#fff",border:"none",borderRadius:6,padding:"6px 14px",fontSize:12,fontWeight:600,cursor:"pointer"}}>Copy URL</button>
-            </div>
-          )}
+          <p style={{color:C.mut,fontSize:13}}>Job detail view coming next — Today's Report, Working Copies, Submitted Reports.</p>
         </div>
       </div>
     </div>
@@ -256,14 +369,19 @@ function Dashboard({user,onLogout}){
   return(
     <div style={{minHeight:"100vh",background:C.bg,color:C.txt,position:"relative"}} onClick={e=>{if(showSet&&!e.target.closest('[data-s]'))setShowSet(false);if(showDD&&!e.target.closest('[data-d]'))setShowDD(false);}}>
 
+      {/* HEADER */}
       <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"16px 20px",borderBottom:`1px solid ${C.brd}`,background:C.card}} data-s>
         <div style={{display:"flex",alignItems:"center",gap:12}}>
           <div style={{width:36,height:36,borderRadius:8,background:C.org,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:700,fontSize:16,color:"#fff"}}>M</div>
           <span style={{fontWeight:700,fontSize:18}}>My Daily Reports</span>
         </div>
-        <button onClick={()=>setShowSet(!showSet)} style={{width:36,height:36,borderRadius:8,background:C.inp,border:`1px solid ${C.brd}`,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",fontSize:16,color:C.mut}}>⚙️</button>
+        <div style={{display:"flex",alignItems:"center",gap:10}}>
+          <button onClick={doShare} style={{width:36,height:36,borderRadius:8,background:C.inp,border:`1px solid ${C.brd}`,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",fontSize:16,color:C.mut}}>↗</button>
+          <button onClick={()=>setShowSet(!showSet)} style={{width:36,height:36,borderRadius:8,background:C.inp,border:`1px solid ${C.brd}`,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",fontSize:16,color:C.mut}}>⚙️</button>
+        </div>
       </div>
 
+      {/* SETTINGS DROPDOWN */}
       {showSet&&(
         <div style={{position:"absolute",top:68,right:20,background:C.card,border:`1px solid ${C.brd}`,borderRadius:12,padding:"8px 0",minWidth:220,zIndex:100,boxShadow:"0 8px 24px rgba(0,0,0,0.5)"}} data-s>
           <div style={{padding:"12px 16px",borderBottom:`1px solid ${C.brd}`}}>
@@ -272,26 +390,16 @@ function Dashboard({user,onLogout}){
           </div>
           <button onClick={()=>{setShowSet(false);alert("Account settings coming soon");}} style={{width:"100%",padding:"12px 16px",background:"none",border:"none",textAlign:"left",color:C.lt,fontSize:14,cursor:"pointer",display:"flex",alignItems:"center",gap:10}}><span>👤</span> Account Settings</button>
           <button onClick={()=>{setShowSet(false);alert("Notifications coming soon");}} style={{width:"100%",padding:"12px 16px",background:"none",border:"none",textAlign:"left",color:C.lt,fontSize:14,cursor:"pointer",display:"flex",alignItems:"center",gap:10}}><span>🔔</span> Notifications</button>
+          <button onClick={()=>{setShowCal(!showCal);setShowSet(false);}} style={{width:"100%",padding:"12px 16px",background:"none",border:"none",textAlign:"left",color:C.lt,fontSize:14,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+            <span style={{display:"flex",alignItems:"center",gap:10}}><span>📅</span> Show Calendar</span>
+            <span style={{fontSize:12,color:showCal?C.ok:C.mut,fontWeight:600}}>{showCal?"ON":"OFF"}</span>
+          </button>
           <div style={{borderTop:`1px solid ${C.brd}`,margin:"4px 0"}}/>
           <button onClick={()=>{setShowSet(false);onLogout();}} style={{width:"100%",padding:"12px 16px",background:"none",border:"none",textAlign:"left",color:"#ef4444",fontSize:14,cursor:"pointer",display:"flex",alignItems:"center",gap:10}}><span>🚪</span> Sign Out</button>
         </div>
       )}
 
-      {/* Scheduling Hub URL */}
-      {hubUrl&&(
-        <div style={{padding:"12px 20px",borderBottom:`1px solid ${C.brd}`}}>
-          <div style={{background:C.card,border:`1px solid ${C.brd}`,borderRadius:10,padding:"14px 16px"}}>
-            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:8}}>
-              <span style={{fontSize:13,fontWeight:700,color:C.blu}}>YOUR SCHEDULING PAGE</span>
-              <button onClick={copyUrl} style={{background:C.org,color:"#fff",border:"none",borderRadius:6,padding:"5px 12px",fontSize:11,fontWeight:700,cursor:"pointer"}}>{copied?"✅ Copied!":"📋 Copy URL"}</button>
-            </div>
-            <div style={{fontSize:12,color:C.lt,wordBreak:"break-all"}}>{hubUrl}</div>
-            <div style={{fontSize:11,color:C.mut,marginTop:6}}>Share this link with your GCs and contractors</div>
-          </div>
-        </div>
-      )}
-
-      {/* Job dropdown */}
+      {/* JOB DROPDOWN */}
       <div style={{padding:"12px 20px",position:"relative"}} data-d>
         <button onClick={()=>setShowDD(!showDD)} style={{width:"100%",display:"flex",alignItems:"center",justifyContent:"space-between",padding:"12px 16px",background:C.card,border:`1px solid ${showDD?C.org:C.brd}`,borderRadius:10,cursor:"pointer",color:C.txt}}>
           <span style={{fontSize:15,fontWeight:600}}>Select a Job</span>
@@ -304,38 +412,59 @@ function Dashboard({user,onLogout}){
               <button key={j.id} onClick={()=>{setSelJob(j);setShowDD(false);}} style={{width:"100%",display:"flex",alignItems:"center",gap:12,padding:"14px 16px",background:"none",border:"none",borderBottom:`1px solid ${C.brd}`,cursor:"pointer",textAlign:"left"}}>
                 {dot(s)}<div style={{flex:1}}><div style={{fontSize:15,fontWeight:600,color:C.txt}}>{j.name}</div><span style={{fontSize:11,color:C.mut}}>{SL[j.schedule]||j.schedule}</span></div>
               </button>);})}
-            {arch.length>0&&(<div>
-              <button onClick={()=>setShowArch(!showArch)} style={{width:"100%",display:"flex",alignItems:"center",gap:12,padding:"14px 16px",background:C.inp,border:"none",borderTop:`1px solid ${C.brd}`,cursor:"pointer",textAlign:"left"}}>
-                <span style={{fontSize:16}}>{showArch?"📂":"📁"}</span><span style={{fontSize:14,fontWeight:600,color:C.mut}}>Archived ({arch.length})</span><span style={{marginLeft:"auto",color:C.mut,fontSize:12}}>{showArch?"▲":"▼"}</span>
-              </button>
-              {showArch&&arch.map(j=>(
-                <button key={j.id} onClick={()=>{setSelJob(j);setShowDD(false);}} style={{width:"100%",display:"flex",alignItems:"center",gap:12,padding:"12px 16px 12px 44px",background:"none",border:"none",borderTop:`1px solid ${C.brd}`,cursor:"pointer",textAlign:"left"}}>
-                  <div style={{fontSize:14,color:C.mut}}>{j.name}</div>
-                </button>))}
-            </div>)}
           </div>
         )}
       </div>
 
-      <div style={{maxWidth:600,margin:"0 auto",padding:"20px"}}>
+      {/* MAIN CONTENT */}
+      <div style={{maxWidth:600,margin:"0 auto",padding:"0 20px 20px"}}>
+
+        {/* + NEW JOB BUTTON */}
         <button className="btn-o" onClick={()=>setShowNew(true)} style={{width:"100%",padding:"14px 0",background:C.org,border:`1px solid ${C.blu}`,borderRadius:10,color:"#fff",fontSize:16,fontWeight:700,cursor:"pointer",marginBottom:20}}>+ New Job</button>
 
-        {loading&&<p style={{textAlign:"center",color:C.mut,padding:40}}>Loading...</p>}
-        {!loading&&act.length===0&&(<div style={{textAlign:"center",padding:"60px 20px",color:C.mut}}><div style={{fontSize:48,marginBottom:16}}>📋</div><p style={{fontSize:16,fontWeight:600,color:C.lt,marginBottom:6}}>No jobs yet</p><p style={{fontSize:14}}>Tap "+ New Job" to create your first project</p></div>)}
+        {/* CALENDAR VIEW (all jobs) */}
+        {showCal&&(
+          <div style={{background:C.card,border:`1px solid ${C.brd}`,borderRadius:12,padding:"20px 18px",marginBottom:16}}>
+            <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:12}}>
+              <span style={{fontSize:20}}>📅</span>
+              <span style={{fontWeight:700,fontSize:16,color:C.txt}}>Inspection Calendar</span>
+            </div>
+            <p style={{fontSize:13,color:C.mut,lineHeight:1.5}}>Calendar view across all jobs coming soon. Enable scheduling on individual jobs to start receiving inspection requests.</p>
+          </div>
+        )}
 
-        {!loading&&act.map(j=>{const s=stat(j.id,j.schedule);return(
+        {loading&&<p style={{textAlign:"center",color:C.mut,padding:40}}>Loading...</p>}
+
+        {/* TOP 3 JOB CARDS */}
+        {!loading&&top3.map(j=>{const s=stat(j.id,j.schedule);return(
           <button key={j.id} onClick={()=>setSelJob(j)} style={{width:"100%",textAlign:"left",background:C.card,border:`1px solid ${C.brd}`,borderRadius:12,padding:"16px 18px",marginBottom:10,cursor:"pointer",display:"flex",alignItems:"center",gap:14}}>
             {dot(s)}<div style={{flex:1}}><div style={{fontWeight:600,fontSize:16,color:C.txt,marginBottom:4}}>{j.name}</div><div style={{display:"flex",alignItems:"center",gap:8}}><span style={{fontSize:11,fontWeight:600,background:C.inp,border:`1px solid ${C.brd}`,borderRadius:6,padding:"2px 8px",color:C.mut}}>{SL[j.schedule]||j.schedule}</span>{j.site_address&&<span style={{fontSize:12,color:C.mut}}>{j.site_address}</span>}</div></div>
             <span style={{color:C.mut,fontSize:18}}>›</span>
           </button>);})}
 
-        <div onClick={()=>alert("Training Center coming soon")} style={{background:C.card,border:`1px solid ${C.brd}`,borderRadius:12,padding:"16px 18px",marginTop:20,cursor:"pointer",display:"flex",alignItems:"center",gap:14}}>
+        {/* EMPTY STATE */}
+        {!loading&&act.length===0&&(
+          <div style={{textAlign:"center",padding:"60px 20px",color:C.mut}}>
+            <div style={{fontSize:48,marginBottom:16}}>📋</div>
+            <p style={{fontSize:16,fontWeight:600,color:C.lt,marginBottom:6}}>No jobs yet</p>
+            <p style={{fontSize:14}}>Tap "+ New Job" to create your first project</p>
+          </div>
+        )}
+
+        {/* ARCHIVED JOBS LINK */}
+        <button onClick={()=>setShowArch(true)} style={{width:"100%",padding:"14px 16px",background:"transparent",border:`1px solid ${C.brd}`,borderRadius:8,cursor:"pointer",marginTop:10,marginBottom:10}}>
+          <span style={{fontSize:13,fontWeight:600,color:C.mut}}>📁 ARCHIVED JOBS{arch.length>0?` (${arch.length})`:""}</span>
+        </button>
+
+        {/* TRAINING CENTER */}
+        <div onClick={()=>alert("Training Center coming soon")} style={{background:C.card,border:`1px solid ${C.brd}`,borderRadius:12,padding:"16px 18px",marginTop:10,cursor:"pointer",display:"flex",alignItems:"center",gap:14}}>
           <div style={{width:40,height:40,borderRadius:10,background:C.inp,border:`1px solid ${C.brd}`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:20,flexShrink:0}}>🎓</div>
           <div style={{flex:1}}><div style={{fontWeight:600,fontSize:15,color:C.txt,marginBottom:2}}>Training Center</div><div style={{fontSize:12,color:C.mut}}>Learn how to get the most out of My Daily Reports</div></div>
           <span style={{color:C.mut,fontSize:18}}>›</span>
         </div>
       </div>
 
+      {/* FOOTER */}
       <div style={{textAlign:"center",padding:"24px 20px 32px",color:C.mut,fontSize:12}}>
         <a href="#" onClick={e=>{e.preventDefault();alert("Terms coming soon");}} style={{color:C.mut,textDecoration:"none"}}>Terms of Service</a>
         <span style={{margin:"0 8px"}}>•</span>
@@ -345,73 +474,8 @@ function Dashboard({user,onLogout}){
   );
 }
 
-/* ═══ AUTH ═══ */
-function App(){
-  const [mode,setMode]=useState("login");
-  const [fn,setFn]=useState("");
-  const [em,setEm]=useState("");
-  const [pw,setPw]=useState("");
-  const [spw,setSpw]=useState(false);
-  const [ld,setLd]=useState(false);
-  const [err,setErr]=useState("");
-  const [msg,setMsg]=useState("");
-  const [user,setUser]=useState(null);
-  const [chk,setChk]=useState(true);
-
-  useEffect(()=>{(async()=>{try{let u=await auth.user();if(!u){const r=await auth.ref();if(r)u=await auth.user();}if(u?.id)setUser(u);}catch(e){}finally{setChk(false);}})();},[]);
-
-  const go=async()=>{
-    setErr("");setMsg("");
-    if(mode==="signup"&&!fn.trim()){setErr("Enter your full name");return;}
-    if(!em||!pw){setErr("Enter email and password");return;}
-    if(pw.length<6){setErr("Password must be at least 6 characters");return;}
-    setLd(true);
-    try{
-      if(mode==="signup"){
-        const d=await auth.up(em,pw,fn.trim());
-        if(d.access_token){
-          const u=await auth.user();
-          if(u?.id){
-            // Auto-create profile with slug
-            const slug=makeSlug(fn.trim());
-            const existing=await db.getProfileBySlug(slug);
-            const finalSlug=existing?slug+"-"+Math.floor(Math.random()*999):slug;
-            try{await db.mkProfile({id:u.id,full_name:fn.trim(),slug:finalSlug});}catch(e){console.error("Profile:",e);}
-            setUser(u);return;
-          }
-        }
-        setMsg("Account created! Check email to confirm, then sign in.");setMode("login");setPw("");
-      }
-      else{await auth.in(em,pw);const u=await auth.user();if(u?.id)setUser(u);}
-    }catch(e){setErr(e.message);}finally{setLd(false);}
-  };
-  const lo=async()=>{await auth.out();setUser(null);setEm("");setPw("");};
-
-  if(chk)return(<div style={{minHeight:"100vh",background:C.bg,display:"flex",alignItems:"center",justifyContent:"center",color:C.mut}}><div style={{textAlign:"center"}}><div style={{width:48,height:48,borderRadius:12,background:C.org,display:"flex",alignItems:"center",justifyContent:"center",margin:"0 auto 16px",fontSize:22,fontWeight:700,color:"#fff"}}>M</div>Loading...</div></div>);
-  if(user)return<Dashboard user={user} onLogout={lo}/>;
-
-  const fs={width:"100%",padding:"12px 14px",background:C.inp,border:`1px solid ${C.brd}`,borderRadius:10,color:C.txt,fontSize:15};
-  return(
-    <div style={{minHeight:"100vh",background:C.bg,display:"flex",alignItems:"center",justifyContent:"center",padding:20}}>
-      <div style={{width:"100%",maxWidth:420,background:C.card,border:`1px solid ${C.brd}`,borderRadius:16,padding:32}}>
-        <div style={{width:48,height:48,borderRadius:12,background:C.org,display:"flex",alignItems:"center",justifyContent:"center",margin:"0 auto 20px",fontSize:22,fontWeight:700,color:"#fff"}}>M</div>
-        <h1 style={{textAlign:"center",color:C.txt,fontSize:24,fontWeight:700,margin:"0 0 6px"}}>My Daily Reports</h1>
-        <p style={{textAlign:"center",color:C.mut,fontSize:14,margin:"0 0 28px"}}>{mode==="login"?"Sign in to access your reports":"Create your account to get started"}</p>
-        <div style={{display:"flex",background:C.inp,borderRadius:10,padding:3,marginBottom:24}}>
-          {["login","signup"].map(m=><button key={m} onClick={()=>{setMode(m);setErr("");setMsg("");}} style={{flex:1,padding:"10px 0",border:"none",borderRadius:8,cursor:"pointer",fontSize:14,fontWeight:600,background:mode===m?C.org:"transparent",color:mode===m?"#fff":C.mut}}>{m==="login"?"Login":"Sign Up"}</button>)}
-        </div>
-        {err&&<div style={{background:"#2d1214",border:"1px solid #5c2023",borderRadius:8,padding:"10px 14px",marginBottom:16,color:C.err,fontSize:13}}>{err}</div>}
-        {msg&&<div style={{background:"#0f2918",border:"1px solid #1a4a2a",borderRadius:8,padding:"10px 14px",marginBottom:16,color:C.ok,fontSize:13}}>{msg}</div>}
-        {mode==="signup"&&<div style={{marginBottom:16}}><label style={{display:"block",color:C.lt,fontSize:13,fontWeight:600,marginBottom:6}}>Full Name</label><input type="text" placeholder="Jesse Saltzman" value={fn} onChange={e=>setFn(e.target.value)} onKeyDown={e=>e.key==="Enter"&&go()} style={fs}/></div>}
-        <div style={{marginBottom:16}}><label style={{display:"block",color:C.lt,fontSize:13,fontWeight:600,marginBottom:6}}>Email</label><input type="email" placeholder="you@example.com" value={em} onChange={e=>setEm(e.target.value)} onKeyDown={e=>e.key==="Enter"&&go()} style={fs}/></div>
-        <div style={{marginBottom:24}}><label style={{display:"block",color:C.lt,fontSize:13,fontWeight:600,marginBottom:6}}>Password</label><div style={{position:"relative"}}><input type={spw?"text":"password"} placeholder="••••••••" value={pw} onChange={e=>setPw(e.target.value)} onKeyDown={e=>e.key==="Enter"&&go()} style={{...fs,paddingRight:48}}/><button type="button" onClick={()=>setSpw(!spw)} style={{position:"absolute",right:12,top:"50%",transform:"translateY(-50%)",background:"none",border:"none",color:C.mut,cursor:"pointer",fontSize:18,padding:0}}>{spw?"🙈":"👁"}</button></div></div>
-        <button className="btn-o" onClick={go} disabled={ld} style={{width:"100%",padding:"14px 0",background:ld?C.orgH:C.org,border:`1px solid ${C.blu}`,borderRadius:10,color:"#fff",fontSize:16,fontWeight:700,cursor:ld?"wait":"pointer",opacity:ld?0.7:1}}>{ld?"Please wait...":mode==="login"?"Sign In":"Create Account"}</button>
-        {mode==="login"&&<p style={{textAlign:"center",marginTop:16,marginBottom:0,color:C.mut,fontSize:13}}><span style={{cursor:"pointer",color:C.blu}} onClick={()=>setMsg("Password reset coming soon.")}>Forgot your password?</span></p>}
-      </div>
-    </div>
-  );
-}
-
+/* ═══ APP — DEV BYPASS ═══ */
+function App(){return<Dashboard user={DEV_USER} onLogout={()=>alert("Auth disabled during dev")}/>;}
 ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
 </script>
 </body>
