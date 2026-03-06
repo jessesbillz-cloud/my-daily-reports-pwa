@@ -22,6 +22,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.9/babel.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 <script type="text/babel">
 const { useState, useEffect, useRef } = React;
 const SB_URL = "https://wluvkmpncafugdbunlkw.supabase.co";
@@ -75,14 +76,52 @@ function CreateJob({user, onBack, onCreated}){
     });
   };
 
+  const extractDocxText=async(f)=>{
+    const zip=await JSZip.loadAsync(f);
+    const xml=await zip.file("word/document.xml").async("string");
+    const parser=new DOMParser();
+    const doc=parser.parseFromString(xml,"application/xml");
+    const ns="http://schemas.openxmlformats.org/wordprocessingml/2006/main";
+    const rows=doc.getElementsByTagNameNS(ns,"tr");
+    let text="";
+    for(let i=0;i<rows.length;i++){
+      const cells=rows[i].getElementsByTagNameNS(ns,"tc");
+      const cellTexts=[];
+      for(let j=0;j<cells.length;j++){
+        const paras=cells[j].getElementsByTagNameNS(ns,"t");
+        let ct="";
+        for(let k=0;k<paras.length;k++)ct+=paras[k].textContent;
+        cellTexts.push(ct.trim());
+      }
+      text+=cellTexts.join(" | ")+"\n";
+    }
+    const paras=doc.getElementsByTagNameNS(ns,"p");
+    let pText="";
+    for(let i=0;i<paras.length;i++){
+      const ts=paras[i].getElementsByTagNameNS(ns,"t");
+      let line="";
+      for(let j=0;j<ts.length;j++)line+=ts[j].textContent;
+      if(line.trim())pText+=line.trim()+"\n";
+    }
+    return"TABLE CONTENT:\n"+text+"\nPARAGRAPH CONTENT:\n"+pText;
+  };
+
   const parseFields=async(f)=>{
     setParsing(true);setErr("");setEditFields([]);setLockFields([]);
     try{
-      const base64=await readFileAsBase64(f);
+      const isPdf=f.name.toLowerCase().endsWith(".pdf");
+      let payload;
+      if(isPdf){
+        const base64=await readFileAsBase64(f);
+        payload={file_base64:base64,file_name:f.name};
+      }else{
+        const docText=await extractDocxText(f);
+        payload={file_text:docText,file_name:f.name};
+      }
       const resp=await fetch("https://wluvkmpncafugdbunlkw.supabase.co/functions/v1/parse-template",{
         method:"POST",
         headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({file_base64:base64,file_name:f.name})
+        body:JSON.stringify(payload)
       });
       const parsed=await resp.json();
       if(parsed.error)throw new Error(parsed.error);
