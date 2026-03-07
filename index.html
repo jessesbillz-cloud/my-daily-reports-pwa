@@ -1007,7 +1007,6 @@ function JobDetail({job, user, onBack, onDeleted}){
   const [showEditJob,setShowEditJob]=useState(false);
   const [showReport,setShowReport]=useState(false);
   const [showTeam,setShowTeam]=useState(false);
-  const [inspections,setInspections]=useState([]);
   const [editName,setEditName]=useState(job.name||"");
   const [editAddr,setEditAddr]=useState(job.site_address||"");
   const [editSaving,setEditSaving]=useState(false);
@@ -1019,8 +1018,6 @@ function JobDetail({job, user, onBack, onDeleted}){
     try{
       const r=await fetch(`${SB_URL}/rest/v1/reports?select=*&job_id=eq.${job.id}&order=report_date.desc`,{headers:db._h()});
       if(r.ok)setRpts(await r.json());
-      const ir=await fetch(`${SB_URL}/rest/v1/inspections?select=id,date,type,status&job_id=eq.${job.id}&order=date.asc`,{headers:db._h()});
-      if(ir.ok){const d=await ir.json();setInspections(d);}
     }catch(e){console.error(e);}
     finally{setLoading(false);}
   },[job.id]);
@@ -1034,9 +1031,6 @@ function JobDetail({job, user, onBack, onDeleted}){
   const working=rpts.filter(r=>r.status!=="submitted");
   const nextNum=submitted.length+working.length+1;
 
-  // Upcoming inspections (next 7 days)
-  const weekOut=new Date(Date.now()+7*86400000).toISOString().split("T")[0];
-  const upcoming=inspections.filter(i=>i.date>=today&&i.date<=weekOut);
 
   // Track if user has started today's report this session
   const [reportStarted,setReportStarted]=useState(false);
@@ -1130,33 +1124,6 @@ function JobDetail({job, user, onBack, onDeleted}){
             </div>
           )}
         </div>
-
-        {/* ── Scheduling Calendar Preview ── */}
-        {job.scheduling_enabled&&(
-          <div style={{background:C.card,border:`1px solid ${C.brd}`,borderRadius:12,padding:20,marginBottom:16}}>
-            <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:12}}>
-              <span style={{fontSize:20}}>📅</span>
-              <span style={{fontWeight:700,fontSize:15,color:C.txt}}>Upcoming Inspections</span>
-              <span style={{fontSize:11,color:C.mut,marginLeft:"auto"}}>Next 7 days</span>
-            </div>
-            {upcoming.length===0?(
-              <div style={{textAlign:"center",padding:"12px 0",color:C.mut,fontSize:13}}>No inspections scheduled this week</div>
-            ):(
-              upcoming.map((insp,i)=>(
-                <div key={insp.id||i} style={{display:"flex",alignItems:"center",gap:12,padding:"10px 0",borderBottom:i<upcoming.length-1?`1px solid ${C.brd}`:"none"}}>
-                  <div style={{width:44,textAlign:"center",flexShrink:0}}>
-                    <div style={{fontSize:10,fontWeight:700,color:C.org,textTransform:"uppercase"}}>{new Date(insp.date+"T12:00:00").toLocaleDateString("en-US",{weekday:"short",timeZone:tz})}</div>
-                    <div style={{fontSize:18,fontWeight:700,color:C.txt}}>{new Date(insp.date+"T12:00:00").getDate()}</div>
-                  </div>
-                  <div style={{flex:1}}>
-                    <div style={{fontSize:14,fontWeight:600,color:C.lt}}>{insp.type||"Inspection"}</div>
-                    <div style={{fontSize:11,color:C.mut}}>{insp.status||"Requested"}</div>
-                  </div>
-                </div>
-              ))
-            )}
-          </div>
-        )}
 
         {/* ── Photo Gallery ── */}
         <Folder icon="📸" label="Photos" count={0} color={C.blu} open={showPhotos} setOpen={setShowPhotos}>
@@ -1435,7 +1402,6 @@ function Dashboard({user, onLogout}){
   const [showNew,setShowNew]=useState(false);
   const [showDD,setShowDD]=useState(false);
   const [showArch,setShowArch]=useState(false);
-  const [showCal,setShowCal]=useState(false);
   const [showAcct,setShowAcct]=useState(false);
   const [showTrain,setShowTrain]=useState(false);
 
@@ -1500,10 +1466,6 @@ function Dashboard({user, onLogout}){
           </div>
           <button onClick={()=>{setShowSet(false);setShowAcct(true);}} style={{width:"100%",padding:"12px 16px",background:"none",border:"none",textAlign:"left",color:C.lt,fontSize:14,cursor:"pointer",display:"flex",alignItems:"center",gap:10}}><span>👤</span> Account Settings</button>
           <button onClick={()=>{setShowSet(false);alert("Notifications coming soon");}} style={{width:"100%",padding:"12px 16px",background:"none",border:"none",textAlign:"left",color:C.lt,fontSize:14,cursor:"pointer",display:"flex",alignItems:"center",gap:10}}><span>🔔</span> Notifications</button>
-          <button onClick={()=>{setShowCal(!showCal);setShowSet(false);}} style={{width:"100%",padding:"12px 16px",background:"none",border:"none",textAlign:"left",color:C.lt,fontSize:14,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
-            <span style={{display:"flex",alignItems:"center",gap:10}}><span>📅</span> Show Calendar</span>
-            <span style={{fontSize:12,color:showCal?C.ok:C.mut,fontWeight:600}}>{showCal?"ON":"OFF"}</span>
-          </button>
           <div style={{borderTop:`1px solid ${C.brd}`,margin:"4px 0"}}/>
           <button onClick={()=>{setShowSet(false);onLogout();}} style={{width:"100%",padding:"12px 16px",background:"none",border:"none",textAlign:"left",color:"#ef4444",fontSize:14,cursor:"pointer",display:"flex",alignItems:"center",gap:10}}><span>🚪</span> Sign Out</button>
         </div>
@@ -1511,13 +1473,6 @@ function Dashboard({user, onLogout}){
 
       <div style={{maxWidth:600,margin:"0 auto",padding:"16px 16px 20px"}}>
         <button className="btn-o" onClick={()=>setShowNew(true)} style={{width:"100%",padding:"14px 0",background:C.org,border:`1px solid ${C.blu}`,borderRadius:10,color:"#fff",fontSize:16,fontWeight:700,cursor:"pointer",marginBottom:16}}>+ New Job</button>
-
-        {showCal&&(
-          <div style={{background:C.card,border:`1px solid ${C.brd}`,borderRadius:12,padding:"20px 18px",marginBottom:16}}>
-            <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:12}}><span style={{fontSize:20}}>📅</span><span style={{fontWeight:700,fontSize:16,color:C.txt}}>Inspection Calendar</span></div>
-            <p style={{fontSize:13,color:C.mut,lineHeight:1.5}}>Calendar view across all jobs coming soon.</p>
-          </div>
-        )}
 
         {loading&&<p style={{textAlign:"center",color:C.mut,padding:40}}>Loading...</p>}
 
@@ -1542,6 +1497,37 @@ function Dashboard({user, onLogout}){
         )}
 
         {!loading&&act.length===0&&(<div style={{textAlign:"center",padding:"60px 20px",color:C.mut}}><div style={{fontSize:48,marginBottom:16}}>📋</div><p style={{fontSize:16,fontWeight:600,color:C.lt,marginBottom:6}}>No jobs yet</p><p style={{fontSize:14}}>Tap "+ New Job" to create your first project</p></div>)}
+
+        {/* ── Shared Scheduling Calendar ── */}
+        {!loading&&(
+          <div style={{background:C.card,border:`1px solid ${C.brd}`,borderRadius:12,padding:"16px 18px",marginBottom:12}}>
+            <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:10}}>
+              <div style={{width:36,height:36,borderRadius:8,background:C.inp,border:`1px solid ${C.brd}`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:18,flexShrink:0}}>📅</div>
+              <div style={{flex:1}}>
+                <div style={{fontWeight:700,fontSize:15,color:C.txt}}>Scheduling Calendar</div>
+                <div style={{fontSize:11,color:C.mut}}>Share with your GC and subs to request inspections</div>
+              </div>
+            </div>
+            {act.some(j=>j.scheduling_enabled)?(
+              <div>
+                <div style={{fontSize:12,color:C.mut,marginBottom:10}}>Jobs with scheduling enabled:</div>
+                {act.filter(j=>j.scheduling_enabled).map(j=>(
+                  <div key={j.id} style={{display:"flex",alignItems:"center",gap:8,padding:"8px 0",borderBottom:`1px solid ${C.brd}`}}>
+                    <div style={{width:8,height:8,borderRadius:"50%",background:C.blu,flexShrink:0}}/>
+                    <span style={{fontSize:13,fontWeight:600,color:C.lt,flex:1}}>{j.name}</span>
+                    <span style={{fontSize:11,color:C.blu,fontWeight:600}}>Active</span>
+                  </div>
+                ))}
+                <div style={{marginTop:12,padding:"10px 14px",background:C.inp,borderRadius:8,border:`1px solid ${C.brd}`}}>
+                  <div style={{fontSize:11,color:C.mut,marginBottom:4}}>Your shared calendar link:</div>
+                  <div style={{fontSize:12,color:C.blu,fontWeight:600,wordBreak:"break-all"}}>mydailyreports.com/schedule/{user?.user_metadata?.full_name?.toLowerCase().replace(/\s+/g,"-")||"inspector"}</div>
+                </div>
+              </div>
+            ):(
+              <div style={{fontSize:13,color:C.mut,lineHeight:1.5}}>Enable Inspection Scheduling on any job to let your GC and subs request inspections through a shared calendar link.</div>
+            )}
+          </div>
+        )}
 
         {/* ── Bottom tiles — two column ── */}
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginTop:4}}>
