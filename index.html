@@ -190,6 +190,24 @@ const db = {
   getTemplatePageUrl(path){
     return `${SB_URL}/storage/v1/object/report-source-docs/${path}`;
   },
+  // Upload preview PDF to temp storage and get a signed URL for viewing
+  async uploadPreviewPdf(userId,jobId,blob){
+    const p=`${userId}/${jobId}/preview_temp.pdf`;
+    let r=await fetch(`${SB_URL}/storage/v1/object/report-source-docs/${p}`,{
+      method:"POST",headers:{apikey:SB_KEY,Authorization:`Bearer ${AUTH_TOKEN||SB_KEY}`,"Content-Type":"application/pdf"},body:blob
+    });
+    if(!r.ok){r=await fetch(`${SB_URL}/storage/v1/object/report-source-docs/${p}`,{
+      method:"PUT",headers:{apikey:SB_KEY,Authorization:`Bearer ${AUTH_TOKEN||SB_KEY}`,"Content-Type":"application/pdf"},body:blob
+    });}
+    // Create a signed URL valid for 1 hour
+    const sr=await fetch(`${SB_URL}/storage/v1/object/sign/report-source-docs/${p}`,{
+      method:"POST",headers:{"Content-Type":"application/json",apikey:SB_KEY,Authorization:`Bearer ${AUTH_TOKEN||SB_KEY}`},
+      body:JSON.stringify({expiresIn:3600})
+    });
+    if(sr.ok){const sd=await sr.json();return `${SB_URL}/storage/v1${sd.signedURL}`;}
+    // Fallback: use authenticated direct URL
+    return `${SB_URL}/storage/v1/object/authenticated/report-source-docs/${p}?token=${AUTH_TOKEN||SB_KEY}`;
+  },
   // Fetch inspection requests for user's jobs in a date range
   async getRequests(userId,startDate,endDate){
     const r=await fetch(`${SB_URL}/rest/v1/inspection_requests?user_id=eq.${userId}&requested_date=gte.${startDate}&requested_date=lte.${endDate}&select=*,jobs(name,site_address)&order=requested_date.asc`,{headers:this._h()});
@@ -991,8 +1009,9 @@ function ReportEditor({job, user, onBack, reportDate}){
       if(draftId){try{const exR=await fetch(`${SB_URL}/rest/v1/reports?select=report_number&id=eq.${draftId}`,{headers:db._h()});const exD=exR.ok?await exR.json():[];if(exD[0]?.report_number)rptNumber=exD[0].report_number;}catch(e){}}
       const rptNum=String(rptNumber).padStart(2,"0");
       const tzDate=new Date().toLocaleDateString("en-US",{month:"2-digit",day:"2-digit",year:"numeric",timeZone:tz}).replace(/\//g,"");
-      // Replace the DR number and date in the original filename pattern — don't add or rearrange anything
-      let baseName=job.report_filename_pattern||("DR_"+rptNum+"_"+job.name.replace(/\s+/g,"_")+"_"+tzDate);
+      // Use the original uploaded filename from the template record as the naming pattern
+      const fnSource=tplRecord.original_filename||job.report_filename_pattern||("DR_"+rptNum+"_"+job.name.replace(/\s+/g,"_")+"_"+tzDate);
+      let baseName=fnSource;
       baseName=baseName.replace(/\.\w+$/,"");
       // Replace first occurrence of a 2-digit number that looks like a DR sequence (after DR or Dr or dr)
       baseName=baseName.replace(/(DR|Dr|dr)(\D*)(\d{2})/, "$1$2"+rptNum);
@@ -1000,59 +1019,16 @@ function ReportEditor({job, user, onBack, reportDate}){
       baseName=baseName.replace(/\d{8}/, tzDate);
       const pdfFilename=baseName+".pdf";
 
-      // ── 7. Build true WYSIWYG preview ──
-      // Hybrid approach: render original template with pdf.js (preserves all visuals),
-      // then draw field values directly on canvas. Photo pages come from the filled PDF.
-      const originalPageCount=pages.length; // template pages before photos were added
-      let previewPages=[];
-      if(window.pdfjsLib){
-        try{
-          // Step A: render original template pages and draw field values on canvas
-          const tplDoc=await window.pdfjsLib.getDocument({data:tplBytesCopy}).promise;
-          for(let pi=1;pi<=tplDoc.numPages;pi++){
-            const pg=await tplDoc.getPage(pi);
-            const scale=2;
-            const vp=pg.getViewport({scale});
-            const cvs=document.createElement("canvas");cvs.width=vp.width;cvs.height=vp.height;
-            const ctx=cvs.getContext("2d");
-            await pg.render({canvasContext:ctx,viewport:vp}).promise;
-            // Draw field values at their coordinates on this page
-            const pageH=pg.getViewport({scale:1}).height;
-            allFields.filter(f=>(f.page||1)===pi&&f.val&&f.x&&f.y).forEach(f=>{
-              const sz=(f.fontSize||10)*scale;
-              ctx.font=sz+"px Helvetica, Arial, sans-serif";
-              ctx.fillStyle="#000000";
-              const drawX=f.x*scale;
-              // pdf-lib uses bottom-up Y, pdf.js canvas uses top-down
-              const drawY=f.y*scale+sz;
-              if(f.multiline&&f.w){
-                const maxW=f.w*scale;
-                const words=f.val.split(" ");let lines=[];let line="";
-                words.forEach(w=>{const test=line?line+" "+w:w;if(ctx.measureText(test).width>maxW&&line){lines.push(line);line=w;}else line=test;});
-                if(line)lines.push(line);
-                lines.forEach((ln,li)=>{ctx.fillText(ln,drawX,drawY+(li*sz*1.2));});
-              }else{
-                ctx.fillText(String(f.val),drawX,drawY);
-              }
-            });
-            previewPages.push(cvs.toDataURL("image/jpeg",0.92));
-            cvs.width=0;cvs.height=0;
-          }
-          // Step B: render photo pages from the filled PDF (pages after original template)
-          const filledDoc=await window.pdfjsLib.getDocument({data:filledPdfBytes.slice(0)}).promise;
-          for(let pi=originalPageCount+1;pi<=filledDoc.numPages;pi++){
-            const pg=await filledDoc.getPage(pi);
-            const vp=pg.getViewport({scale:2});
-            const cvs=document.createElement("canvas");cvs.width=vp.width;cvs.height=vp.height;
-            await pg.render({canvasContext:cvs.getContext("2d"),viewport:vp}).promise;
-            previewPages.push(cvs.toDataURL("image/jpeg",0.92));
-            cvs.width=0;cvs.height=0;
-          }
-        }catch(pjErr){console.error("Preview render error:",pjErr);}
-      }
+      // ── 7. Upload filled PDF to temp storage for preview via browser's native PDF viewer ──
+      let previewUrl=null;
+      try{
+        previewUrl=await db.uploadPreviewPdf(user.id,job.id,pdfBlob);
+      }catch(upErr){console.error("Preview upload error:",upErr);}
+      // Fallback: create a local blob URL if upload fails
+      if(!previewUrl)previewUrl=URL.createObjectURL(pdfBlob);
 
       setPreviewPdf({blob:pdfBlob,base64:pdfBase64,filename:pdfFilename,
-        previewPages:previewPages});
+        previewUrl:previewUrl});
     }catch(e){
       console.error("PDF generation error:",e);
       showToast("Error: "+e.message);
@@ -1122,33 +1098,39 @@ function ReportEditor({job, user, onBack, reportDate}){
       onTouchStart:e=>{swipeState.sx=e.touches[0].clientX;},
       onTouchEnd:e=>{if(e.changedTouches[0].clientX-swipeState.sx>80)setPreviewPdf(null);}
     };
-    const hasPages=previewPdf.previewPages&&previewPdf.previewPages.length>0;
-
     return(
       <div style={{minHeight:"100vh",background:C.bg,color:C.txt,display:"flex",flexDirection:"column"}} {...swipeHandlers}>
         <div style={{display:"flex",alignItems:"center",gap:10,padding:"12px 16px",borderBottom:`1px solid ${C.brd}`,background:C.card}}>
-          <button onClick={()=>setPreviewPdf(null)} style={{background:"none",border:"none",color:C.blu,fontSize:28,cursor:"pointer",padding:"8px 12px",lineHeight:1,borderRadius:8,minWidth:48,minHeight:48,display:"flex",alignItems:"center",justifyContent:"center"}}>←</button>
+          <button onClick={()=>{if(previewPdf.previewUrl&&previewPdf.previewUrl.startsWith("blob:"))URL.revokeObjectURL(previewPdf.previewUrl);setPreviewPdf(null);}} style={{background:"none",border:"none",color:C.blu,fontSize:28,cursor:"pointer",padding:"8px 12px",lineHeight:1,borderRadius:8,minWidth:48,minHeight:48,display:"flex",alignItems:"center",justifyContent:"center"}}>←</button>
           <MDRLogo size={28}/>
           <div style={{flex:1}}>
             <div style={{fontWeight:700,fontSize:17}}>Review Report</div>
             <div style={{fontSize:12,color:C.mut}}>{previewPdf.filename}</div>
           </div>
+          {previewPdf.previewUrl&&<a href={previewPdf.previewUrl} target="_blank" rel="noopener noreferrer" style={{color:C.blu,fontSize:13,fontWeight:600,textDecoration:"none",padding:"8px 12px"}}>Open ↗</a>}
         </div>
-        <div style={{flex:1,overflow:"auto",WebkitOverflowScrolling:"touch",paddingBottom:90}}>
-          <div style={{padding:"12px 16px"}}>
-            {hasPages?previewPdf.previewPages.map((dataUrl,i)=>(
-              <div key={i} style={{marginBottom:12,borderRadius:4,overflow:"hidden",boxShadow:"0 1px 6px rgba(0,0,0,0.4)"}}>
-                <img src={dataUrl} style={{width:"100%",display:"block"}} alt={"Page "+(i+1)}/>
+        <div style={{flex:1,display:"flex",flexDirection:"column",paddingBottom:80}}>
+          {previewPdf.previewUrl?(
+            /iPad|iPhone|iPod/.test(navigator.userAgent)?(
+              <div style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:20,padding:24}}>
+                <div style={{fontSize:48}}>📄</div>
+                <div style={{color:C.lt,fontSize:16,fontWeight:600,textAlign:"center"}}>Your report is ready to review</div>
+                <div style={{color:C.mut,fontSize:13,textAlign:"center"}}>{previewPdf.filename}</div>
+                <a href={previewPdf.previewUrl} target="_blank" rel="noopener noreferrer" style={{display:"inline-block",padding:"14px 32px",background:C.blu,color:"#fff",borderRadius:10,fontSize:15,fontWeight:700,textDecoration:"none"}}>
+                  View Full PDF ↗
+                </a>
               </div>
-            )):(
-              <div style={{background:"#1a1a1a",borderRadius:8,padding:24,textAlign:"center"}}>
-                <span style={{color:C.mut,fontSize:14}}>PDF preview could not be rendered. The report will still be generated correctly.</span>
-              </div>
-            )}
-          </div>
+            ):(
+              <iframe src={previewPdf.previewUrl} style={{flex:1,width:"100%",border:"none",minHeight:"calc(100vh - 160px)"}} title="PDF Preview"/>
+            )
+          ):(
+            <div style={{flex:1,display:"flex",alignItems:"center",justifyContent:"center",padding:24}}>
+              <span style={{color:C.mut,fontSize:14}}>PDF preview could not be loaded. The report will still be generated correctly.</span>
+            </div>
+          )}
         </div>
         <div style={{position:"fixed",bottom:0,left:0,right:0,display:"flex",gap:10,padding:"14px 20px",borderTop:`1px solid ${C.brd}`,background:C.card,zIndex:100}}>
-          <button onClick={()=>setPreviewPdf(null)} style={{flex:1,padding:"14px 0",background:"transparent",border:`1px solid ${C.brd}`,borderRadius:10,color:C.lt,fontSize:15,fontWeight:700,cursor:"pointer"}}>
+          <button onClick={()=>{if(previewPdf.previewUrl&&previewPdf.previewUrl.startsWith("blob:"))URL.revokeObjectURL(previewPdf.previewUrl);setPreviewPdf(null);}} style={{flex:1,padding:"14px 0",background:"transparent",border:`1px solid ${C.brd}`,borderRadius:10,color:C.lt,fontSize:15,fontWeight:700,cursor:"pointer"}}>
             Go Back & Edit
           </button>
           <button onClick={confirmSubmit} disabled={submitting} className="btn-o" style={{flex:1,padding:"14px 0",background:C.org,border:"none",borderRadius:10,color:"#fff",fontSize:15,fontWeight:700,cursor:submitting?"default":"pointer",opacity:submitting?0.6:1}}>
@@ -1334,6 +1316,7 @@ function JobDetail({job, user, onBack, onDeleted}){
   const [newEmail,setNewEmail]=useState("");
   const [teamSaving,setTeamSaving]=useState(false);
 
+  const [tplFilename,setTplFilename]=useState(null);
   const loadReports=useCallback(async()=>{
     try{
       const r=await fetch(`${SB_URL}/rest/v1/reports?select=*&job_id=eq.${job.id}&order=report_date.desc`,{headers:db._h()});
@@ -1341,8 +1324,11 @@ function JobDetail({job, user, onBack, onDeleted}){
     }catch(e){console.error(e);}
     finally{setLoading(false);}
   },[job.id]);
+  const loadTplFilename=useCallback(async()=>{
+    try{const t=await db.getTemplate(job.id);if(t&&t.original_filename)setTplFilename(t.original_filename);}catch(e){}
+  },[job.id]);
 
-  useEffect(()=>{loadReports();},[loadReports]);
+  useEffect(()=>{loadReports();loadTplFilename();},[loadReports,loadTplFilename]);
 
   const tz=Intl.DateTimeFormat().resolvedOptions().timeZone;
   const today=new Date().toLocaleDateString("en-CA",{timeZone:tz});
@@ -1354,6 +1340,15 @@ function JobDetail({job, user, onBack, onDeleted}){
 
   // Track if user has started today's report this session
   const [reportStarted,setReportStarted]=useState(false);
+  // Build display filename from template's original_filename pattern
+  const buildReportName=(num,dateStr)=>{
+    const padNum=String(num).padStart(2,"0");
+    const src=tplFilename||job.report_filename_pattern||("DR_"+padNum+"_"+dateStr);
+    let n=src.replace(/\.[^.]+$/,"");
+    n=n.replace(/(DR|Dr|dr)(\D*)(\d{2})/,"$1$2"+padNum);
+    n=n.replace(/\d{8}/,dateStr);
+    return n;
+  };
 
   const doDelete=async()=>{
     setDeleting(true);
@@ -1458,7 +1453,7 @@ function JobDetail({job, user, onBack, onDeleted}){
           {working.length===0?(
             <div style={{textAlign:"center",padding:"16px 0",color:C.mut,fontSize:13}}>No drafts in progress</div>
           ):(
-            working.map((r,i)=>{const wNum=String(r.report_number||1).padStart(2,"0");const wDate=new Date(r.report_date+"T12:00:00").toLocaleDateString("en-US",{month:"2-digit",day:"2-digit",year:"numeric",timeZone:tz}).replace(/\//g,"");let rptName=job.report_filename_pattern||("DR_"+wNum+"_"+wDate);rptName=rptName.replace(/\.\w+$/,"").replace(/(DR|Dr|dr)(\D*)(\d{2})/,"$1$2"+wNum).replace(/\d{8}/,wDate);return(
+            working.map((r,i)=>{const wDate=new Date(r.report_date+"T12:00:00").toLocaleDateString("en-US",{month:"2-digit",day:"2-digit",year:"numeric",timeZone:tz}).replace(/\//g,"");const rptName=buildReportName(r.report_number||1,wDate);return(
               <button key={r.id} onClick={()=>openReport(r.report_date)} style={{width:"100%",display:"flex",alignItems:"center",gap:12,padding:"14px 16px",background:"transparent",border:"none",borderBottom:i<working.length-1?`1px solid ${C.brd}`:"none",cursor:"pointer",textAlign:"left"}}>
                 <div style={{width:10,height:10,borderRadius:"50%",background:C.org,flexShrink:0}}/>
                 <div style={{flex:1,minWidth:0}}>
@@ -1478,9 +1473,7 @@ function JobDetail({job, user, onBack, onDeleted}){
           ):(
             submitted.map((r,i)=>{
               const rptDate=new Date(r.report_date+"T12:00:00").toLocaleDateString("en-US",{month:"2-digit",day:"2-digit",year:"numeric",timeZone:tz}).replace(/\//g,"");
-              const rptNum=String(r.report_number||i+1).padStart(2,"0");
-              let rptName=job.report_filename_pattern||("DR_"+rptNum+"_"+rptDate);
-              rptName=rptName.replace(/\.\w+$/,"").replace(/(DR|Dr|dr)(\D*)(\d{2})/,"$1$2"+rptNum).replace(/\d{8}/,rptDate);
+              const rptName=buildReportName(r.report_number||i+1,rptDate);
               return(
               <button key={r.id} onClick={()=>openReport(r.report_date)} style={{width:"100%",display:"flex",alignItems:"center",gap:12,padding:"14px 16px",marginBottom:i<submitted.length-1?0:0,borderBottom:i<submitted.length-1?`1px solid ${C.brd}`:"none",background:"transparent",border:"none",borderBottomWidth:i<submitted.length-1?1:0,borderBottomStyle:"solid",borderBottomColor:C.brd,cursor:"pointer",textAlign:"left"}}>
                 <div style={{width:10,height:10,borderRadius:"50%",background:C.ok,flexShrink:0}}/>
