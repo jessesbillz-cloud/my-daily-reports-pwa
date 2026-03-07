@@ -190,24 +190,6 @@ const db = {
   getTemplatePageUrl(path){
     return `${SB_URL}/storage/v1/object/report-source-docs/${path}`;
   },
-  // Upload preview PDF to temp storage and get a signed URL for viewing
-  async uploadPreviewPdf(userId,jobId,blob){
-    const p=`${userId}/${jobId}/preview_temp.pdf`;
-    let r=await fetch(`${SB_URL}/storage/v1/object/report-source-docs/${p}`,{
-      method:"POST",headers:{apikey:SB_KEY,Authorization:`Bearer ${AUTH_TOKEN||SB_KEY}`,"Content-Type":"application/pdf"},body:blob
-    });
-    if(!r.ok){r=await fetch(`${SB_URL}/storage/v1/object/report-source-docs/${p}`,{
-      method:"PUT",headers:{apikey:SB_KEY,Authorization:`Bearer ${AUTH_TOKEN||SB_KEY}`,"Content-Type":"application/pdf"},body:blob
-    });}
-    // Create a signed URL valid for 1 hour
-    const sr=await fetch(`${SB_URL}/storage/v1/object/sign/report-source-docs/${p}`,{
-      method:"POST",headers:{"Content-Type":"application/json",apikey:SB_KEY,Authorization:`Bearer ${AUTH_TOKEN||SB_KEY}`},
-      body:JSON.stringify({expiresIn:3600})
-    });
-    if(sr.ok){const sd=await sr.json();return `${SB_URL}/storage/v1${sd.signedURL}`;}
-    // Fallback: use authenticated direct URL
-    return `${SB_URL}/storage/v1/object/authenticated/report-source-docs/${p}?token=${AUTH_TOKEN||SB_KEY}`;
-  },
   // Fetch inspection requests for user's jobs in a date range
   async getRequests(userId,startDate,endDate){
     const r=await fetch(`${SB_URL}/rest/v1/inspection_requests?user_id=eq.${userId}&requested_date=gte.${startDate}&requested_date=lte.${endDate}&select=*,jobs(name,site_address)&order=requested_date.asc`,{headers:this._h()});
@@ -922,13 +904,116 @@ function ReportEditor({job, user, onBack, reportDate}){
   };
 
   const [submitting,setSubmitting]=useState(false);
-  const [previewPdf,setPreviewPdf]=useState(null); // {blob, base64, filename}
+  const [viewingReport,setViewingReport]=useState(null); // array of page image data URLs
   const [toast,setToast]=useState("");
 
   const showToast=(msg)=>{setToast(msg);setTimeout(()=>setToast(""),2500);};
 
-  // Generate the filled PDF + build preview data
-  const generatePdf=async()=>{
+  // Shared: build editable field values only — locked fields are already on the template
+  const buildEditableFields=()=>editFields.map(f=>({...f,val:vals[f.name]||""}));
+
+  // Shared: draw fields + notes onto a canvas context (for View Report preview)
+  const drawFieldsOnCanvas=(ctx,fields,pageNum,scale,pageH)=>{
+    const notesFieldNames=["notes","ior notes","observations","comments","work observed","remarks","daily notes"];
+    let notesField=null;
+    fields.filter(f=>(f.page||1)===pageNum&&f.val&&f.x&&f.y).forEach(f=>{
+      if(notesFieldNames.includes(f.name.toLowerCase()))notesField=f;
+      const sz=(f.fontSize||10)*scale;
+      ctx.font=sz+"px Helvetica, Arial, sans-serif";
+      ctx.fillStyle="#000000";
+      const drawX=f.x*scale;
+      const drawY=f.y*scale+sz;
+      if(f.multiline&&f.w){
+        const maxW=f.w*scale;
+        const words=f.val.split(" ");let lines=[];let line="";
+        words.forEach(w=>{const test=line?line+" "+w:w;if(ctx.measureText(test).width>maxW&&line){lines.push(line);line=w;}else line=test;});
+        if(line)lines.push(line);
+        lines.forEach((ln,li)=>{ctx.fillText(ln,drawX,drawY+(li*sz*1.2));});
+      }else{
+        ctx.fillText(String(f.val),drawX,drawY);
+      }
+    });
+    return notesField;
+  };
+
+  // View Report — renders original template with pdf.js, overlays field values + notes on canvas
+  const viewReport=async()=>{
+    setSubmitting(true);
+    try{
+      const tplRecord=await db.getTemplate(job.id);
+      if(!tplRecord||!tplRecord.storage_path)throw new Error("No template found.");
+      const tplResp=await fetch(`${SB_URL}/storage/v1/object/report-source-docs/${tplRecord.storage_path}`,{
+        headers:{apikey:SB_KEY,Authorization:`Bearer ${AUTH_TOKEN||SB_KEY}`}
+      });
+      if(!tplResp.ok)throw new Error("Could not download template.");
+      const tplBytes=await tplResp.arrayBuffer();
+      if(!window.pdfjsLib)throw new Error("PDF viewer not loaded.");
+      const allFields=buildEditableFields();
+      const pjDoc=await window.pdfjsLib.getDocument({data:tplBytes}).promise;
+      const previewPages=[];
+      const scale=2;
+      for(let pi=1;pi<=pjDoc.numPages;pi++){
+        const pg=await pjDoc.getPage(pi);
+        const vp=pg.getViewport({scale});
+        const cvs=document.createElement("canvas");cvs.width=vp.width;cvs.height=vp.height;
+        const ctx=cvs.getContext("2d");
+        await pg.render({canvasContext:ctx,viewport:vp}).promise;
+        // Draw field values on this page
+        const pageH=pg.getViewport({scale:1}).height;
+        const notesField=drawFieldsOnCanvas(ctx,allFields,pi,scale,pageH);
+        // Draw freeform notes as bullets on the page that has the notes field
+        if(notes&&notes.trim()&&notesField&&(notesField.page||1)===pi){
+          const nSz=(notesField.fontSize||9)*scale;
+          const nX=notesField.x*scale;
+          const nW=notesField.w*scale;
+          let curY=notesField.y*scale+nSz;
+          ctx.font=nSz+"px Helvetica, Arial, sans-serif";
+          ctx.fillStyle="#000000";
+          notes.trim().split("\n").filter(l=>l.trim()).forEach(line=>{
+            const bullet="• "+line.trim();
+            const words=bullet.split(" ");let wrapped=[];let cur="";
+            words.forEach(w=>{const test=cur?cur+" "+w:w;if(ctx.measureText(test).width>nW&&cur){wrapped.push(cur);cur=w;}else cur=test;});
+            if(cur)wrapped.push(cur);
+            wrapped.forEach(wl=>{ctx.fillText(wl,nX,curY);curY+=nSz*1.3;});
+          });
+        }
+        previewPages.push(cvs.toDataURL("image/jpeg",0.92));
+        cvs.width=0;cvs.height=0;
+      }
+      // Render photos as an additional preview page
+      if(photos.length>0){
+        const cols=parseInt(photoLayout)||2;
+        const pgW=612*scale;const pgH=792*scale;
+        const cvs=document.createElement("canvas");cvs.width=pgW;cvs.height=pgH;
+        const ctx=cvs.getContext("2d");
+        ctx.fillStyle="#ffffff";ctx.fillRect(0,0,pgW,pgH);
+        ctx.fillStyle="#666666";ctx.font=(12*scale)+"px Helvetica, Arial, sans-serif";
+        ctx.fillText("Photos — "+job.name,36*scale,40*scale);
+        const imgW=(612-72-(cols-1)*12)/cols*scale;const imgH=imgW*0.75;
+        let loaded=0;
+        for(let i=0;i<photos.length;i++){
+          try{
+            const src=photos[i].src||photos[i];
+            const im=new Image();
+            await new Promise((res,rej)=>{im.onload=res;im.onerror=rej;im.src=src;});
+            const slot=i%cols;const row=Math.floor(i/cols);
+            const xPos=36*scale+slot*(imgW+12*scale);const yPos=60*scale+(row*(imgH+12*scale));
+            ctx.drawImage(im,xPos,yPos,imgW,imgH);
+            loaded++;
+          }catch(e){}
+        }
+        if(loaded>0)previewPages.push(cvs.toDataURL("image/jpeg",0.92));
+        cvs.width=0;cvs.height=0;
+      }
+      setViewingReport(previewPages);
+    }catch(e){
+      console.error("View report error:",e);
+      showToast("Error: "+e.message);
+    }finally{setSubmitting(false);}
+  };
+
+  // Submit Report — generates filled PDF with pdf-lib, uploads, emails, all in one step
+  const submitReport=async()=>{
     setSubmitting(true);
     try{
       const {PDFDocument,rgb,StandardFonts}=PDFLib;
@@ -941,13 +1026,15 @@ function ReportEditor({job, user, onBack, reportDate}){
       });
       if(!tplResp.ok)throw new Error("Could not download template file.");
       const tplBytes=await tplResp.arrayBuffer();
-      const tplBytesCopy=tplBytes.slice(0); // Save copy before pdf-lib consumes the buffer
       const isPdfTemplate=tplRecord.file_type==="pdf";
 
-      // ── 2. Load template with pdf-lib ──
+      // ── 2. Load template — use copyPages to preserve original visual content ──
       let pdfDoc;
       if(isPdfTemplate){
-        pdfDoc=await PDFDocument.load(tplBytes,{ignoreEncryption:true});
+        const srcDoc=await PDFDocument.load(tplBytes,{ignoreEncryption:true});
+        pdfDoc=await PDFDocument.create();
+        const copiedPages=await pdfDoc.copyPages(srcDoc,srcDoc.getPageIndices());
+        copiedPages.forEach(p=>pdfDoc.addPage(p));
       }else{
         pdfDoc=await PDFDocument.create();pdfDoc.addPage([612,792]);
       }
@@ -955,18 +1042,13 @@ function ReportEditor({job, user, onBack, reportDate}){
       const pages=pdfDoc.getPages();
 
       // ── 3. Build field values ──
-      const allFields=[
-        ...lockFields.map(f=>({...f,val:lockVals[f.name]||f.value||""})),
-        ...editFields.map(f=>({...f,val:vals[f.name]||""}))
-      ];
+      const allFields=buildEditableFields();
 
       // ── 4. Draw field values onto template ──
-      // Identify notes-type fields so we can merge the freeform notes textarea into them
       const notesFieldNames=["notes","ior notes","observations","comments","work observed","remarks","daily notes"];
       let notesField=null;
       allFields.forEach(f=>{
         if(!f.x||!f.y||!f.val)return;
-        // Track any notes-type field for merging freeform notes later
         if(notesFieldNames.includes(f.name.toLowerCase()))notesField=f;
         const pageIdx=(f.page||1)-1;
         if(pageIdx<0||pageIdx>=pages.length)return;
@@ -982,11 +1064,10 @@ function ReportEditor({job, user, onBack, reportDate}){
         }
       });
 
-      // ── 4b. Draw freeform notes as bullet points into the notes area ──
+      // ── 4b. Draw freeform notes as bullet points ──
       if(notes&&notes.trim()){
         const noteLines=notes.trim().split("\n").filter(l=>l.trim());
         if(noteLines.length>0){
-          // Use the notes field coordinates if available, otherwise place near bottom of page 1
           const nPage=(notesField?.page||1)-1;
           const nX=(notesField?.x||72);
           const nY=(notesField?.y||500);
@@ -994,11 +1075,9 @@ function ReportEditor({job, user, onBack, reportDate}){
           const nSz=(notesField?.fontSize||9);
           const pg=pages[Math.min(nPage,pages.length-1)];
           const pgH=pg.getHeight();
-          // Start drawing from the top of the notes area
           let curY=pgH-nY-nSz;
           noteLines.forEach(line=>{
             const bullet="• "+line.trim();
-            // Word-wrap within the notes column width
             const words=bullet.split(" ");let wrapped=[];let cur="";
             words.forEach(w=>{const test=cur?cur+" "+w:w;if(font.widthOfTextAtSize(test,nSz)>nW&&cur){wrapped.push(cur);cur=w;}else cur=test;});
             if(cur)wrapped.push(cur);
@@ -1010,7 +1089,7 @@ function ReportEditor({job, user, onBack, reportDate}){
         }
       }
 
-      // ── 5. Photos — add on next page after template pages ──
+      // ── 5. Photos on new page ──
       if(photos.length>0){
         const cols=parseInt(photoLayout)||2;
         const imgW=(612-72-(cols-1)*12)/cols;const imgH=imgW*0.75;
@@ -1039,69 +1118,40 @@ function ReportEditor({job, user, onBack, reportDate}){
       const uint8=new Uint8Array(filledPdfBytes);
       let binary="";for(let i=0;i<uint8.length;i++)binary+=String.fromCharCode(uint8[i]);
       const pdfBase64=btoa(binary);
-      // Get correct report number — count existing reports for this job + 1
+
+      // ── 7. Build filename ──
       let rptNumber=1;
       try{const cntR=await fetch(`${SB_URL}/rest/v1/reports?select=id&job_id=eq.${job.id}`,{headers:db._h()});const allR=cntR.ok?await cntR.json():[];rptNumber=allR.length+1;}catch(e){}
-      // If this report already exists (editing), use its existing number
       if(draftId){try{const exR=await fetch(`${SB_URL}/rest/v1/reports?select=report_number&id=eq.${draftId}`,{headers:db._h()});const exD=exR.ok?await exR.json():[];if(exD[0]?.report_number)rptNumber=exD[0].report_number;}catch(e){}}
       const rptNum=String(rptNumber).padStart(2,"0");
       const tzDate=new Date().toLocaleDateString("en-US",{month:"2-digit",day:"2-digit",year:"numeric",timeZone:tz}).replace(/\//g,"");
-      // Use the original uploaded filename — only swap in the sequential number and today's date
       const fnSource=tplRecord.original_filename||job.report_filename_pattern||job.name||"Report";
-      let baseName=fnSource.replace(/\.[^.]+$/,""); // strip extension
-      // Replace sequential number: find first standalone 1-2 digit number (not part of a longer number)
+      let baseName=fnSource.replace(/\.[^.]+$/,"");
       baseName=baseName.replace(/(?<!\d)\d{1,2}(?!\d)/,rptNum);
-      // Replace date: find first 6+ digit sequence that looks like a date (MMDDYYYY, MMDDYY, etc.)
       baseName=baseName.replace(/\d{6,8}/,tzDate);
       const pdfFilename=baseName+".pdf";
 
-      // ── 7. Upload filled PDF to temp storage for preview via browser's native PDF viewer ──
-      let previewUrl=null;
-      try{
-        previewUrl=await db.uploadPreviewPdf(user.id,job.id,pdfBlob);
-      }catch(upErr){console.error("Preview upload error:",upErr);}
-      // Fallback: create a local blob URL if upload fails
-      if(!previewUrl)previewUrl=URL.createObjectURL(pdfBlob);
-
-      setPreviewPdf({blob:pdfBlob,base64:pdfBase64,filename:pdfFilename,
-        previewUrl:previewUrl});
-    }catch(e){
-      console.error("PDF generation error:",e);
-      showToast("Error: "+e.message);
-    }finally{setSubmitting(false);}
-  };
-
-  // Final submit — save, upload, email
-  const confirmSubmit=async()=>{
-    if(!previewPdf)return;
-    setSubmitting(true);
-    try{
-      // Save report as submitted
+      // ── 8. Save report, upload PDF, send email — all at once ──
       const reportContent={vals,lockVals,notes,photos,photoLayout,lockFields,editFields};
       await db.saveReport({
         job_id:job.id,user_id:user.id,report_date:todayISO,status:"submitted",
         content:JSON.stringify(reportContent),updated_at:new Date().toISOString()
       });
 
-      // Upload filled PDF to storage
-      const storagePath=`${user.id}/${job.id}/reports/${previewPdf.filename}`;
+      const storagePath=`${user.id}/${job.id}/reports/${pdfFilename}`;
       let upR=await fetch(`${SB_URL}/storage/v1/object/report-source-docs/${storagePath}`,{
-        method:"POST",headers:{apikey:SB_KEY,Authorization:`Bearer ${AUTH_TOKEN||SB_KEY}`,"Content-Type":"application/pdf"},
-        body:previewPdf.blob
+        method:"POST",headers:{apikey:SB_KEY,Authorization:`Bearer ${AUTH_TOKEN||SB_KEY}`,"Content-Type":"application/pdf"},body:pdfBlob
       });
       if(!upR.ok){await fetch(`${SB_URL}/storage/v1/object/report-source-docs/${storagePath}`,{
-        method:"PUT",headers:{apikey:SB_KEY,Authorization:`Bearer ${AUTH_TOKEN||SB_KEY}`,"Content-Type":"application/pdf"},
-        body:previewPdf.blob
+        method:"PUT",headers:{apikey:SB_KEY,Authorization:`Bearer ${AUTH_TOKEN||SB_KEY}`,"Content-Type":"application/pdf"},body:pdfBlob
       });}
 
-      // Build email body
       const userName=user.user_metadata?.full_name||user.email?.split("@")[0]||"Inspector";
       const photoNote=photos.length>0?`<p style="color:#555;font-size:14px;margin:12px 0 0;">${photos.length} site photo${photos.length>1?"s":""} included in the attached PDF.</p>`:"";
       const fieldSummary=editFields.filter(f=>vals[f.name]).map(f=>`<tr><td style="padding:4px 12px 4px 0;color:#888;font-size:13px;white-space:nowrap;">${f.name}</td><td style="padding:4px 0;color:#333;font-size:13px;">${vals[f.name]}</td></tr>`).join("");
       const summaryTable=fieldSummary?`<table style="margin:16px 0;border-collapse:collapse;">${fieldSummary}</table>`:"";
       const emailHtml=`<div style="font-family:-apple-system,sans-serif;max-width:600px;margin:0 auto;"><div style="background:#e8742a;padding:20px 24px;border-radius:8px 8px 0 0;"><h1 style="color:#fff;margin:0;font-size:20px;">My Daily Reports</h1></div><div style="background:#f9f9f9;padding:24px;border:1px solid #e0e0e0;border-top:none;border-radius:0 0 8px 8px;"><p style="color:#333;font-size:16px;line-height:1.6;margin:0 0 8px;">Hi,</p><p style="color:#333;font-size:15px;line-height:1.6;margin:0 0 16px;">${userName} has submitted the daily field report for <strong>${job.name}</strong> on ${todayDisplay}.</p>${summaryTable}<p style="color:#555;font-size:14px;margin:16px 0 0;">The full PDF report is attached to this email.${photoNote?"":" No site photos were included."}</p>${photoNote}</div><p style="color:#999;font-size:11px;text-align:center;margin-top:16px;">Sent via My Daily Reports &bull; mydailyreports.com</p></div>`;
 
-      // Send email
       const teamEmails=job.team_emails||[];
       const userEmail=user.email;
       const recipients=[...new Set([userEmail,...teamEmails])].filter(Boolean);
@@ -1109,7 +1159,7 @@ function ReportEditor({job, user, onBack, reportDate}){
         try{
           await fetch(`${SB_URL}/functions/v1/send-report`,{
             method:"POST",headers:{"Content-Type":"application/json",Authorization:`Bearer ${SB_KEY}`,apikey:SB_KEY},
-            body:JSON.stringify({to:recipients,subject:`${job.name} — Daily Report ${todayDisplay}`,html_body:emailHtml,pdf_base64:previewPdf.base64,pdf_filename:previewPdf.filename})
+            body:JSON.stringify({to:recipients,subject:`${job.name} — Daily Report ${todayDisplay}`,html_body:emailHtml,pdf_base64:pdfBase64,pdf_filename:pdfFilename})
           });
         }catch(emailErr){console.error("Email send error:",emailErr);}
       }
@@ -1127,53 +1177,30 @@ function ReportEditor({job, user, onBack, reportDate}){
 
   if(loadingDraft)return(<div style={{minHeight:"100vh",background:C.bg,display:"flex",alignItems:"center",justifyContent:"center"}}><p style={{color:C.mut}}>Loading report...</p></div>);
 
-  // ── PDF Preview Screen ──
-  if(previewPdf){
-    const swipeState={sx:0};
-    const swipeHandlers={
-      onTouchStart:e=>{swipeState.sx=e.touches[0].clientX;},
-      onTouchEnd:e=>{if(e.changedTouches[0].clientX-swipeState.sx>80)setPreviewPdf(null);}
-    };
+  // ── View Report Screen (canvas-rendered preview of template + field values) ──
+  if(viewingReport){
     return(
-      <div style={{minHeight:"100vh",background:C.bg,color:C.txt,display:"flex",flexDirection:"column"}} {...swipeHandlers}>
+      <div style={{minHeight:"100vh",background:C.bg,color:C.txt,display:"flex",flexDirection:"column"}}>
         <div style={{display:"flex",alignItems:"center",gap:10,padding:"12px 16px",borderBottom:`1px solid ${C.brd}`,background:C.card}}>
-          <button onClick={()=>{if(previewPdf.previewUrl&&previewPdf.previewUrl.startsWith("blob:"))URL.revokeObjectURL(previewPdf.previewUrl);setPreviewPdf(null);}} style={{background:"none",border:"none",color:C.blu,fontSize:28,cursor:"pointer",padding:"8px 12px",lineHeight:1,borderRadius:8,minWidth:48,minHeight:48,display:"flex",alignItems:"center",justifyContent:"center"}}>←</button>
+          <button onClick={()=>setViewingReport(null)} style={{background:"none",border:"none",color:C.blu,fontSize:28,cursor:"pointer",padding:"8px 12px",lineHeight:1,borderRadius:8,minWidth:48,minHeight:48,display:"flex",alignItems:"center",justifyContent:"center"}}>←</button>
           <MDRLogo size={28}/>
           <div style={{flex:1}}>
-            <div style={{fontWeight:700,fontSize:17}}>Review Report</div>
-            <div style={{fontSize:12,color:C.mut}}>{previewPdf.filename}</div>
+            <div style={{fontWeight:700,fontSize:17}}>Report Preview</div>
+            <div style={{fontSize:12,color:C.mut}}>This is how your report will look</div>
           </div>
-          {previewPdf.previewUrl&&<a href={previewPdf.previewUrl} target="_blank" rel="noopener noreferrer" style={{color:C.blu,fontSize:13,fontWeight:600,textDecoration:"none",padding:"8px 12px"}}>Open ↗</a>}
         </div>
-        <div style={{flex:1,display:"flex",flexDirection:"column",paddingBottom:80}}>
-          {previewPdf.previewUrl?(
-            /iPad|iPhone|iPod/.test(navigator.userAgent)?(
-              <div style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:20,padding:24}}>
-                <div style={{fontSize:48}}>📄</div>
-                <div style={{color:C.lt,fontSize:16,fontWeight:600,textAlign:"center"}}>Your report is ready to review</div>
-                <div style={{color:C.mut,fontSize:13,textAlign:"center"}}>{previewPdf.filename}</div>
-                <a href={previewPdf.previewUrl} target="_blank" rel="noopener noreferrer" style={{display:"inline-block",padding:"14px 32px",background:C.blu,color:"#fff",borderRadius:10,fontSize:15,fontWeight:700,textDecoration:"none"}}>
-                  View Full PDF ↗
-                </a>
-              </div>
-            ):(
-              <iframe src={previewPdf.previewUrl} style={{flex:1,width:"100%",border:"none",minHeight:"calc(100vh - 160px)"}} title="PDF Preview"/>
-            )
-          ):(
-            <div style={{flex:1,display:"flex",alignItems:"center",justifyContent:"center",padding:24}}>
-              <span style={{color:C.mut,fontSize:14}}>PDF preview could not be loaded. The report will still be generated correctly.</span>
+        <div style={{flex:1,overflow:"auto",WebkitOverflowScrolling:"touch",padding:"12px 16px"}}>
+          {viewingReport.map((dataUrl,i)=>(
+            <div key={i} style={{marginBottom:12,borderRadius:4,overflow:"hidden",boxShadow:"0 1px 6px rgba(0,0,0,0.4)"}}>
+              <img src={dataUrl} style={{width:"100%",display:"block"}} alt={"Page "+(i+1)}/>
             </div>
-          )}
+          ))}
         </div>
-        <div style={{position:"fixed",bottom:0,left:0,right:0,display:"flex",gap:10,padding:"14px 20px",borderTop:`1px solid ${C.brd}`,background:C.card,zIndex:100}}>
-          <button onClick={()=>{if(previewPdf.previewUrl&&previewPdf.previewUrl.startsWith("blob:"))URL.revokeObjectURL(previewPdf.previewUrl);setPreviewPdf(null);}} style={{flex:1,padding:"14px 0",background:"transparent",border:`1px solid ${C.brd}`,borderRadius:10,color:C.lt,fontSize:15,fontWeight:700,cursor:"pointer"}}>
-            Go Back & Edit
-          </button>
-          <button onClick={confirmSubmit} disabled={submitting} className="btn-o" style={{flex:1,padding:"14px 0",background:C.org,border:"none",borderRadius:10,color:"#fff",fontSize:15,fontWeight:700,cursor:submitting?"default":"pointer",opacity:submitting?0.6:1}}>
-            {submitting?"Sending...":"Submit & Send"}
+        <div style={{position:"fixed",bottom:0,left:0,right:0,padding:"14px 20px",borderTop:`1px solid ${C.brd}`,background:C.card,zIndex:100}}>
+          <button onClick={()=>setViewingReport(null)} style={{width:"100%",padding:"14px 0",background:C.blu,border:"none",borderRadius:10,color:"#fff",fontSize:15,fontWeight:700,cursor:"pointer"}}>
+            Back to Editing
           </button>
         </div>
-        {toast&&<div style={{position:"fixed",bottom:80,left:"50%",transform:"translateX(-50%)",background:C.card,border:`1px solid ${C.ok}`,borderRadius:10,padding:"10px 20px",fontSize:14,fontWeight:600,color:C.ok,zIndex:9999}}>{toast}</div>}
       </div>
     );
   }
@@ -1317,14 +1344,19 @@ function ReportEditor({job, user, onBack, reportDate}){
         </div>
 
         {/* ── Action buttons ── */}
-        <div style={{display:"flex",gap:10,marginBottom:20}}>
-          {reportStatus!=="submitted"&&(
-            <button onClick={saveWorking} disabled={saving} className="btn-o" style={{flex:1,padding:"14px 0",background:C.blu,border:"none",borderRadius:10,color:"#fff",fontSize:15,fontWeight:700,cursor:saving?"default":"pointer",opacity:saving?0.6:1}}>
-              {saving?"Saving...":"Save Working Copy"}
+        <div style={{display:"flex",flexDirection:"column",gap:10,marginBottom:20}}>
+          <div style={{display:"flex",gap:10}}>
+            {reportStatus!=="submitted"&&(
+              <button onClick={saveWorking} disabled={saving||submitting} className="btn-o" style={{flex:1,padding:"14px 0",background:C.blu,border:"none",borderRadius:10,color:"#fff",fontSize:15,fontWeight:700,cursor:saving?"default":"pointer",opacity:saving?0.6:1}}>
+                {saving?"Saving...":"Save Working Copy"}
+              </button>
+            )}
+            <button onClick={viewReport} disabled={submitting} style={{flex:1,padding:"14px 0",background:"transparent",border:`1px solid ${C.brd}`,borderRadius:10,color:C.lt,fontSize:15,fontWeight:700,cursor:submitting?"default":"pointer",opacity:submitting?0.6:1}}>
+              {submitting?"Loading...":"View Report"}
             </button>
-          )}
-          <button onClick={generatePdf} disabled={submitting} className="btn-o" style={{flex:1,padding:"14px 0",background:C.org,border:`1px solid ${C.blu}`,borderRadius:10,color:"#fff",fontSize:15,fontWeight:700,cursor:submitting?"default":"pointer",opacity:submitting?0.6:1}}>
-            {submitting?"Generating PDF...":reportStatus==="submitted"?"Update & Resubmit":"Submit Report"}
+          </div>
+          <button onClick={submitReport} disabled={submitting} className="btn-o" style={{width:"100%",padding:"14px 0",background:C.org,border:"none",borderRadius:10,color:"#fff",fontSize:15,fontWeight:700,cursor:submitting?"default":"pointer",opacity:submitting?0.6:1}}>
+            {submitting?"Submitting...":reportStatus==="submitted"?"Update & Resubmit":"Submit Report"}
           </button>
         </div>
       </div>
