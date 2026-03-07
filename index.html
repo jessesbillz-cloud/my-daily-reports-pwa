@@ -123,13 +123,13 @@ const db = {
     await fetch(`${SB_URL}/rest/v1/profiles?id=eq.${userId}`,{method:"DELETE",headers:this._h()});
     return true;
   },
-  // Save or update a working copy / draft report
+  // Save or update a report (works for both working_copy and submitted)
   async saveReport(d){
-    // Check if draft exists for this job+date
-    const chk=await fetch(`${SB_URL}/rest/v1/reports?select=id&job_id=eq.${d.job_id}&report_date=eq.${d.report_date}&status=eq.working_copy`,{headers:this._h()});
+    // Check if ANY report exists for this job+date (regardless of status)
+    const chk=await fetch(`${SB_URL}/rest/v1/reports?select=id,status&job_id=eq.${d.job_id}&report_date=eq.${d.report_date}&limit=1`,{headers:this._h()});
     const existing=chk.ok?await chk.json():[];
     if(existing.length>0){
-      // Update existing draft
+      // Update existing report
       const r=await fetch(`${SB_URL}/rest/v1/reports?id=eq.${existing[0].id}`,{method:"PATCH",headers:this._h(),body:JSON.stringify({...d,updated_at:new Date().toISOString()})});
       if(!r.ok){const e=await r.json();throw new Error(e.message||"Save failed");}
       return(await r.json())[0];
@@ -138,15 +138,15 @@ const db = {
       const cntR=await fetch(`${SB_URL}/rest/v1/reports?select=id&job_id=eq.${d.job_id}`,{headers:this._h()});
       const allRpts=cntR.ok?await cntR.json():[];
       d.report_number=allRpts.length+1;
-      // Create new draft
+      // Create new report
       const r=await fetch(`${SB_URL}/rest/v1/reports`,{method:"POST",headers:this._h(),body:JSON.stringify(d)});
       if(!r.ok){const e=await r.json();throw new Error(e.message||"Save failed");}
       return(await r.json())[0];
     }
   },
-  // Get draft report for a job + date
-  async getDraft(jobId,date){
-    const r=await fetch(`${SB_URL}/rest/v1/reports?select=*&job_id=eq.${jobId}&report_date=eq.${date}&status=eq.working_copy&limit=1`,{headers:this._h()});
+  // Get today's report for a job + date (any status)
+  async getReport(jobId,date){
+    const r=await fetch(`${SB_URL}/rest/v1/reports?select=*&job_id=eq.${jobId}&report_date=eq.${date}&limit=1`,{headers:this._h()});
     if(!r.ok)return null;
     const d=await r.json();
     return d[0]||null;
@@ -741,23 +741,27 @@ function ReportEditor({job, user, onBack}){
   const [photoLayout,setPhotoLayout]=useState("2"); // "1","2","4"
   const photoRef=useRef(null);
 
-  // Load existing draft on mount
+  const [reportStatus,setReportStatus]=useState(null);
+  // Load existing report on mount (works for both working_copy and submitted)
   useEffect(()=>{
     (async()=>{
       try{
-        const draft=await db.getDraft(job.id,todayISO);
-        if(draft&&draft.content){
-          const c=typeof draft.content==="string"?JSON.parse(draft.content):draft.content;
-          if(c.vals)setVals(p=>({...p,...c.vals}));
-          if(c.lockVals)setLockVals(p=>({...p,...c.lockVals}));
-          if(c.notes)setNotes(c.notes);
-          if(c.photos)setPhotos(c.photos);
-          if(c.photoLayout)setPhotoLayout(c.photoLayout);
-          if(c.lockFields)setLockFields(c.lockFields);
-          if(c.editFields)setEditFields(c.editFields);
-          setDraftId(draft.id);
+        const rpt=await db.getReport(job.id,todayISO);
+        if(rpt){
+          setReportStatus(rpt.status);
+          setDraftId(rpt.id);
+          if(rpt.content){
+            const c=typeof rpt.content==="string"?JSON.parse(rpt.content):rpt.content;
+            if(c.vals)setVals(p=>({...p,...c.vals}));
+            if(c.lockVals)setLockVals(p=>({...p,...c.lockVals}));
+            if(c.notes)setNotes(c.notes);
+            if(c.photos)setPhotos(c.photos);
+            if(c.photoLayout)setPhotoLayout(c.photoLayout);
+            if(c.lockFields)setLockFields(c.lockFields);
+            if(c.editFields)setEditFields(c.editFields);
+          }
         }
-      }catch(e){console.error("Load draft error:",e);}
+      }catch(e){console.error("Load report error:",e);}
       finally{setLoadingDraft(false);}
     })();
   },[]);
@@ -990,12 +994,20 @@ function ReportEditor({job, user, onBack}){
           <div style={{fontSize:12,color:C.mut}}>{previewPdf.filename}</div>
         </div>
       </div>
-      <div style={{flex:1,padding:0,overflow:"auto"}}>
-        <iframe src={URL.createObjectURL(previewPdf.blob)} style={{width:"100%",height:"calc(100vh - 140px)",border:"none",background:"#fff"}}/>
+      <div style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:"20px",gap:16}}>
+        <div style={{background:C.card,border:`1px solid ${C.brd}`,borderRadius:12,padding:24,textAlign:"center",width:"100%",maxWidth:400}}>
+          <div style={{fontSize:48,marginBottom:12}}>📄</div>
+          <div style={{fontWeight:700,fontSize:16,color:C.txt,marginBottom:4}}>{previewPdf.filename}</div>
+          <div style={{fontSize:12,color:C.mut,marginBottom:16}}>Your filled report is ready to review</div>
+          <button onClick={()=>{const u=URL.createObjectURL(previewPdf.blob);window.open(u,"_blank");}} style={{width:"100%",padding:"12px 0",background:C.blu,border:"none",borderRadius:10,color:"#fff",fontSize:15,fontWeight:700,cursor:"pointer",marginBottom:10}}>
+            Open PDF to Review
+          </button>
+          <div style={{fontSize:11,color:C.mut}}>Opens in a new tab so you can scroll through it</div>
+        </div>
       </div>
       <div style={{display:"flex",gap:10,padding:"12px 20px",borderTop:`1px solid ${C.brd}`,background:C.card}}>
         <button onClick={()=>setPreviewPdf(null)} style={{flex:1,padding:"14px 0",background:"transparent",border:`1px solid ${C.brd}`,borderRadius:10,color:C.lt,fontSize:15,fontWeight:700,cursor:"pointer"}}>
-          Go Back
+          Go Back & Edit
         </button>
         <button onClick={confirmSubmit} disabled={submitting} className="btn-o" style={{flex:1,padding:"14px 0",background:C.org,border:"none",borderRadius:10,color:"#fff",fontSize:15,fontWeight:700,cursor:submitting?"default":"pointer",opacity:submitting?0.6:1}}>
           {submitting?"Sending...":"Submit & Send"}
@@ -1014,9 +1026,10 @@ function ReportEditor({job, user, onBack}){
         <button onClick={onBack} style={{background:"none",border:"none",color:C.mut,fontSize:22,cursor:"pointer",padding:0,lineHeight:1}}>←</button>
         <MDRLogo size={28}/>
         <div style={{flex:1}}>
-          <div style={{fontWeight:700,fontSize:17}}>Today's Report</div>
+          <div style={{fontWeight:700,fontSize:17}}>{reportStatus==="submitted"?"Submitted Report":"Today's Report"}</div>
           <div style={{fontSize:12,color:C.mut}}>{job.name}</div>
         </div>
+        {reportStatus==="submitted"&&<span style={{padding:"4px 10px",fontSize:11,fontWeight:700,borderRadius:6,background:C.ok+"22",color:C.ok}}>Submitted</span>}
       </div>
 
       <div style={{maxWidth:600,margin:"0 auto",padding:"20px"}}>
@@ -1144,11 +1157,13 @@ function ReportEditor({job, user, onBack}){
 
         {/* ── Action buttons ── */}
         <div style={{display:"flex",gap:10,marginBottom:20}}>
-          <button onClick={saveWorking} disabled={saving} className="btn-o" style={{flex:1,padding:"14px 0",background:C.blu,border:"none",borderRadius:10,color:"#fff",fontSize:15,fontWeight:700,cursor:saving?"default":"pointer",opacity:saving?0.6:1}}>
-            {saving?"Saving...":"Save Working Copy"}
-          </button>
+          {reportStatus!=="submitted"&&(
+            <button onClick={saveWorking} disabled={saving} className="btn-o" style={{flex:1,padding:"14px 0",background:C.blu,border:"none",borderRadius:10,color:"#fff",fontSize:15,fontWeight:700,cursor:saving?"default":"pointer",opacity:saving?0.6:1}}>
+              {saving?"Saving...":"Save Working Copy"}
+            </button>
+          )}
           <button onClick={generatePdf} disabled={submitting} className="btn-o" style={{flex:1,padding:"14px 0",background:C.org,border:`1px solid ${C.blu}`,borderRadius:10,color:"#fff",fontSize:15,fontWeight:700,cursor:submitting?"default":"pointer",opacity:submitting?0.6:1}}>
-            {submitting?"Generating PDF...":"Submit Report"}
+            {submitting?"Generating PDF...":reportStatus==="submitted"?"Update & Resubmit":"Submit Report"}
           </button>
         </div>
       </div>
