@@ -133,6 +133,10 @@ const db = {
       if(!r.ok){const e=await r.json();throw new Error(e.message||"Save failed");}
       return(await r.json())[0];
     }else{
+      // Get next report number for this job
+      const cntR=await fetch(`${SB_URL}/rest/v1/reports?select=id&job_id=eq.${d.job_id}`,{headers:this._h()});
+      const allRpts=cntR.ok?await cntR.json():[];
+      d.report_number=allRpts.length+1;
       // Create new draft
       const r=await fetch(`${SB_URL}/rest/v1/reports`,{method:"POST",headers:this._h(),body:JSON.stringify(d)});
       if(!r.ok){const e=await r.json();throw new Error(e.message||"Save failed");}
@@ -963,10 +967,15 @@ function ReportEditor({job, user, onBack}){
             </div>
           )}
 
-          {/* Single photo button — iOS shows Take Photo / Photo Library / Choose File natively */}
-          <button onClick={()=>photoRef.current.click()} style={{width:"100%",padding:"14px 0",background:C.card,border:`1px solid ${C.brd}`,borderRadius:10,color:C.lt,fontSize:14,fontWeight:600,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",gap:8}}>
-            <span>📷</span> Add Photos
-          </button>
+          {/* Two photo buttons */}
+          <div style={{display:"flex",gap:10}}>
+            <button onClick={()=>{photoRef.current.setAttribute("capture","environment");photoRef.current.click();}} style={{flex:1,padding:"14px 0",background:C.card,border:`1px solid ${C.brd}`,borderRadius:10,color:C.lt,fontSize:14,fontWeight:600,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",gap:8}}>
+              <span>📷</span> Take Photo
+            </button>
+            <button onClick={()=>{photoRef.current.removeAttribute("capture");photoRef.current.click();}} style={{flex:1,padding:"14px 0",background:C.card,border:`1px solid ${C.brd}`,borderRadius:10,color:C.lt,fontSize:14,fontWeight:600,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",gap:8}}>
+              <span>🖼️</span> Library
+            </button>
+          </div>
           <input ref={photoRef} type="file" accept="image/*" multiple onChange={handlePhoto} style={{display:"none"}}/>
           <div style={{fontSize:11,color:C.mut,marginTop:8}}>Photos will display as {layouts.find(l=>l.k===photoLayout)?.l} in the final PDF</div>
         </div>
@@ -1462,8 +1471,8 @@ function Dashboard({user, onLogout}){
         </div>
       )}
 
-      <div style={{maxWidth:600,margin:"0 auto",padding:"16px 20px 20px"}}>
-        <button className="btn-o" onClick={()=>setShowNew(true)} style={{width:"100%",padding:"14px 0",background:C.org,border:`1px solid ${C.blu}`,borderRadius:10,color:"#fff",fontSize:16,fontWeight:700,cursor:"pointer",marginBottom:20}}>+ New Job</button>
+      <div style={{maxWidth:600,margin:"0 auto",padding:"16px 16px 20px"}}>
+        <button className="btn-o" onClick={()=>setShowNew(true)} style={{width:"100%",padding:"14px 0",background:C.org,border:`1px solid ${C.blu}`,borderRadius:10,color:"#fff",fontSize:16,fontWeight:700,cursor:"pointer",marginBottom:16}}>+ New Job</button>
 
         {showCal&&(
           <div style={{background:C.card,border:`1px solid ${C.brd}`,borderRadius:12,padding:"20px 18px",marginBottom:16}}>
@@ -1474,22 +1483,38 @@ function Dashboard({user, onLogout}){
 
         {loading&&<p style={{textAlign:"center",color:C.mut,padding:40}}>Loading...</p>}
 
-        {!loading&&top3.map(j=>{const s=stat(j.id,j.schedule);return(
-          <button key={j.id} onClick={()=>setSelJob(j)} style={{width:"100%",textAlign:"left",background:C.card,border:`1px solid ${C.brd}`,borderRadius:12,padding:"16px 18px",marginBottom:10,cursor:"pointer",display:"flex",alignItems:"center",gap:14}}>
-            {dot(s)}<div style={{flex:1}}><div style={{fontWeight:600,fontSize:16,color:C.txt,marginBottom:4}}>{j.name}</div><div style={{display:"flex",alignItems:"center",gap:8}}><span style={{fontSize:11,fontWeight:600,background:C.inp,border:`1px solid ${C.brd}`,borderRadius:6,padding:"2px 8px",color:C.mut}}>{SL[j.schedule]||j.schedule}</span>{j.site_address&&<span style={{fontSize:12,color:C.mut}}>{j.site_address}</span>}</div></div>
-            <span style={{color:C.mut,fontSize:18}}>›</span>
-          </button>);})}
+        {/* ── Job cards — two column grid ── */}
+        {!loading&&act.length>0&&(
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:16}}>
+            {act.map(j=>{const s=stat(j.id,j.schedule);const sc=s==="submitted"?C.ok:s==="working"?C.org:s==="due"?"#ef4444":C.brd;return(
+              <button key={j.id} onClick={()=>setSelJob(j)} style={{textAlign:"left",background:C.card,border:`1px solid ${C.brd}`,borderRadius:12,padding:14,cursor:"pointer",display:"flex",flexDirection:"column",gap:8,position:"relative",borderTop:`3px solid ${sc}`}}>
+                <div style={{display:"flex",alignItems:"center",gap:8}}>
+                  <div style={{width:36,height:36,borderRadius:8,background:C.inp,border:`1px solid ${C.brd}`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:18,flexShrink:0}}>📋</div>
+                  <div style={{flex:1,minWidth:0}}>
+                    <div style={{fontWeight:700,fontSize:14,color:C.txt,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{j.name}</div>
+                  </div>
+                </div>
+                <div style={{display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}>
+                  <span style={{fontSize:10,fontWeight:600,background:C.inp,border:`1px solid ${C.brd}`,borderRadius:4,padding:"2px 6px",color:C.mut}}>{SL[j.schedule]||j.schedule}</span>
+                  {s!=="none"&&<span style={{fontSize:10,fontWeight:700,color:sc}}>{s==="submitted"?"Done":s==="working"?"In Progress":"Due"}</span>}
+                </div>
+                {j.site_address&&<div style={{fontSize:11,color:C.mut,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{j.site_address}</div>}
+              </button>);})}
+          </div>
+        )}
 
         {!loading&&act.length===0&&(<div style={{textAlign:"center",padding:"60px 20px",color:C.mut}}><div style={{fontSize:48,marginBottom:16}}>📋</div><p style={{fontSize:16,fontWeight:600,color:C.lt,marginBottom:6}}>No jobs yet</p><p style={{fontSize:14}}>Tap "+ New Job" to create your first project</p></div>)}
 
-        <button onClick={()=>setShowArch(true)} style={{width:"100%",padding:"14px 16px",background:"transparent",border:`1px solid ${C.brd}`,borderRadius:8,cursor:"pointer",marginTop:10,marginBottom:10}}>
-          <span style={{fontSize:13,fontWeight:600,color:C.mut}}>📁 ARCHIVED JOBS{arch.length>0?` (${arch.length})`:""}</span>
-        </button>
-
-        <div onClick={()=>setShowTrain(true)} style={{background:C.card,border:`1px solid ${C.brd}`,borderRadius:12,padding:"16px 18px",marginTop:10,cursor:"pointer",display:"flex",alignItems:"center",gap:14}}>
-          <div style={{width:40,height:40,borderRadius:10,background:C.inp,border:`1px solid ${C.brd}`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:20,flexShrink:0}}>🎓</div>
-          <div style={{flex:1}}><div style={{fontWeight:600,fontSize:15,color:C.txt,marginBottom:2}}>Training Center</div><div style={{fontSize:12,color:C.mut}}>Learn how to get the most out of My Daily Reports</div></div>
-          <span style={{color:C.mut,fontSize:18}}>›</span>
+        {/* ── Bottom tiles — two column ── */}
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginTop:4}}>
+          <button onClick={()=>setShowArch(true)} style={{background:C.card,border:`1px solid ${C.brd}`,borderRadius:12,padding:14,cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",gap:8,textAlign:"center"}}>
+            <div style={{width:40,height:40,borderRadius:8,background:C.inp,border:`1px solid ${C.brd}`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:20}}>📁</div>
+            <div><div style={{fontWeight:600,fontSize:13,color:C.txt}}>Archived Jobs</div>{arch.length>0&&<div style={{fontSize:11,color:C.mut}}>{arch.length} job{arch.length!==1?"s":""}</div>}</div>
+          </button>
+          <button onClick={()=>setShowTrain(true)} style={{background:C.card,border:`1px solid ${C.brd}`,borderRadius:12,padding:14,cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",gap:8,textAlign:"center"}}>
+            <div style={{width:40,height:40,borderRadius:8,background:C.inp,border:`1px solid ${C.brd}`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:20}}>🎓</div>
+            <div><div style={{fontWeight:600,fontSize:13,color:C.txt}}>Training Center</div><div style={{fontSize:11,color:C.mut}}>Guides & tips</div></div>
+          </button>
         </div>
       </div>
 
