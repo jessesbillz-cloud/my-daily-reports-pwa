@@ -108,15 +108,23 @@ const db = {
   async jobs(userId){const r=await fetch(`${SB_URL}/rest/v1/jobs?user_id=eq.${userId}&select=*&order=created_at.asc`,{headers:this._h()});if(!r.ok)throw new Error("Failed");return await r.json();},
   async todayRpts(ids){if(!ids.length)return[];const t=new Date().toISOString().split("T")[0];const q=ids.map(i=>`"${i}"`).join(",");const r=await fetch(`${SB_URL}/rest/v1/reports?select=id,job_id,status,report_date&report_date=eq.${t}&job_id=in.(${q})`,{headers:this._h()});if(!r.ok)return[];return await r.json();},
   async mkJob(d){const r=await fetch(`${SB_URL}/rest/v1/jobs`,{method:"POST",headers:this._h(),body:JSON.stringify(d)});if(!r.ok){const e=await r.json();throw new Error(e.message||"Failed");}return(await r.json())[0];},
-  async ulTpl(uid,jid,f){const ext=f.name.split(".").pop().toLowerCase();const p=`${uid}/${jid}/template.${ext}`;const r=await fetch(`${SB_URL}/storage/v1/object/report-source-docs/${p}`,{method:"POST",headers:{apikey:SB_KEY,Authorization:`Bearer ${AUTH_TOKEN||SB_KEY}`,"Content-Type":f.type||"application/octet-stream"},body:f});if(!r.ok)throw new Error("Upload failed");return p;},
+  async ulTpl(uid,jid,blob,ext){const p=`${uid}/${jid}/template.${ext||"pdf"}`;const ct=blob.type||"application/octet-stream";let r=await fetch(`${SB_URL}/storage/v1/object/report-source-docs/${p}`,{method:"POST",headers:{apikey:SB_KEY,Authorization:`Bearer ${AUTH_TOKEN||SB_KEY}`,"Content-Type":ct},body:blob});if(!r.ok){r=await fetch(`${SB_URL}/storage/v1/object/report-source-docs/${p}`,{method:"PUT",headers:{apikey:SB_KEY,Authorization:`Bearer ${AUTH_TOKEN||SB_KEY}`,"Content-Type":ct},body:blob});if(!r.ok)throw new Error("Upload failed");}return p;},
   async mkTpl(d){
-    const r=await fetch(`${SB_URL}/rest/v1/templates`,{method:"POST",headers:this._h(),body:JSON.stringify(d)});
-    if(!r.ok){
-      // If page_images column doesn't exist yet, retry without it
-      if(d.page_images){const d2={...d};delete d2.page_images;const r2=await fetch(`${SB_URL}/rest/v1/templates`,{method:"POST",headers:this._h(),body:JSON.stringify(d2)});if(r2.ok)return(await r2.json())[0];}
-      throw new Error("Template save failed");
-    }
-    return(await r.json())[0];
+    // Try full payload first
+    let r=await fetch(`${SB_URL}/rest/v1/templates`,{method:"POST",headers:this._h(),body:JSON.stringify(d)});
+    if(r.ok)return(await r.json())[0];
+    // Strip optional columns that may not exist and retry
+    const extras=["page_images","original_filename"];
+    let d2={...d};
+    for(const col of extras)delete d2[col];
+    r=await fetch(`${SB_URL}/rest/v1/templates`,{method:"POST",headers:this._h(),body:JSON.stringify(d2)});
+    if(r.ok)return(await r.json())[0];
+    // Last resort: only send the bare minimum columns
+    const minimal={user_id:d.user_id,job_id:d.job_id,storage_path:d.storage_path,file_type:d.file_type,name:d.name};
+    r=await fetch(`${SB_URL}/rest/v1/templates`,{method:"POST",headers:this._h(),body:JSON.stringify(minimal)});
+    if(r.ok)return(await r.json())[0];
+    const err=await r.json().catch(()=>({}));
+    throw new Error(err.message||"Template save failed");
   },
   async getProfile(userId){const r=await fetch(`${SB_URL}/rest/v1/profiles?id=eq.${userId}&select=*`,{headers:this._h()});if(!r.ok)return null;const d=await r.json();return d[0]||null;},
   async upsertProfile(d){const r=await fetch(`${SB_URL}/rest/v1/profiles`,{method:"POST",headers:{...this._h(),Prefer:"return=representation,resolution=merge-duplicates"},body:JSON.stringify(d)});if(!r.ok)throw new Error("Profile save failed");return(await r.json())[0];},
@@ -563,13 +571,15 @@ function CreateJob({user, onBack, onCreated}){
       const job=await db.mkJob({user_id:user.id,name:jn.trim(),site_address:addr.trim()||null,report_filename_pattern:fnPattern,schedule:es,schedule_days:es==="custom"?days:[],reminder_enabled:remOn,reminder_time:remOn?remT:null,reminder_hours_before:remOn?remH:null,scheduling_enabled:schedOn,field_config:{editable:[...editFields,...autoFields],locked:lockFields}});
       if(tf&&job?.id){
         const ext=tf.name.split(".").pop().toLowerCase();
-        const sp=await db.ulTpl(user.id,job.id,tf);
+        // Read file buffer once, use for both upload and rendering
+        const fileBuf=await tf.arrayBuffer();
+        const fileBlob=new Blob([fileBuf],{type:tf.type||"application/octet-stream"});
+        const sp=await db.ulTpl(user.id,job.id,fileBlob,ext);
         let pagePaths=[];
-        // Render PDF pages to images for preview cache
+        // Render PDF pages to images for preview cache (non-blocking)
         if(ext==="pdf"&&window.pdfjsLib){
           try{
-            const buf=await tf.arrayBuffer();
-            const pjDoc=await window.pdfjsLib.getDocument({data:buf}).promise;
+            const pjDoc=await window.pdfjsLib.getDocument({data:fileBuf.slice(0)}).promise;
             const imgs=[];
             for(let i=1;i<=pjDoc.numPages;i++){
               const pg=await pjDoc.getPage(i);
@@ -582,7 +592,7 @@ function CreateJob({user, onBack, onCreated}){
             pagePaths=await db.saveTemplatePages(user.id,job.id,imgs);
           }catch(pgErr){console.error("Template page render:",pgErr);}
         }
-        await db.mkTpl({user_id:user.id,job_id:job.id,name:tf.name,original_filename:tf.name,file_type:ext,storage_path:sp,page_images:pagePaths.length>0?pagePaths:null});
+        await db.mkTpl({user_id:user.id,job_id:job.id,name:tf.name,file_type:ext,storage_path:sp});
       }
       onCreated();
     }catch(e){setErr(e.message);}finally{setSaving(false);}
