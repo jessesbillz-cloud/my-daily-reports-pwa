@@ -2093,13 +2093,412 @@ function Dashboard({user, onLogout}){
   );
 }
 
+/* ── Setup Wizard (gates dashboard access for new users) ── */
+function SetupWizard({user, onComplete}){
+  const [step,setStep]=useState(0);
+  const [saving,setSaving]=useState(false);
+  const [fullName,setFullName]=useState(user?.user_metadata?.full_name||"");
+  const [timezone,setTimezone]=useState(Intl.DateTimeFormat().resolvedOptions().timeZone);
+  const [slug,setSlug]=useState(()=>(user?.user_metadata?.full_name||"").toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/(^-|-$)/g,""));
+  // Track which sections the user has expanded/read
+  const [readSections,setReadSections]=useState({});
+  const [trainGuidesDone,setTrainGuidesDone]=useState({});
+  const markRead=(key)=>setReadSections(p=>({...p,[key]:true}));
+  const markTrain=(key)=>setTrainGuidesDone(p=>({...p,[key]:true}));
+
+  const TZ_OPTIONS=["America/New_York","America/Chicago","America/Denver","America/Phoenix","America/Los_Angeles","America/Anchorage","Pacific/Honolulu"];
+  const TZ_LABELS={"America/New_York":"Eastern (ET)","America/Chicago":"Central (CT)","America/Denver":"Mountain (MT)","America/Phoenix":"Arizona (MST)","America/Los_Angeles":"Pacific (PT)","America/Anchorage":"Alaska (AKT)","Pacific/Honolulu":"Hawaii (HT)"};
+
+  const fs={width:"100%",padding:"12px 14px",background:C.inp,border:`1px solid ${C.brd}`,borderRadius:10,color:C.txt,fontSize:15};
+  const ls={display:"block",color:C.lt,fontSize:13,fontWeight:600,marginBottom:6};
+  const cardS={background:C.card,border:`1px solid ${C.brd}`,borderRadius:12,padding:20,marginBottom:16};
+  const tipS={background:"rgba(232,116,42,0.08)",border:`1px solid rgba(232,116,42,0.25)`,borderRadius:8,padding:"12px 14px",marginTop:12,fontSize:13,color:C.lt,lineHeight:1.6};
+
+  const WIZARD_STEPS=[
+    {title:"Welcome",icon:"👋"},
+    {title:"Your Profile",icon:"👤"},
+    {title:"How It Works",icon:"📄"},
+    {title:"Template Prep",icon:"🔧"},
+    {title:"Training",icon:"🎓"},
+    {title:"Subscription",icon:"⭐"},
+    {title:"You're Ready",icon:"🚀"},
+  ];
+
+  const allTemplateRead=readSections.parsing&&readSections.cleanDoc&&readSections.notes&&readSections.photos&&readSections.singlePage;
+  const trainReqKeys=["getting-started","creating-reports","voice","photos","exporting","managing","calendar","settings"];
+  const allTrainDone=trainReqKeys.every(k=>trainGuidesDone[k]);
+
+  const canAdvance=()=>{
+    if(step===1)return fullName.trim().length>0&&slug.trim().length>0;
+    if(step===3)return allTemplateRead;
+    if(step===4)return allTrainDone;
+    return true;
+  };
+
+  const saveProfileAndFinish=async()=>{
+    setSaving(true);
+    try{
+      const slugVal=slug.trim()||fullName.trim().toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/(^-|-$)/g,"");
+      await db.upsertProfile({
+        id:user.id,
+        full_name:fullName.trim(),
+        email:user.email,
+        timezone,
+        slug:slugVal,
+        setup_complete:true,
+        wizard_completed_at:new Date().toISOString(),
+        training_completed_at:new Date().toISOString(),
+      });
+      onComplete();
+    }catch(e){
+      alert("Error saving profile: "+e.message);
+    }finally{setSaving(false);}
+  };
+
+  const next=()=>{if(step<WIZARD_STEPS.length-1)setStep(step+1);};
+  const prev=()=>{if(step>0)setStep(step-1);};
+
+  // Progress bar
+  const pct=Math.round((step/(WIZARD_STEPS.length-1))*100);
+
+  return(
+    <div style={{minHeight:"100vh",background:C.bg,color:C.txt}}>
+      {/* Header */}
+      <div style={{display:"flex",alignItems:"center",gap:10,padding:"14px 20px",borderBottom:`1px solid ${C.brd}`,background:C.card}}>
+        <MDRLogo size={30}/>
+        <span style={{fontWeight:700,fontSize:16,flex:1}}>Setup Wizard</span>
+        <span style={{fontSize:12,color:C.mut,fontWeight:600}}>Step {step+1} of {WIZARD_STEPS.length}</span>
+      </div>
+
+      {/* Progress bar */}
+      <div style={{height:3,background:C.brd}}>
+        <div style={{height:3,background:C.org,width:pct+"%",transition:"width 0.3s ease"}}/>
+      </div>
+
+      <div style={{maxWidth:560,margin:"0 auto",padding:"20px 16px 40px"}}>
+
+        {/* ── Step 0: Welcome ── */}
+        {step===0&&(
+          <div>
+            <div style={{textAlign:"center",padding:"30px 0 20px"}}>
+              <MDRLogo size={72}/>
+              <h1 style={{fontSize:24,fontWeight:800,marginTop:16,marginBottom:8}}>Welcome to My Daily Reports</h1>
+              <p style={{fontSize:15,color:C.lt,lineHeight:1.6,maxWidth:400,margin:"0 auto"}}>Let's get you set up. This wizard walks you through everything you need to know before creating your first job and report.</p>
+            </div>
+            <div style={cardS}>
+              <div style={{fontSize:14,color:C.lt,lineHeight:1.7}}>
+                <p style={{marginBottom:12}}>Here's what we'll cover:</p>
+                <div style={{display:"flex",flexDirection:"column",gap:10}}>
+                  {WIZARD_STEPS.slice(1).map((s,i)=>(
+                    <div key={i} style={{display:"flex",alignItems:"center",gap:10,padding:"8px 12px",background:C.inp,borderRadius:8,border:`1px solid ${C.brd}`}}>
+                      <span style={{fontSize:18}}>{s.icon}</span>
+                      <span style={{fontSize:14,fontWeight:600,color:C.txt}}>{s.title}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+            <div style={tipS}>
+              <strong style={{color:C.org}}>Important:</strong> You must complete all steps in this wizard and review the training materials before you can access the dashboard. This ensures you get the most out of your reports from day one.
+            </div>
+          </div>
+        )}
+
+        {/* ── Step 1: Profile Setup ── */}
+        {step===1&&(
+          <div>
+            <h2 style={{fontSize:20,fontWeight:700,marginBottom:4}}>👤 Your Profile</h2>
+            <p style={{fontSize:14,color:C.mut,marginBottom:20}}>This is how you'll appear across the app and on your scheduling calendar.</p>
+
+            <div style={cardS}>
+              <div style={{marginBottom:18}}>
+                <label style={ls}>Full Name</label>
+                <input type="text" value={fullName} onChange={e=>setFullName(e.target.value)} placeholder="Jesse Saltzman" style={fs}/>
+                <div style={{fontSize:11,color:C.mut,marginTop:4}}>Your name as it will appear on reports and your scheduling page.</div>
+              </div>
+              <div style={{marginBottom:18}}>
+                <label style={ls}>Timezone</label>
+                <select value={timezone} onChange={e=>setTimezone(e.target.value)} style={{...fs,cursor:"pointer"}}>
+                  {TZ_OPTIONS.map(tz=><option key={tz} value={tz}>{TZ_LABELS[tz]||tz}</option>)}
+                </select>
+                <div style={{fontSize:11,color:C.mut,marginTop:4}}>Used for timestamps on submitted reports.</div>
+              </div>
+              <div>
+                <label style={ls}>Scheduling Display Name</label>
+                <input type="text" value={slug} onChange={e=>setSlug(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g,""))} placeholder="jesse-saltzman" style={fs}/>
+                <div style={{fontSize:12,color:C.blu,marginTop:6,fontWeight:600}}>schedule.mydailyreports.org/{slug||"your-name"}</div>
+                <div style={{fontSize:11,color:C.mut,marginTop:4}}>This is the link you'll share with GCs and subs so they can request site visits.</div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ── Step 2: How It Works ── */}
+        {step===2&&(
+          <div>
+            <h2 style={{fontSize:20,fontWeight:700,marginBottom:4}}>📄 How It Works</h2>
+            <p style={{fontSize:14,color:C.mut,marginBottom:20}}>Understanding how My Daily Reports processes your templates and generates reports.</p>
+
+            <div style={cardS}>
+              <div style={{fontSize:14,fontWeight:700,color:C.org,marginBottom:10}}>AI-Powered Template Parsing</div>
+              <p style={{fontSize:14,color:C.lt,lineHeight:1.7,marginBottom:14}}>When you create a new job, you upload your existing daily report template — the same PDF or Word document you already use. Our AI analyzes the document and automatically detects every fillable field on it.</p>
+              <p style={{fontSize:14,color:C.lt,lineHeight:1.7,marginBottom:14}}>Each detected field gets classified into one of four types that you control:</p>
+              <div style={{display:"flex",flexDirection:"column",gap:8,marginBottom:14}}>
+                <div style={{display:"flex",gap:10,padding:"10px 12px",background:C.inp,borderRadius:8,border:`1px solid ${C.brd}`}}>
+                  <span style={{fontSize:16,flexShrink:0}}>✏️</span>
+                  <div><div style={{fontWeight:700,fontSize:13,color:C.txt}}>Edit</div><div style={{fontSize:12,color:C.mut}}>Fields you fill in each day — notes, weather, hours, observations</div></div>
+                </div>
+                <div style={{display:"flex",gap:10,padding:"10px 12px",background:C.inp,borderRadius:8,border:`1px solid ${C.brd}`}}>
+                  <span style={{fontSize:16,flexShrink:0}}>🔒</span>
+                  <div><div style={{fontWeight:700,fontSize:13,color:C.txt}}>Lock</div><div style={{fontSize:12,color:C.mut}}>Fields that never change — project name, contractor, architect. These stay on the original template as-is.</div></div>
+                </div>
+                <div style={{display:"flex",gap:10,padding:"10px 12px",background:C.inp,borderRadius:8,border:`1px solid ${C.brd}`}}>
+                  <span style={{fontSize:16,flexShrink:0}}>📅</span>
+                  <div><div style={{fontWeight:700,fontSize:13,color:C.txt}}>Auto-Date</div><div style={{fontSize:12,color:C.mut}}>Automatically fills in today's date on each new report</div></div>
+                </div>
+                <div style={{display:"flex",gap:10,padding:"10px 12px",background:C.inp,borderRadius:8,border:`1px solid ${C.brd}`}}>
+                  <span style={{fontSize:16,flexShrink:0}}>🔢</span>
+                  <div><div style={{fontWeight:700,fontSize:13,color:C.txt}}>Auto-Number</div><div style={{fontSize:12,color:C.mut}}>Sequential report number that auto-increments — DR#1, DR#2, DR#3</div></div>
+                </div>
+              </div>
+              <p style={{fontSize:14,color:C.lt,lineHeight:1.7}}>Once configured, you never have to set up fields again for that job. Every new daily report starts with locked fields already in place and editable fields ready for your input.</p>
+            </div>
+
+            <div style={cardS}>
+              <div style={{fontSize:14,fontWeight:700,color:C.org,marginBottom:10}}>How Reports Are Generated</div>
+              <p style={{fontSize:14,color:C.lt,lineHeight:1.7,marginBottom:14}}>When you submit a report, the app takes your original uploaded template and overlays your editable field values onto it. Locked fields are already on the template — they don't get redrawn. The result is a PDF that looks exactly like your original document with your daily entries filled in.</p>
+              <p style={{fontSize:14,color:C.lt,lineHeight:1.7}}>Your notes appear in the designated notes area of your template. Photos are added to additional pages that include the header and footer styling from your original document.</p>
+            </div>
+          </div>
+        )}
+
+        {/* ── Step 3: Template Preparation ── */}
+        {step===3&&(
+          <div>
+            <h2 style={{fontSize:20,fontWeight:700,marginBottom:4}}>🔧 Template Preparation</h2>
+            <p style={{fontSize:14,color:C.mut,marginBottom:6}}>Before uploading your template, make sure it's set up correctly. Expand and read each section below.</p>
+            <p style={{fontSize:12,color:C.org,fontWeight:600,marginBottom:20}}>You must read all 5 sections to continue.</p>
+
+            {/* Collapsible sections */}
+            {[
+              {key:"parsing",icon:"🔍",title:"How Parsing Works",body:(
+                <div style={{fontSize:13,color:C.lt,lineHeight:1.7}}>
+                  <p style={{marginBottom:10}}>The AI scans your document looking for patterns like "Label:" or "Label: value" — essentially any place where a label is followed by a colon and a value area. It also looks at table cells with labels and values.</p>
+                  <p style={{marginBottom:10}}>The AI estimates where each field sits on the page using coordinate positions. These positions are approximate — they work well for most standard report layouts but may need slight adjustments depending on your template's formatting.</p>
+                  <p>After parsing, you'll see all detected fields in a single vertical list. Your actual form may have several horizontal columns — that's normal. The list is just for configuration purposes. You review each field, set its type (Edit, Lock, Auto-Date, Auto-Number), and you're done.</p>
+                </div>
+              )},
+              {key:"cleanDoc",icon:"🧹",title:"Clean Your Document First",body:(
+                <div style={{fontSize:13,color:C.lt,lineHeight:1.7}}>
+                  <p style={{marginBottom:10,fontWeight:700,color:C.org}}>This is the most important step.</p>
+                  <p style={{marginBottom:10}}>Before uploading, open your template in Word or your PDF editor and make sure:</p>
+                  <p style={{marginBottom:6}}>• There are no hidden text boxes floating over your form fields. These confuse the parser and can cause fields to be detected in wrong positions.</p>
+                  <p style={{marginBottom:6}}>• Remove any invisible or zero-opacity elements that might be layered on top of your form.</p>
+                  <p style={{marginBottom:6}}>• If your template has a header and footer, make sure they're clean and consistent.</p>
+                  <p>• Check that form field labels are clearly visible and followed by a colon where possible (e.g., "Project Name:" not just "Project Name").</p>
+                </div>
+              )},
+              {key:"notes",icon:"📝",title:"Setting Up Your Notes Section",body:(
+                <div style={{fontSize:13,color:C.lt,lineHeight:1.7}}>
+                  <p style={{marginBottom:10}}>The notes or observations section is where you'll spend most of your time each day. To make sure the AI picks it up correctly:</p>
+                  <p style={{marginBottom:6}}>• The notes section label should be clearly defined with a colon — for example, "IOR Notes:" or "Observations:" or "Daily Notes:"</p>
+                  <p style={{marginBottom:6}}>• Leave the notes area blank or with minimal placeholder text. The more clutter in this area, the harder it is for the parser to determine the correct boundaries.</p>
+                  <p style={{marginBottom:6}}>• After parsing, check the field list for your notes field and confirm it was detected. It should show as an "Edit" field with voice input enabled.</p>
+                  <p>• Your notes will appear as bullet points in the designated notes area of the generated PDF. Each entry you take throughout the day becomes a separate bullet.</p>
+                </div>
+              )},
+              {key:"photos",icon:"📸",title:"How the Photo System Works",body:(
+                <div style={{fontSize:13,color:C.lt,lineHeight:1.7}}>
+                  <p style={{marginBottom:10}}>When you add photos to a report, the app creates additional pages after your main report page. Each photo page includes the header and footer styling from your original uploaded document, keeping the look consistent.</p>
+                  <p style={{marginBottom:10,fontWeight:700,color:C.org}}>Important: Your uploaded template should be a single page.</p>
+                  <p>If your uploaded template already has a blank second page, that blank page will show up in every generated report. Before uploading, open your document and delete any extra blank pages at the end. The photo system will create new pages as needed — you don't need placeholder pages in your template.</p>
+                </div>
+              )},
+              {key:"singlePage",icon:"📐",title:"Template Best Practices",body:(
+                <div style={{fontSize:13,color:C.lt,lineHeight:1.7}}>
+                  <p style={{marginBottom:6}}>• Upload a single-page template. Multi-page templates are supported but single page works best for daily reports.</p>
+                  <p style={{marginBottom:6}}>• PDF format is recommended over Word (.docx) for the most accurate field detection and PDF generation.</p>
+                  <p style={{marginBottom:6}}>• If you have a Word template, save it as PDF first and upload the PDF version.</p>
+                  <p style={{marginBottom:6}}>• Standard letter size (8.5" x 11") works best. The AI is calibrated for this page size.</p>
+                  <p style={{marginBottom:6}}>• Make sure your template has actual text labels — not just form field boxes — so the AI can read what each field is for.</p>
+                  <p>• You only upload a template once per job. After that, every daily report uses it automatically.</p>
+                </div>
+              )},
+            ].map(section=>{
+              const isOpen=readSections[section.key];
+              return(
+                <div key={section.key} style={{background:C.card,border:`1px solid ${isOpen?C.org+"60":C.brd}`,borderRadius:12,marginBottom:10,overflow:"hidden"}}>
+                  <button onClick={()=>markRead(section.key)} style={{width:"100%",display:"flex",alignItems:"center",gap:10,padding:"14px 16px",background:"none",border:"none",cursor:"pointer",textAlign:"left"}}>
+                    <span style={{fontSize:18}}>{section.icon}</span>
+                    <span style={{flex:1,fontSize:14,fontWeight:700,color:C.txt}}>{section.title}</span>
+                    {isOpen?<span style={{color:C.ok,fontSize:14,fontWeight:700}}>✓</span>:<span style={{color:C.mut,fontSize:12}}>Tap to read</span>}
+                  </button>
+                  {isOpen&&(
+                    <div style={{padding:"0 16px 16px",borderTop:`1px solid ${C.brd}`}}>
+                      <div style={{paddingTop:14}}>{section.body}</div>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+
+            {!allTemplateRead&&(
+              <div style={{fontSize:12,color:C.mut,textAlign:"center",marginTop:8}}>
+                Read all {5-Object.keys(readSections).filter(k=>["parsing","cleanDoc","notes","photos","singlePage"].includes(k)).length} remaining section{5-Object.keys(readSections).filter(k=>["parsing","cleanDoc","notes","photos","singlePage"].includes(k)).length!==1?"s":""} to continue
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ── Step 4: Training ── */}
+        {step===4&&(
+          <div>
+            <h2 style={{fontSize:20,fontWeight:700,marginBottom:4}}>🎓 Training</h2>
+            <p style={{fontSize:14,color:C.mut,marginBottom:6}}>Review each training topic below. You can revisit these anytime from the Training Center on the dashboard.</p>
+            <p style={{fontSize:12,color:C.org,fontWeight:600,marginBottom:20}}>Mark all {trainReqKeys.length} topics as reviewed to continue.</p>
+
+            {[
+              {key:"getting-started",icon:"🚀",title:"Getting Started",desc:"Learn the basics — sign in, dashboard, creating jobs"},
+              {key:"creating-reports",icon:"📝",title:"Creating Reports",desc:"Start a report, fill fields, save, and submit"},
+              {key:"voice",icon:"🎤",title:"Voice Input",desc:"Dictate notes hands-free using your phone's keyboard mic"},
+              {key:"photos",icon:"📸",title:"Photo Documentation",desc:"Take site photos, add them to reports"},
+              {key:"exporting",icon:"📤",title:"Exporting & Sharing",desc:"PDF generation, download, email to team"},
+              {key:"managing",icon:"💼",title:"Managing Jobs",desc:"Edit, archive, and organize your projects"},
+              {key:"calendar",icon:"📅",title:"Sharing Your Calendar",desc:"Let GCs and subs request site visits"},
+              {key:"settings",icon:"⚙️",title:"Profile & Settings",desc:"Timezone, display name, notifications"},
+            ].map(topic=>{
+              const done=trainGuidesDone[topic.key];
+              return(
+                <div key={topic.key} style={{display:"flex",alignItems:"center",gap:12,padding:"12px 14px",background:C.card,border:`1px solid ${done?C.ok+"40":C.brd}`,borderRadius:10,marginBottom:8,cursor:"pointer"}} onClick={()=>markTrain(topic.key)}>
+                  <span style={{fontSize:20}}>{topic.icon}</span>
+                  <div style={{flex:1}}>
+                    <div style={{fontSize:14,fontWeight:700,color:C.txt}}>{topic.title}</div>
+                    <div style={{fontSize:12,color:C.mut}}>{topic.desc}</div>
+                  </div>
+                  {done?(
+                    <span style={{color:C.ok,fontSize:16,fontWeight:700}}>✓</span>
+                  ):(
+                    <span style={{fontSize:11,color:C.org,fontWeight:600}}>Review</span>
+                  )}
+                </div>
+              );
+            })}
+
+            <div style={tipS}>
+              <strong style={{color:C.org}}>Tip:</strong> These same guides are always available from the Training Center on your dashboard. You can come back to them anytime you need a refresher.
+            </div>
+          </div>
+        )}
+
+        {/* ── Step 5: Subscription ── */}
+        {step===5&&(
+          <div>
+            <h2 style={{fontSize:20,fontWeight:700,marginBottom:4}}>⭐ Subscription</h2>
+            <p style={{fontSize:14,color:C.mut,marginBottom:20}}>Your account and billing status.</p>
+
+            <div style={cardS}>
+              <div style={{textAlign:"center",padding:"20px 0"}}>
+                <div style={{width:64,height:64,borderRadius:"50%",background:"rgba(34,197,94,0.1)",border:"2px solid rgba(34,197,94,0.3)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:28,margin:"0 auto 14px"}}>🎉</div>
+                <div style={{fontSize:18,fontWeight:800,color:C.txt,marginBottom:6}}>Early Access</div>
+                <div style={{display:"inline-block",background:"rgba(34,197,94,0.1)",border:"1px solid rgba(34,197,94,0.3)",borderRadius:20,padding:"6px 16px",marginBottom:14}}>
+                  <span style={{fontSize:14,fontWeight:700,color:C.ok}}>FREE During Beta</span>
+                </div>
+                <p style={{fontSize:14,color:C.lt,lineHeight:1.6,maxWidth:360,margin:"0 auto"}}>You're part of the early access program. Enjoy full access to all features while we finalize the platform.</p>
+              </div>
+            </div>
+
+            <div style={{background:"rgba(90,143,192,0.08)",border:`1px solid rgba(90,143,192,0.25)`,borderRadius:12,padding:20}}>
+              <div style={{fontSize:14,fontWeight:700,color:C.blu,marginBottom:8}}>Coming Soon — $19.99/month</div>
+              <p style={{fontSize:13,color:C.lt,lineHeight:1.6,marginBottom:10}}>When we launch paid subscriptions, your plan will include:</p>
+              <div style={{fontSize:13,color:C.lt,lineHeight:1.8}}>
+                <p>• Unlimited jobs and daily reports</p>
+                <p>• AI-powered template parsing</p>
+                <p>• PDF generation with your branding</p>
+                <p>• Email delivery to your project team</p>
+                <p>• Shared scheduling calendar</p>
+                <p>• Photo documentation</p>
+                <p>• Voice-to-text note taking</p>
+              </div>
+              <p style={{fontSize:12,color:C.mut,marginTop:12}}>You'll be notified before any charges begin. Early access users will receive priority pricing.</p>
+            </div>
+          </div>
+        )}
+
+        {/* ── Step 6: You're Ready ── */}
+        {step===6&&(
+          <div>
+            <div style={{textAlign:"center",padding:"30px 0 20px"}}>
+              <div style={{fontSize:56,marginBottom:16}}>🚀</div>
+              <h2 style={{fontSize:22,fontWeight:800,marginBottom:8}}>You're All Set!</h2>
+              <p style={{fontSize:15,color:C.lt,lineHeight:1.6,maxWidth:400,margin:"0 auto"}}>Your profile is configured and you've completed the training. You're ready to create your first job and start generating reports.</p>
+            </div>
+
+            <div style={cardS}>
+              <div style={{fontSize:14,fontWeight:700,color:C.txt,marginBottom:14}}>Quick Recap</div>
+              <div style={{display:"flex",flexDirection:"column",gap:10}}>
+                <div style={{display:"flex",gap:10,alignItems:"flex-start"}}>
+                  <span style={{color:C.ok,fontWeight:700,flexShrink:0}}>✓</span>
+                  <div style={{fontSize:13,color:C.lt}}>Profile set up as <strong style={{color:C.txt}}>{fullName}</strong></div>
+                </div>
+                <div style={{display:"flex",gap:10,alignItems:"flex-start"}}>
+                  <span style={{color:C.ok,fontWeight:700,flexShrink:0}}>✓</span>
+                  <div style={{fontSize:13,color:C.lt}}>Scheduling URL: <strong style={{color:C.blu}}>schedule.mydailyreports.org/{slug}</strong></div>
+                </div>
+                <div style={{display:"flex",gap:10,alignItems:"flex-start"}}>
+                  <span style={{color:C.ok,fontWeight:700,flexShrink:0}}>✓</span>
+                  <div style={{fontSize:13,color:C.lt}}>Template preparation guidelines reviewed</div>
+                </div>
+                <div style={{display:"flex",gap:10,alignItems:"flex-start"}}>
+                  <span style={{color:C.ok,fontWeight:700,flexShrink:0}}>✓</span>
+                  <div style={{fontSize:13,color:C.lt}}>All training topics completed</div>
+                </div>
+              </div>
+            </div>
+
+            <div style={tipS}>
+              <strong style={{color:C.org}}>What's Next:</strong> Tap "Go to Dashboard" below. From there, tap "+ New Job" to create your first job and upload your report template. Follow the template prep guidelines you just reviewed for the best results.
+            </div>
+          </div>
+        )}
+
+        {/* ── Navigation Buttons ── */}
+        <div style={{display:"flex",gap:12,marginTop:24}}>
+          {step>0&&(
+            <button onClick={prev} style={{flex:1,padding:"14px 0",background:C.inp,border:`1px solid ${C.brd}`,borderRadius:10,color:C.lt,fontSize:15,fontWeight:700,cursor:"pointer"}}>Back</button>
+          )}
+          {step<WIZARD_STEPS.length-1?(
+            <button onClick={next} disabled={!canAdvance()} className="btn-o" style={{flex:step===0?1:2,padding:"14px 0",background:canAdvance()?C.org:C.inp,border:canAdvance()?`1px solid ${C.org}`:`1px solid ${C.brd}`,borderRadius:10,color:canAdvance()?"#fff":C.mut,fontSize:15,fontWeight:700,cursor:canAdvance()?"pointer":"default",opacity:canAdvance()?1:0.5}}>
+              {step===0?"Let's Get Started":"Continue"}
+            </button>
+          ):(
+            <button onClick={saveProfileAndFinish} disabled={saving} className="btn-o" style={{flex:2,padding:"14px 0",background:C.org,border:`1px solid ${C.org}`,borderRadius:10,color:"#fff",fontSize:15,fontWeight:700,cursor:"pointer"}}>
+              {saving?"Saving...":"Go to Dashboard"}
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function App(){
   const [user,setUser]=useState(null);
   const [authErr,setAuthErr]=useState("");
   const [booting,setBooting]=useState(true);
+  const [setupDone,setSetupDone]=useState(null); // null=loading, true/false
 
   useEffect(()=>{
-    devLogin().then(u=>{setUser(u);setBooting(false);}).catch(e=>{setAuthErr(e.message);setBooting(false);});
+    devLogin().then(async(u)=>{
+      setUser(u);
+      // Check if setup is complete
+      try{
+        const p=await db.getProfile(u.id);
+        setSetupDone(p?.setup_complete===true);
+      }catch(e){
+        setSetupDone(false);
+      }
+      setBooting(false);
+    }).catch(e=>{setAuthErr(e.message);setBooting(false);});
   },[]);
 
   if(booting)return(
@@ -2116,6 +2515,8 @@ function App(){
     </div>
   );
   if(!user)return null;
+  // Gate: if setup not complete, show wizard
+  if(setupDone===false)return<SetupWizard user={user} onComplete={()=>setSetupDone(true)}/>;
   return<Dashboard user={user} onLogout={()=>{AUTH_TOKEN=null;DEV_USER=null;window.location.reload();}}/>;
 }
 ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
