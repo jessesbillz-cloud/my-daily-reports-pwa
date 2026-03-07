@@ -25,7 +25,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
-<script>if(window.pdfjsLib){window.pdfjsLib.GlobalWorkerOptions.workerSrc="";}</script>
+<script>if(window.pdfjsLib){window.pdfjsLib.GlobalWorkerOptions.workerSrc="";window.pdfjsLib.GlobalWorkerOptions.workerPort=null;window.pdfjsLib.disableWorker=true;}</script>
 <script type="text/babel">
 const { useState, useEffect, useRef, useCallback } = React;
 const SB_URL = "https://wluvkmpncafugdbunlkw.supabase.co";
@@ -554,7 +554,8 @@ function CreateJob({user, onBack, onCreated}){
     if(!ok)return;setSaving(true);setErr("");
     try{
       const es=effSch();
-      const fnPattern=tf?tf.name.replace(/\.[^.]+$/,""):`DR_##__${jn.trim().replace(/\s+/g,"_")}`;
+      // Store the original uploaded filename (minus extension) exactly as the pattern
+      const fnPattern=tf?tf.name.replace(/\.[^.]+$/,""):("DR_01_"+jn.trim().replace(/\s+/g,"_")+"_"+new Date().toLocaleDateString("en-US",{month:"2-digit",day:"2-digit",year:"numeric",timeZone:tz}).replace(/\//g,""));
       const coords=(f)=>({page:f.page,x:f.x,y:f.y,w:f.w,h:f.h,fontSize:f.fontSize,multiline:f.multiline});
       const editFields=fields.filter(f=>f.mode==="edit").map(f=>({name:f.name,value:f.value,voiceEnabled:true,...coords(f)}));
       const lockFields=fields.filter(f=>f.mode==="lock").map(f=>({name:f.name,value:f.value,...coords(f)}));
@@ -919,6 +920,7 @@ function ReportEditor({job, user, onBack, reportDate}){
       });
       if(!tplResp.ok)throw new Error("Could not download template file.");
       const tplBytes=await tplResp.arrayBuffer();
+      const tplBytesCopy=tplBytes.slice(0); // Save copy before pdf-lib consumes the buffer
       const isPdfTemplate=tplRecord.file_type==="pdf";
 
       // ── 2. Load template with pdf-lib ──
@@ -986,7 +988,13 @@ function ReportEditor({job, user, onBack, reportDate}){
       if(draftId){try{const exR=await fetch(`${SB_URL}/rest/v1/reports?select=report_number&id=eq.${draftId}`,{headers:db._h()});const exD=exR.ok?await exR.json():[];if(exD[0]?.report_number)rptNumber=exD[0].report_number;}catch(e){}}
       const rptNum=String(rptNumber).padStart(2,"0");
       const tzDate=new Date().toLocaleDateString("en-US",{month:"2-digit",day:"2-digit",year:"numeric",timeZone:tz}).replace(/\//g,"");
-      const baseName=job.report_filename_pattern?job.report_filename_pattern.replace(/\.\w+$/,"").replace("##",rptNum).replace(/__/g,"_"+tzDate+"_"):("DR_"+rptNum+"_"+job.name.replace(/\s+/g,"_")+"_"+tzDate);
+      // Replace the DR number and date in the original filename pattern — don't add or rearrange anything
+      let baseName=job.report_filename_pattern||("DR_"+rptNum+"_"+job.name.replace(/\s+/g,"_")+"_"+tzDate);
+      baseName=baseName.replace(/\.\w+$/,"");
+      // Replace first occurrence of a 2-digit number that looks like a DR sequence (after DR or Dr or dr)
+      baseName=baseName.replace(/(DR|Dr|dr)(\D*)(\d{2})/, "$1$2"+rptNum);
+      // Replace any 8-digit date pattern (MMDDYYYY) with today's date
+      baseName=baseName.replace(/\d{8}/, tzDate);
       const pdfFilename=baseName+".pdf";
 
       // ── 7. Build preview: load cached template page images, overlay field values as HTML ──
@@ -995,10 +1003,10 @@ function ReportEditor({job, user, onBack, reportDate}){
       if(tplRecord.page_images&&tplRecord.page_images.length>0){
         // Use cached page images from job creation
         templatePageUrls=tplRecord.page_images.map(p=>db.getTemplatePageUrl(p)+"?t="+Date.now());
-      }else if(isPdfTemplate&&window.pdfjsLib&&tplBytes){
+      }else if(isPdfTemplate&&window.pdfjsLib&&tplBytesCopy){
         // Fallback: render template pages on-the-fly with pdf.js for jobs created before caching
         try{
-          const pjDoc=await window.pdfjsLib.getDocument({data:tplBytes.slice(0)}).promise;
+          const pjDoc=await window.pdfjsLib.getDocument({data:tplBytesCopy}).promise;
           const rendered=[];
           for(let pi=1;pi<=pjDoc.numPages;pi++){
             const pg=await pjDoc.getPage(pi);
@@ -1448,7 +1456,7 @@ function JobDetail({job, user, onBack, onDeleted}){
           {working.length===0?(
             <div style={{textAlign:"center",padding:"16px 0",color:C.mut,fontSize:13}}>No drafts in progress</div>
           ):(
-            working.map((r,i)=>{const rptName=job.report_filename_pattern?job.report_filename_pattern.replace("##",String(r.report_number||1).padStart(2,"0")):("DR#"+(r.report_number||"?"));return(
+            working.map((r,i)=>{const wNum=String(r.report_number||1).padStart(2,"0");const wDate=new Date(r.report_date+"T12:00:00").toLocaleDateString("en-US",{month:"2-digit",day:"2-digit",year:"numeric",timeZone:tz}).replace(/\//g,"");let rptName=job.report_filename_pattern||("DR_"+wNum+"_"+wDate);rptName=rptName.replace(/\.\w+$/,"").replace(/(DR|Dr|dr)(\D*)(\d{2})/,"$1$2"+wNum).replace(/\d{8}/,wDate);return(
               <button key={r.id} onClick={()=>openReport(r.report_date)} style={{width:"100%",display:"flex",alignItems:"center",gap:12,padding:"14px 16px",background:"transparent",border:"none",borderBottom:i<working.length-1?`1px solid ${C.brd}`:"none",cursor:"pointer",textAlign:"left"}}>
                 <div style={{width:10,height:10,borderRadius:"50%",background:C.org,flexShrink:0}}/>
                 <div style={{flex:1,minWidth:0}}>
@@ -1469,7 +1477,8 @@ function JobDetail({job, user, onBack, onDeleted}){
             submitted.map((r,i)=>{
               const rptDate=new Date(r.report_date+"T12:00:00").toLocaleDateString("en-US",{month:"2-digit",day:"2-digit",year:"numeric",timeZone:tz}).replace(/\//g,"");
               const rptNum=String(r.report_number||i+1).padStart(2,"0");
-              const rptName=job.report_filename_pattern?job.report_filename_pattern.replace(/\.\w+$/,"").replace("##",rptNum).replace(/__/g,"_"+rptDate+"_"):("DR_"+rptNum+"_"+rptDate);
+              let rptName=job.report_filename_pattern||("DR_"+rptNum+"_"+rptDate);
+              rptName=rptName.replace(/\.\w+$/,"").replace(/(DR|Dr|dr)(\D*)(\d{2})/,"$1$2"+rptNum).replace(/\d{8}/,rptDate);
               return(
               <button key={r.id} onClick={()=>openReport(r.report_date)} style={{width:"100%",display:"flex",alignItems:"center",gap:12,padding:"14px 16px",marginBottom:i<submitted.length-1?0:0,borderBottom:i<submitted.length-1?`1px solid ${C.brd}`:"none",background:"transparent",border:"none",borderBottomWidth:i<submitted.length-1?1:0,borderBottomStyle:"solid",borderBottomColor:C.brd,cursor:"pointer",textAlign:"left"}}>
                 <div style={{width:10,height:10,borderRadius:"50%",background:C.ok,flexShrink:0}}/>
