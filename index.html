@@ -164,6 +164,23 @@ const db = {
     const r=await fetch(`${SB_URL}/rest/v1/templates?job_id=eq.${jobId}&select=*&limit=1`,{headers:this._h()});
     if(!r.ok)return null;const d=await r.json();return d[0]||null;
   },
+  // Save template page images (rendered from PDF during job creation)
+  async saveTemplatePages(userId,jobId,pageImages){
+    const paths=[];
+    for(let i=0;i<pageImages.length;i++){
+      const blob=await(await fetch(pageImages[i])).blob();
+      const p=`${userId}/${jobId}/template_page_${i}.jpg`;
+      await fetch(`${SB_URL}/storage/v1/object/report-source-docs/${p}`,{
+        method:"POST",headers:{apikey:SB_KEY,Authorization:`Bearer ${AUTH_TOKEN||SB_KEY}`,"Content-Type":"image/jpeg"},body:blob
+      });
+      paths.push(p);
+    }
+    return paths;
+  },
+  // Get template page image URLs
+  getTemplatePageUrl(path){
+    return `${SB_URL}/storage/v1/object/report-source-docs/${path}`;
+  },
   // Fetch inspection requests for user's jobs in a date range
   async getRequests(userId,startDate,endDate){
     const r=await fetch(`${SB_URL}/rest/v1/inspection_requests?user_id=eq.${userId}&requested_date=gte.${startDate}&requested_date=lte.${endDate}&select=*,jobs(name,site_address)&order=requested_date.asc`,{headers:this._h()});
@@ -260,7 +277,7 @@ function AccountSettings({user, onBack, onLogout}){
     <div style={{minHeight:"100vh",background:C.bg,color:C.txt}}>
       {/* Header */}
       <div style={{display:"flex",alignItems:"center",gap:12,padding:"16px 20px",borderBottom:`1px solid ${C.brd}`,background:C.card}}>
-        <button onClick={onBack} style={{background:"none",border:"none",color:C.mut,fontSize:22,cursor:"pointer",padding:0,lineHeight:1}}>←</button>
+        <button onClick={onBack} style={{background:"none",border:"none",color:C.blu,fontSize:28,cursor:"pointer",padding:"8px 12px",lineHeight:1,borderRadius:8,minWidth:48,minHeight:48,display:"flex",alignItems:"center",justifyContent:"center"}}>←</button>
         <MDRLogo size={28}/>
         <span style={{fontWeight:700,fontSize:17}}>Account Settings</span>
       </div>
@@ -531,7 +548,29 @@ function CreateJob({user, onBack, onCreated}){
       const lockFields=fields.filter(f=>f.mode==="lock").map(f=>({name:f.name,value:f.value,...coords(f)}));
       const autoFields=fields.filter(f=>f.mode==="auto-date"||f.mode==="auto-num").map(f=>({name:f.name,value:f.value,autoFill:f.mode==="auto-date"?"date":"increment",...coords(f)}));
       const job=await db.mkJob({user_id:user.id,name:jn.trim(),site_address:addr.trim()||null,report_filename_pattern:fnPattern,schedule:es,schedule_days:es==="custom"?days:[],reminder_enabled:remOn,reminder_time:remOn?remT:null,reminder_hours_before:remOn?remH:null,scheduling_enabled:schedOn,field_config:{editable:[...editFields,...autoFields],locked:lockFields}});
-      if(tf&&job?.id){const ext=tf.name.split(".").pop().toLowerCase();const sp=await db.ulTpl(user.id,job.id,tf);await db.mkTpl({user_id:user.id,job_id:job.id,name:tf.name,original_filename:tf.name,file_type:ext,storage_path:sp});}
+      if(tf&&job?.id){
+        const ext=tf.name.split(".").pop().toLowerCase();
+        const sp=await db.ulTpl(user.id,job.id,tf);
+        let pagePaths=[];
+        // Render PDF pages to images for preview cache
+        if(ext==="pdf"&&window.pdfjsLib){
+          try{
+            const buf=await tf.arrayBuffer();
+            const pjDoc=await window.pdfjsLib.getDocument({data:buf}).promise;
+            const imgs=[];
+            for(let i=1;i<=pjDoc.numPages;i++){
+              const pg=await pjDoc.getPage(i);
+              const vp=pg.getViewport({scale:1.5});
+              const cvs=document.createElement("canvas");cvs.width=vp.width;cvs.height=vp.height;
+              await pg.render({canvasContext:cvs.getContext("2d"),viewport:vp}).promise;
+              imgs.push(cvs.toDataURL("image/jpeg",0.85));
+              cvs.width=0;cvs.height=0;
+            }
+            pagePaths=await db.saveTemplatePages(user.id,job.id,imgs);
+          }catch(pgErr){console.error("Template page render:",pgErr);}
+        }
+        await db.mkTpl({user_id:user.id,job_id:job.id,name:tf.name,original_filename:tf.name,file_type:ext,storage_path:sp,page_images:pagePaths.length>0?pagePaths:null});
+      }
       onCreated();
     }catch(e){setErr(e.message);}finally{setSaving(false);}
   };
@@ -558,7 +597,7 @@ function CreateJob({user, onBack, onCreated}){
   return(
     <div style={{minHeight:"100vh",background:C.bg,color:C.txt}}>
       <div style={{display:"flex",alignItems:"center",gap:12,padding:"16px 20px",borderBottom:`1px solid ${C.brd}`,background:C.card}}>
-        <button onClick={onBack} style={{background:"none",border:"none",color:C.mut,fontSize:22,cursor:"pointer",padding:0,lineHeight:1}}>←</button>
+        <button onClick={onBack} style={{background:"none",border:"none",color:C.blu,fontSize:28,cursor:"pointer",padding:"8px 12px",lineHeight:1,borderRadius:8,minWidth:48,minHeight:48,display:"flex",alignItems:"center",justifyContent:"center"}}>←</button>
         <MDRLogo size={28}/>
         <span style={{fontWeight:700,fontSize:17}}>New Job</span>
       </div>
@@ -688,7 +727,7 @@ function ArchivedJobs({jobs, onBack, onSelect}){
   return(
     <div style={{minHeight:"100vh",background:C.bg,color:C.txt}}>
       <div style={{display:"flex",alignItems:"center",gap:12,padding:"16px 20px",borderBottom:`1px solid ${C.brd}`,background:C.card}}>
-        <button onClick={onBack} style={{background:"none",border:"none",color:C.mut,fontSize:22,cursor:"pointer",padding:0,lineHeight:1}}>←</button>
+        <button onClick={onBack} style={{background:"none",border:"none",color:C.blu,fontSize:28,cursor:"pointer",padding:"8px 12px",lineHeight:1,borderRadius:8,minWidth:48,minHeight:48,display:"flex",alignItems:"center",justifyContent:"center"}}>←</button>
         <MDRLogo size={28}/>
         <span style={{fontWeight:700,fontSize:17}}>Archived Jobs</span>
         <span style={{fontSize:13,color:C.mut,marginLeft:"auto"}}>{jobs.length} job{jobs.length!==1?"s":""}</span>
@@ -854,15 +893,15 @@ function ReportEditor({job, user, onBack, reportDate}){
 
   const showToast=(msg)=>{setToast(msg);setTimeout(()=>setToast(""),2500);};
 
-  // Generate the filled PDF for preview
+  // Generate the filled PDF + build preview data
   const generatePdf=async()=>{
     setSubmitting(true);
     try{
       const {PDFDocument,rgb,StandardFonts}=PDFLib;
 
-      // ── 1. Look up template storage path from templates table ──
+      // ── 1. Look up template ──
       const tplRecord=await db.getTemplate(job.id);
-      if(!tplRecord||!tplRecord.storage_path)throw new Error("No template found for this job. Upload a template in Job Settings first.");
+      if(!tplRecord||!tplRecord.storage_path)throw new Error("No template found. Upload a template in Job Settings first.");
       const tplResp=await fetch(`${SB_URL}/storage/v1/object/report-source-docs/${tplRecord.storage_path}`,{
         headers:{apikey:SB_KEY,Authorization:`Bearer ${AUTH_TOKEN||SB_KEY}`}
       });
@@ -870,13 +909,12 @@ function ReportEditor({job, user, onBack, reportDate}){
       const tplBytes=await tplResp.arrayBuffer();
       const isPdfTemplate=tplRecord.file_type==="pdf";
 
-      // ── 2. Load template ──
+      // ── 2. Load template with pdf-lib ──
       let pdfDoc;
       if(isPdfTemplate){
         pdfDoc=await PDFDocument.load(tplBytes,{ignoreEncryption:true});
       }else{
-        pdfDoc=await PDFDocument.create();
-        pdfDoc.addPage([612,792]);
+        pdfDoc=await PDFDocument.create();pdfDoc.addPage([612,792]);
       }
       const font=await pdfDoc.embedFont(StandardFonts.Helvetica);
       const pages=pdfDoc.getPages();
@@ -887,15 +925,13 @@ function ReportEditor({job, user, onBack, reportDate}){
         ...editFields.map(f=>({...f,val:vals[f.name]||""}))
       ];
 
-      // ── 4. Draw values onto template at stored coordinates ──
+      // ── 4. Draw values onto template ──
       allFields.forEach(f=>{
         if(!f.x||!f.y||!f.val)return;
         const pageIdx=(f.page||1)-1;
         if(pageIdx<0||pageIdx>=pages.length)return;
-        const page=pages[pageIdx];
-        const pageH=page.getHeight();
-        const sz=f.fontSize||10;
-        const pdfY=pageH-f.y-sz;
+        const page=pages[pageIdx];const pageH=page.getHeight();
+        const sz=f.fontSize||10;const pdfY=pageH-f.y-sz;
         if(f.multiline&&f.w){
           const maxW=f.w;const words=f.val.split(" ");let lines=[];let line="";
           words.forEach(w=>{const test=line?line+" "+w:w;const tw=font.widthOfTextAtSize(test,sz);if(tw>maxW&&line){lines.push(line);line=w;}else line=test;});
@@ -911,10 +947,11 @@ function ReportEditor({job, user, onBack, reportDate}){
         const cols=parseInt(photoLayout)||2;
         for(let i=0;i<photos.length;i++){
           try{
-            const imgData=photos[i];
+            const imgData=photos[i].src||photos[i];
             let img;
-            if(imgData.startsWith("data:image/png"))img=await pdfDoc.embedPng(imgData);
-            else img=await pdfDoc.embedJpg(imgData);
+            if(typeof imgData==="string"&&imgData.startsWith("data:image/png"))img=await pdfDoc.embedPng(imgData);
+            else if(typeof imgData==="string")img=await pdfDoc.embedJpg(imgData);
+            if(!img)continue;
             if(i%cols===0){const newPage=pdfDoc.addPage([612,792]);newPage.drawText("Photos — "+job.name,{x:36,y:760,size:12,font,color:rgb(0.4,0.4,0.4)});}
             const pg=pdfDoc.getPages()[pdfDoc.getPageCount()-1];
             const slot=i%cols;const imgW=(612-72-(cols-1)*12)/cols;const imgH=imgW*0.75;
@@ -924,7 +961,7 @@ function ReportEditor({job, user, onBack, reportDate}){
         }
       }
 
-      // ── 6. Serialize ──
+      // ── 6. Serialize filled PDF ──
       const filledPdfBytes=await pdfDoc.save();
       const pdfBlob=new Blob([filledPdfBytes],{type:"application/pdf"});
       const uint8=new Uint8Array(filledPdfBytes);
@@ -933,27 +970,21 @@ function ReportEditor({job, user, onBack, reportDate}){
       const baseName=job.report_filename_pattern?job.report_filename_pattern.replace(/\.\w+$/,"").replace("##","01"):("DR_"+job.name.replace(/\s+/g,"_")+"_"+todayISO);
       const pdfFilename=baseName+".pdf";
 
-      // Render PDF pages to images for preview
-      let pageImages=[];
-      try{
-        if(window.pdfjsLib){
-          const copyBuf=new Uint8Array(filledPdfBytes).buffer;
-          const loadTask=window.pdfjsLib.getDocument({data:copyBuf,disableAutoFetch:true,disableStream:true});
-          const pdfJsDoc=await loadTask.promise;
-          for(let i=1;i<=pdfJsDoc.numPages;i++){
-            const pg=await pdfJsDoc.getPage(i);
-            const vp=pg.getViewport({scale:1.5});
-            const cvs=document.createElement("canvas");
-            cvs.width=vp.width;cvs.height=vp.height;
-            const ctx2d=cvs.getContext("2d");
-            await pg.render({canvasContext:ctx2d,viewport:vp}).promise;
-            pageImages.push(cvs.toDataURL("image/jpeg",0.85));
-            cvs.width=0;cvs.height=0;
-          }
-        }
-      }catch(imgErr){console.error("Page render error:",imgErr);}
+      // ── 7. Build preview: load cached template page images, overlay field values as HTML ──
+      let templatePageUrls=[];
+      let templatePageDims={w:612,h:792};// default letter size in pts
+      if(tplRecord.page_images&&tplRecord.page_images.length>0){
+        // Use cached page images from job creation
+        templatePageUrls=tplRecord.page_images.map(p=>db.getTemplatePageUrl(p)+"?t="+Date.now());
+      }
+      // Get actual page dimensions from the PDF
+      if(pages.length>0){
+        templatePageDims={w:pages[0].getWidth(),h:pages[0].getHeight()};
+      }
 
-      setPreviewPdf({blob:pdfBlob,base64:pdfBase64,filename:pdfFilename,images:pageImages});
+      setPreviewPdf({blob:pdfBlob,base64:pdfBase64,filename:pdfFilename,
+        templatePages:templatePageUrls,pageDims:templatePageDims,
+        fields:allFields,photoCount:photos.length});
     }catch(e){
       console.error("PDF generation error:",e);
       showToast("Error: "+e.message);
@@ -979,6 +1010,13 @@ function ReportEditor({job, user, onBack, reportDate}){
         body:previewPdf.blob
       });
 
+      // Build email body
+      const userName=user.user_metadata?.full_name||user.email?.split("@")[0]||"Inspector";
+      const photoNote=photos.length>0?`<p style="color:#555;font-size:14px;margin:12px 0 0;">${photos.length} site photo${photos.length>1?"s":""} included in the attached PDF.</p>`:"";
+      const fieldSummary=editFields.filter(f=>vals[f.name]).map(f=>`<tr><td style="padding:4px 12px 4px 0;color:#888;font-size:13px;white-space:nowrap;">${f.name}</td><td style="padding:4px 0;color:#333;font-size:13px;">${vals[f.name]}</td></tr>`).join("");
+      const summaryTable=fieldSummary?`<table style="margin:16px 0;border-collapse:collapse;">${fieldSummary}</table>`:"";
+      const emailHtml=`<div style="font-family:-apple-system,sans-serif;max-width:600px;margin:0 auto;"><div style="background:#e8742a;padding:20px 24px;border-radius:8px 8px 0 0;"><h1 style="color:#fff;margin:0;font-size:20px;">My Daily Reports</h1></div><div style="background:#f9f9f9;padding:24px;border:1px solid #e0e0e0;border-top:none;border-radius:0 0 8px 8px;"><p style="color:#333;font-size:16px;line-height:1.6;margin:0 0 8px;">Hi,</p><p style="color:#333;font-size:15px;line-height:1.6;margin:0 0 16px;">${userName} has submitted the daily inspection report for <strong>${job.name}</strong> on ${todayDisplay}.</p>${summaryTable}<p style="color:#555;font-size:14px;margin:16px 0 0;">The full PDF report is attached to this email.${photoNote?"":" No site photos were included."}</p>${photoNote}</div><p style="color:#999;font-size:11px;text-align:center;margin-top:16px;">Sent via My Daily Reports &bull; mydailyreports.com</p></div>`;
+
       // Send email
       const teamEmails=job.team_emails||[];
       const userEmail=user.email;
@@ -987,7 +1025,7 @@ function ReportEditor({job, user, onBack, reportDate}){
         try{
           await fetch(`${SB_URL}/functions/v1/send-report`,{
             method:"POST",headers:{"Content-Type":"application/json",Authorization:`Bearer ${SB_KEY}`,apikey:SB_KEY},
-            body:JSON.stringify({to:recipients,subject:`${job.name} — Daily Report ${todayDisplay}`,body:`Daily report for ${job.name} submitted on ${todayDisplay}.`,pdf_base64:previewPdf.base64,pdf_filename:previewPdf.filename})
+            body:JSON.stringify({to:recipients,subject:`${job.name} — Daily Report ${todayDisplay}`,html_body:emailHtml,pdf_base64:previewPdf.base64,pdf_filename:previewPdf.filename})
           });
         }catch(emailErr){console.error("Email send error:",emailErr);}
       }
@@ -1007,10 +1045,34 @@ function ReportEditor({job, user, onBack, reportDate}){
 
   // ── PDF Preview Screen ──
   if(previewPdf){
-    const previewSwipeRef=React.createRef();
-    const handlePreviewTouch=(()=>{let sx=0;return{onTouchStart:e=>{sx=e.touches[0].clientX;},onTouchEnd:e=>{const dx=e.changedTouches[0].clientX-sx;if(dx>80)setPreviewPdf(null);}};})();
+    const swipeState={sx:0};
+    const swipeHandlers={
+      onTouchStart:e=>{swipeState.sx=e.touches[0].clientX;},
+      onTouchEnd:e=>{if(e.changedTouches[0].clientX-swipeState.sx>80)setPreviewPdf(null);}
+    };
+    const pd=previewPdf.pageDims||{w:612,h:792};
+    const hasPages=previewPdf.templatePages&&previewPdf.templatePages.length>0;
+    const renderOverlayPage=(pageNum,imgUrl)=>{
+      const fieldsOnPage=(previewPdf.fields||[]).filter(f=>(f.page||1)===pageNum&&f.val&&f.x&&f.y);
+      return(
+        <div key={pageNum} style={{position:"relative",width:"100%",marginBottom:12,borderRadius:4,overflow:"hidden",boxShadow:"0 1px 6px rgba(0,0,0,0.4)",background:"#fff",aspectRatio:`${pd.w}/${pd.h}`}}>
+          {imgUrl&&<img src={imgUrl} style={{width:"100%",height:"100%",display:"block",objectFit:"contain"}} alt={"Page "+pageNum} crossOrigin="anonymous"/>}
+          {!imgUrl&&<div style={{width:"100%",height:"100%",background:"#f5f5f5",display:"flex",alignItems:"center",justifyContent:"center",color:"#999",fontSize:14}}>Template page {pageNum}</div>}
+          {fieldsOnPage.map((f,i)=>{
+            const leftPct=(f.x/pd.w)*100;
+            const topPct=(f.y/pd.h)*100;
+            const fsPct=((f.fontSize||10)/pd.h)*100;
+            const maxWPct=f.w?((f.w/pd.w)*100):undefined;
+            return(<div key={i} style={{position:"absolute",left:leftPct+"%",top:topPct+"%",fontSize:`min(${fsPct}vw, ${(f.fontSize||10)*1.5}px)`,color:"#000",fontFamily:"Helvetica,Arial,sans-serif",lineHeight:1.2,whiteSpace:f.multiline?"pre-wrap":"nowrap",maxWidth:maxWPct?maxWPct+"%":undefined,overflow:"hidden",pointerEvents:"none"}}>{f.val}</div>);
+          })}
+        </div>
+      );
+    };
+    // Figure out how many pages the template has
+    const pageCount=hasPages?previewPdf.templatePages.length:((previewPdf.fields||[]).reduce((mx,f)=>Math.max(mx,f.page||1),1));
+
     return(
-      <div style={{minHeight:"100vh",background:C.bg,color:C.txt,display:"flex",flexDirection:"column"}} {...handlePreviewTouch}>
+      <div style={{minHeight:"100vh",background:C.bg,color:C.txt,display:"flex",flexDirection:"column"}} {...swipeHandlers}>
         <div style={{display:"flex",alignItems:"center",gap:10,padding:"12px 16px",borderBottom:`1px solid ${C.brd}`,background:C.card}}>
           <button onClick={()=>setPreviewPdf(null)} style={{background:"none",border:"none",color:C.blu,fontSize:28,cursor:"pointer",padding:"8px 12px",lineHeight:1,borderRadius:8,minWidth:48,minHeight:48,display:"flex",alignItems:"center",justifyContent:"center"}}>←</button>
           <MDRLogo size={28}/>
@@ -1020,19 +1082,18 @@ function ReportEditor({job, user, onBack, reportDate}){
           </div>
         </div>
         <div style={{flex:1,overflow:"auto",WebkitOverflowScrolling:"touch",paddingBottom:90}}>
-          {previewPdf.images&&previewPdf.images.length>0?(
-            <div style={{padding:"12px 16px"}}>
-              {previewPdf.images.map((src,i)=>(
-                <img key={i} src={src} style={{width:"100%",display:"block",marginBottom:8,borderRadius:4,boxShadow:"0 1px 4px rgba(0,0,0,0.3)"}} alt={"Page "+(i+1)}/>
-              ))}
-            </div>
-          ):(
-            <div style={{textAlign:"center",padding:40,color:C.mut}}>
-              <div style={{fontSize:48,marginBottom:12}}>📄</div>
-              <div style={{fontSize:14,marginBottom:8}}>PDF preview could not render</div>
-              <div style={{fontSize:12}}>You can still Submit & Send below</div>
-            </div>
-          )}
+          <div style={{padding:"12px 16px"}}>
+            {Array.from({length:pageCount},(_, i)=>{
+              const pgNum=i+1;
+              const imgUrl=hasPages&&previewPdf.templatePages[i]?previewPdf.templatePages[i]:null;
+              return renderOverlayPage(pgNum,imgUrl);
+            })}
+            {previewPdf.photoCount>0&&(
+              <div style={{background:"#1a1a1a",borderRadius:8,padding:16,marginTop:8,textAlign:"center"}}>
+                <span style={{color:C.mut,fontSize:13}}>{previewPdf.photoCount} photo{previewPdf.photoCount>1?"s":""} will be attached</span>
+              </div>
+            )}
+          </div>
         </div>
         <div style={{position:"fixed",bottom:0,left:0,right:0,display:"flex",gap:10,padding:"14px 20px",borderTop:`1px solid ${C.brd}`,background:C.card,zIndex:100}}>
           <button onClick={()=>setPreviewPdf(null)} style={{flex:1,padding:"14px 0",background:"transparent",border:`1px solid ${C.brd}`,borderRadius:10,color:C.lt,fontSize:15,fontWeight:700,cursor:"pointer"}}>
@@ -1287,7 +1348,7 @@ function JobDetail({job, user, onBack, onDeleted}){
     <div style={{minHeight:"100vh",background:C.bg,color:C.txt}}>
       {/* Header */}
       <div style={{display:"flex",alignItems:"center",gap:12,padding:"16px 20px",borderBottom:`1px solid ${C.brd}`,background:C.card}}>
-        <button onClick={onBack} style={{background:"none",border:"none",color:C.mut,fontSize:22,cursor:"pointer",padding:0,lineHeight:1}}>←</button>
+        <button onClick={onBack} style={{background:"none",border:"none",color:C.blu,fontSize:28,cursor:"pointer",padding:"8px 12px",lineHeight:1,borderRadius:8,minWidth:48,minHeight:48,display:"flex",alignItems:"center",justifyContent:"center"}}>←</button>
         <MDRLogo size={28}/>
         <div style={{flex:1}}>
           <div style={{fontWeight:700,fontSize:17}}>{job.name}</div>
@@ -1575,7 +1636,7 @@ function TrainingCenter({onBack}){
   return(
     <div style={{minHeight:"100vh",background:C.bg,color:C.txt}}>
       <div style={{display:"flex",alignItems:"center",gap:12,padding:"16px 20px",borderBottom:`1px solid ${C.brd}`,background:C.card}}>
-        <button onClick={onBack} style={{background:"none",border:"none",color:C.mut,fontSize:22,cursor:"pointer",padding:0,lineHeight:1}}>←</button>
+        <button onClick={onBack} style={{background:"none",border:"none",color:C.blu,fontSize:28,cursor:"pointer",padding:"8px 12px",lineHeight:1,borderRadius:8,minWidth:48,minHeight:48,display:"flex",alignItems:"center",justifyContent:"center"}}>←</button>
         <MDRLogo size={28}/>
         <span style={{fontWeight:700,fontSize:17}}>Training Center</span>
       </div>
@@ -1840,7 +1901,21 @@ function Dashboard({user, onLogout}){
                         {rq.notes&&<div style={{fontSize:11,color:C.mut,marginTop:4,fontStyle:"italic"}}>{rq.notes}</div>}
                         <div style={{display:"flex",gap:8,marginTop:10}}>
                           {rq.status!=="confirmed"&&(
-                            <button onClick={async(e)=>{e.stopPropagation();try{await db.updateRequest(rq.id,{status:"confirmed"});await loadRequests();}catch(er){alert("Error: "+er.message);}}} style={{flex:1,padding:"7px 0",fontSize:12,fontWeight:700,borderRadius:6,background:"#22c55e",border:"none",color:"#fff",cursor:"pointer"}}>
+                            <button onClick={async(e)=>{e.stopPropagation();try{
+                              await db.updateRequest(rq.id,{status:"confirmed"});
+                              // Send confirmation email to requester
+                              if(rq.requester_email){
+                                const reqDate=new Date(rq.requested_date+"T12:00:00").toLocaleDateString("en-US",{weekday:"long",month:"long",day:"numeric",year:"numeric"});
+                                const inspectorName=user?.user_metadata?.full_name||user?.email||"Your inspector";
+                                fetch(`${SB_URL}/functions/v1/send-report`,{
+                                  method:"POST",headers:{"Content-Type":"application/json",Authorization:`Bearer ${SB_KEY}`,apikey:SB_KEY},
+                                  body:JSON.stringify({to:[rq.requester_email],subject:`Inspection Confirmed — ${rq.jobs?.name||"Job"} on ${reqDate}`,
+                                    html_body:`<div style="font-family:-apple-system,sans-serif;max-width:600px;margin:0 auto;"><div style="background:#22c55e;padding:20px 24px;border-radius:8px 8px 0 0;"><h1 style="color:#fff;margin:0;font-size:20px;">Inspection Confirmed</h1></div><div style="background:#f9f9f9;padding:24px;border:1px solid #e0e0e0;border-top:none;border-radius:0 0 8px 8px;"><p style="color:#333;font-size:16px;line-height:1.6;margin:0 0 8px;">Hi ${rq.requester_name||"there"},</p><p style="color:#333;font-size:15px;line-height:1.6;margin:0 0 16px;">Your inspection request for <strong>${rq.jobs?.name||"the job"}</strong> has been confirmed by ${inspectorName} for <strong>${reqDate}</strong>.</p><p style="color:#555;font-size:14px;margin:0;">Type: ${rq.inspection_type||"General Inspection"}</p></div><p style="color:#999;font-size:11px;text-align:center;margin-top:16px;">Sent via My Daily Reports &bull; mydailyreports.com</p></div>`
+                                  })
+                                }).catch(emailErr=>console.error("Confirmation email error:",emailErr));
+                              }
+                              await loadRequests();
+                            }catch(er){alert("Error: "+er.message);}}} style={{flex:1,padding:"7px 0",fontSize:12,fontWeight:700,borderRadius:6,background:"#22c55e",border:"none",color:"#fff",cursor:"pointer"}}>
                               ✓ Scheduled
                             </button>
                           )}
