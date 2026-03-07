@@ -97,8 +97,6 @@ function AccountSettings({user, onBack, onLogout}){
   // Form state
   const [fullName,setFullName]=useState(user?.user_metadata?.full_name||"");
   const [email,setEmail]=useState(user?.email||"");
-  const [phone,setPhone]=useState("");
-  const [company,setCompany]=useState("");
   const [timezone,setTimezone]=useState(Intl.DateTimeFormat().resolvedOptions().timeZone);
   const [slug,setSlug]=useState("");
   const [showDelete,setShowDelete]=useState(false);
@@ -122,8 +120,6 @@ function AccountSettings({user, onBack, onLogout}){
         if(p){
           setProfile(p);
           if(p.full_name)setFullName(p.full_name);
-          if(p.phone)setPhone(p.phone);
-          if(p.company)setCompany(p.company);
           if(p.timezone)setTimezone(p.timezone);
           if(p.slug)setSlug(p.slug);
         }
@@ -142,8 +138,6 @@ function AccountSettings({user, onBack, onLogout}){
         id:user.id,
         full_name:fullName.trim(),
         email:email.trim(),
-        phone:phone.trim()||null,
-        company:company.trim()||null,
         timezone,
         slug:slugVal,
       };
@@ -205,30 +199,22 @@ function AccountSettings({user, onBack, onLogout}){
                 </div>
 
                 <div style={{marginBottom:16}}>
-                  <label style={ls}>Full Name *</label>
-                  <input type="text" value={fullName} onChange={e=>setFullName(e.target.value)} placeholder="Jesse Saltzman" style={fs}/>
+                  <label style={ls}>Full Name</label>
+                  <input type="text" value={fullName} readOnly style={{...fs,opacity:0.6,cursor:"default"}}/>
+                  <div style={{fontSize:11,color:C.mut,marginTop:4}}>Set during sign up</div>
                 </div>
 
                 <div style={{marginBottom:16}}>
                   <label style={ls}>Email</label>
-                  <input type="email" value={email} onChange={e=>setEmail(e.target.value)} style={{...fs,opacity:0.6}} disabled/>
-                  <div style={{fontSize:11,color:C.mut,marginTop:4}}>Email cannot be changed here</div>
-                </div>
-
-                <div style={{marginBottom:16}}>
-                  <label style={ls}>Phone Number</label>
-                  <input type="tel" value={phone} onChange={e=>setPhone(e.target.value)} placeholder="(619) 555-0123" style={fs}/>
-                </div>
-
-                <div style={{marginBottom:16}}>
-                  <label style={ls}>Company / Firm</label>
-                  <input type="text" value={company} onChange={e=>setCompany(e.target.value)} placeholder="Saltzman Inspections LLC" style={fs}/>
+                  <input type="email" value={email} readOnly style={{...fs,opacity:0.6,cursor:"default"}}/>
+                  <div style={{fontSize:11,color:C.mut,marginTop:4}}>Set during sign up</div>
                 </div>
 
                 <div style={{marginBottom:0}}>
-                  <label style={ls}>Scheduling Profile Slug</label>
+                  <label style={ls}>Scheduling Display Name</label>
                   <input type="text" value={slug} onChange={e=>setSlug(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g,""))} placeholder="jesse-saltzman" style={fs}/>
-                  <div style={{fontSize:11,color:C.blu,marginTop:4}}>Your scheduling URL: hub.html?i={slug||"your-slug"}</div>
+                  <div style={{fontSize:12,color:C.mut,marginTop:6,lineHeight:1.4}}>This is how your name appears at the end of your scheduling URL</div>
+                  <div style={{fontSize:12,color:C.blu,marginTop:4,fontWeight:600}}>hub.html?i={slug||"your-name"}</div>
                 </div>
               </div>
             </div>
@@ -259,8 +245,12 @@ function AccountSettings({user, onBack, onLogout}){
                 <div style={{fontWeight:700,fontSize:15,color:C.txt,marginBottom:16,display:"flex",alignItems:"center",gap:8}}>
                   <span style={{color:C.org}}>🔔</span> Notifications
                 </div>
-                <div style={{fontSize:13,color:C.mut,lineHeight:1.6}}>
-                  Push notifications and email reminders will be available soon. Your reminder settings are configured per-job during job creation.
+                <div style={{fontSize:13,color:C.mut,lineHeight:1.6,marginBottom:14}}>
+                  Email reminders are sent based on your per-job reminder settings.
+                </div>
+                <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"12px 0",borderTop:`1px solid ${C.brd}`}}>
+                  <div><div style={{fontSize:14,fontWeight:600,color:C.lt}}>Email Reminders</div><div style={{fontSize:11,color:C.mut}}>Configured per-job in job settings</div></div>
+                  <div style={{fontSize:12,fontWeight:600,color:C.ok}}>Active</div>
                 </div>
               </div>
             </div>
@@ -287,7 +277,7 @@ function AccountSettings({user, onBack, onLogout}){
             </div>
 
             {/* Save Button */}
-            <button className="btn-o" onClick={saveProfile} disabled={saving||!fullName.trim()} style={{width:"100%",padding:"14px 0",background:fullName.trim()?C.org:C.brd,border:`1px solid ${fullName.trim()?C.blu:C.brd}`,borderRadius:10,color:"#fff",fontSize:16,fontWeight:700,cursor:fullName.trim()&&!saving?"pointer":"default",opacity:saving?0.7:1,marginBottom:28}}>
+            <button className="btn-o" onClick={saveProfile} disabled={saving} style={{width:"100%",padding:"14px 0",background:C.org,border:`1px solid ${C.blu}`,borderRadius:10,color:"#fff",fontSize:16,fontWeight:700,cursor:saving?"default":"pointer",opacity:saving?0.7:1,marginBottom:28}}>
               {saving?"Saving...":"Save Settings"}
             </button>
 
