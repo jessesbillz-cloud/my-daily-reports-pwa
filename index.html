@@ -125,7 +125,7 @@ const db = {
   // Save or update a working copy / draft report
   async saveReport(d){
     // Check if draft exists for this job+date
-    const chk=await fetch(`${SB_URL}/rest/v1/reports?select=id&job_id=eq.${d.job_id}&report_date=eq.${d.report_date}&status=eq.working`,{headers:this._h()});
+    const chk=await fetch(`${SB_URL}/rest/v1/reports?select=id&job_id=eq.${d.job_id}&report_date=eq.${d.report_date}&status=eq.working_copy`,{headers:this._h()});
     const existing=chk.ok?await chk.json():[];
     if(existing.length>0){
       // Update existing draft
@@ -145,7 +145,7 @@ const db = {
   },
   // Get draft report for a job + date
   async getDraft(jobId,date){
-    const r=await fetch(`${SB_URL}/rest/v1/reports?select=*&job_id=eq.${jobId}&report_date=eq.${date}&status=eq.working&limit=1`,{headers:this._h()});
+    const r=await fetch(`${SB_URL}/rest/v1/reports?select=*&job_id=eq.${jobId}&report_date=eq.${date}&status=eq.working_copy&limit=1`,{headers:this._h()});
     if(!r.ok)return null;
     const d=await r.json();
     return d[0]||null;
@@ -807,7 +807,7 @@ function ReportEditor({job, user, onBack}){
         job_id:job.id,
         user_id:user.id,
         report_date:todayISO,
-        status:"working",
+        status:"working_copy",
         content:JSON.stringify(content),
         updated_at:new Date().toISOString()
       });
