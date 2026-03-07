@@ -157,6 +157,11 @@ const db = {
     if(!r.ok)throw new Error("Field config update failed");
     return(await r.json())[0];
   },
+  // Get the template record for a job
+  async getTemplate(jobId){
+    const r=await fetch(`${SB_URL}/rest/v1/templates?job_id=eq.${jobId}&select=*&limit=1`,{headers:this._h()});
+    if(!r.ok)return null;const d=await r.json();return d[0]||null;
+  },
   // Fetch inspection requests for user's jobs in a date range
   async getRequests(userId,startDate,endDate){
     const r=await fetch(`${SB_URL}/rest/v1/inspection_requests?user_id=eq.${userId}&requested_date=gte.${startDate}&requested_date=lte.${endDate}&select=*,jobs(name,site_address)&order=requested_date.asc`,{headers:this._h()});
@@ -844,16 +849,25 @@ function ReportEditor({job, user, onBack}){
     try{
       const {PDFDocument,rgb,StandardFonts}=PDFLib;
 
-      // ── 1. Download the original template PDF from Supabase Storage ──
-      const tplPath=`${user.id}/${job.id}/template.pdf`;
-      const tplResp=await fetch(`${SB_URL}/storage/v1/object/report-source-docs/${tplPath}`,{
+      // ── 1. Look up template storage path from templates table ──
+      const tplRecord=await db.getTemplate(job.id);
+      if(!tplRecord||!tplRecord.storage_path)throw new Error("No template found for this job. Upload a template in Job Settings first.");
+      const tplResp=await fetch(`${SB_URL}/storage/v1/object/report-source-docs/${tplRecord.storage_path}`,{
         headers:{apikey:SB_KEY,Authorization:`Bearer ${AUTH_TOKEN||SB_KEY}`}
       });
-      if(!tplResp.ok)throw new Error("Could not download template PDF. Make sure a PDF template was uploaded for this job.");
+      if(!tplResp.ok)throw new Error("Could not download template file. Storage path: "+tplRecord.storage_path);
       const tplBytes=await tplResp.arrayBuffer();
+      const isPdfTemplate=tplRecord.file_type==="pdf";
 
-      // ── 2. Load template into pdf-lib ──
-      const pdfDoc=await PDFDocument.load(tplBytes,{ignoreEncryption:true});
+      // ── 2. Load template into pdf-lib (PDF templates) or create new doc (DOCX) ──
+      let pdfDoc;
+      if(isPdfTemplate){
+        pdfDoc=await PDFDocument.load(tplBytes,{ignoreEncryption:true});
+      }else{
+        // For DOCX templates, create a fresh PDF and lay out the fields
+        pdfDoc=await PDFDocument.create();
+        pdfDoc.addPage([612,792]);
+      }
       const font=await pdfDoc.embedFont(StandardFonts.Helvetica);
       const pages=pdfDoc.getPages();
 
