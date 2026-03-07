@@ -24,7 +24,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.9/babel.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 <script type="text/babel">
-const { useState, useEffect, useRef } = React;
+const { useState, useEffect, useRef, useCallback } = React;
 const SB_URL = "https://wluvkmpncafugdbunlkw.supabase.co";
 const SB_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndsdXZrbXBuY2FmdWdkYnVubGt3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzIzMDU1MTUsImV4cCI6MjA4Nzg4MTUxNX0.HZpQ2xVGpf4EQ0BVDmIEuPqW5T_eNG5OqBNAqT03rH8";
 const C = {bg:"#0f0f0f",card:"#1a1a1a",brd:"#333",inp:"#222",org:"#e8742a",orgH:"#d4691f",blu:"#5a8fc0",txt:"#fff",mut:"#888",lt:"#ccc",err:"#ef4444",ok:"#22c55e"};
@@ -32,19 +32,319 @@ const DEV_USER = {id:"00000000-0000-0000-0000-000000000001",email:"saltzman.jess
 
 const SL={daily_mf:"Daily M-F",daily_7:"Daily 7 Days",weekly:"Weekly",as_needed:"As Needed",custom:"Custom"};
 
+/* ── MDR Logo SVG Component ── */
+function MDRLogo({size=36}){
+  return(
+    <svg width={size} height={size} viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <circle cx="50" cy="50" r="48" fill="#5a8fc0" opacity="0.15"/>
+      <circle cx="50" cy="50" r="40" fill="#1a1a1a" stroke="#5a8fc0" strokeWidth="2"/>
+      {/* Gear teeth */}
+      {[0,45,90,135,180,225,270,315].map((angle,i)=>{
+        const rad=angle*Math.PI/180;
+        const x1=50+34*Math.cos(rad);const y1=50+34*Math.sin(rad);
+        const x2=50+42*Math.cos(rad);const y2=50+42*Math.sin(rad);
+        return <line key={i} x1={x1} y1={y1} x2={x2} y2={y2} stroke="#5a8fc0" strokeWidth="6" strokeLinecap="round"/>;
+      })}
+      <circle cx="50" cy="50" r="28" fill="#1a1a1a" stroke="#5a8fc0" strokeWidth="1.5"/>
+      <circle cx="50" cy="50" r="6" fill="#5a8fc0"/>
+      {/* Clock hands */}
+      <line x1="50" y1="50" x2="50" y2="28" stroke="#fff" strokeWidth="2.5" strokeLinecap="round"/>
+      <line x1="50" y1="50" x2="62" y2="42" stroke="#fff" strokeWidth="2" strokeLinecap="round"/>
+      {/* Hour markers */}
+      {[0,90,180,270].map((angle,i)=>{
+        const rad=angle*Math.PI/180;
+        const x1=50+22*Math.cos(rad);const y1=50+22*Math.sin(rad);
+        const x2=50+26*Math.cos(rad);const y2=50+26*Math.sin(rad);
+        return <line key={`m${i}`} x1={x1} y1={y1} x2={x2} y2={y2} stroke="#5a8fc0" strokeWidth="2" strokeLinecap="round"/>;
+      })}
+    </svg>
+  );
+}
+
+/* ── Database Layer ── */
 const db = {
   _h(){return{"Content-Type":"application/json",apikey:SB_KEY,Authorization:`Bearer ${SB_KEY}`,Prefer:"return=representation"};},
-  async jobs(){const r=await fetch(`${SB_URL}/rest/v1/jobs?select=*&order=created_at.asc`,{headers:this._h()});if(!r.ok)throw new Error("Failed");return await r.json();},
+  async jobs(userId){const r=await fetch(`${SB_URL}/rest/v1/jobs?user_id=eq.${userId}&select=*&order=created_at.asc`,{headers:this._h()});if(!r.ok)throw new Error("Failed");return await r.json();},
   async todayRpts(ids){if(!ids.length)return[];const t=new Date().toISOString().split("T")[0];const q=ids.map(i=>`"${i}"`).join(",");const r=await fetch(`${SB_URL}/rest/v1/reports?select=id,job_id,status,report_date&report_date=eq.${t}&job_id=in.(${q})`,{headers:this._h()});if(!r.ok)return[];return await r.json();},
   async mkJob(d){const r=await fetch(`${SB_URL}/rest/v1/jobs`,{method:"POST",headers:this._h(),body:JSON.stringify(d)});if(!r.ok){const e=await r.json();throw new Error(e.message||"Failed");}return(await r.json())[0];},
   async ulTpl(uid,jid,f){const ext=f.name.split(".").pop().toLowerCase();const p=`${uid}/${jid}/template.${ext}`;const r=await fetch(`${SB_URL}/storage/v1/object/report-source-docs/${p}`,{method:"POST",headers:{apikey:SB_KEY,Authorization:`Bearer ${SB_KEY}`,"Content-Type":f.type||"application/octet-stream"},body:f});if(!r.ok)throw new Error("Upload failed");return p;},
   async mkTpl(d){const r=await fetch(`${SB_URL}/rest/v1/templates`,{method:"POST",headers:this._h(),body:JSON.stringify(d)});if(!r.ok)throw new Error("Template save failed");return(await r.json())[0];},
+  async getProfile(userId){const r=await fetch(`${SB_URL}/rest/v1/profiles?id=eq.${userId}&select=*`,{headers:this._h()});if(!r.ok)return null;const d=await r.json();return d[0]||null;},
+  async upsertProfile(d){const r=await fetch(`${SB_URL}/rest/v1/profiles`,{method:"POST",headers:{...this._h(),Prefer:"return=representation,resolution=merge-duplicates"},body:JSON.stringify(d)});if(!r.ok)throw new Error("Profile save failed");return(await r.json())[0];},
+  async deleteJob(jobId){
+    // Delete related templates, reports, then the job itself
+    await fetch(`${SB_URL}/rest/v1/templates?job_id=eq.${jobId}`,{method:"DELETE",headers:this._h()});
+    await fetch(`${SB_URL}/rest/v1/reports?job_id=eq.${jobId}`,{method:"DELETE",headers:this._h()});
+    const r=await fetch(`${SB_URL}/rest/v1/jobs?id=eq.${jobId}`,{method:"DELETE",headers:this._h()});
+    if(!r.ok)throw new Error("Delete failed");return true;
+  },
+  async deleteAccount(userId){
+    // Delete jobs, then profile
+    await fetch(`${SB_URL}/rest/v1/jobs?user_id=eq.${userId}`,{method:"DELETE",headers:this._h()});
+    await fetch(`${SB_URL}/rest/v1/profiles?id=eq.${userId}`,{method:"DELETE",headers:this._h()});
+    return true;
+  },
 };
 
+/* ── Account Settings Page ── */
+function AccountSettings({user, onBack, onLogout}){
+  const [profile,setProfile]=useState(null);
+  const [loading,setLoading]=useState(true);
+  const [saving,setSaving]=useState(false);
+  const [msg,setMsg]=useState("");
+  const [msgType,setMsgType]=useState("ok");
+
+  // Form state
+  const [fullName,setFullName]=useState(user?.user_metadata?.full_name||"");
+  const [email,setEmail]=useState(user?.email||"");
+  const [phone,setPhone]=useState("");
+  const [company,setCompany]=useState("");
+  const [timezone,setTimezone]=useState(Intl.DateTimeFormat().resolvedOptions().timeZone);
+  const [slug,setSlug]=useState("");
+  const [showDelete,setShowDelete]=useState(false);
+  const [deleteConfirm,setDeleteConfirm]=useState("");
+
+  const TZ_OPTIONS = [
+    "America/New_York","America/Chicago","America/Denver","America/Phoenix",
+    "America/Los_Angeles","America/Anchorage","Pacific/Honolulu"
+  ];
+  const TZ_LABELS = {
+    "America/New_York":"Eastern (ET)","America/Chicago":"Central (CT)",
+    "America/Denver":"Mountain (MT)","America/Phoenix":"Arizona (MST)",
+    "America/Los_Angeles":"Pacific (PT)","America/Anchorage":"Alaska (AKT)",
+    "Pacific/Honolulu":"Hawaii (HT)"
+  };
+
+  useEffect(()=>{
+    (async()=>{
+      try{
+        const p=await db.getProfile(user.id);
+        if(p){
+          setProfile(p);
+          if(p.full_name)setFullName(p.full_name);
+          if(p.phone)setPhone(p.phone);
+          if(p.company)setCompany(p.company);
+          if(p.timezone)setTimezone(p.timezone);
+          if(p.slug)setSlug(p.slug);
+        }
+      }catch(e){console.error(e);}
+      finally{setLoading(false);}
+    })();
+  },[]);
+
+  const flash=(m,t="ok")=>{setMsg(m);setMsgType(t);setTimeout(()=>setMsg(""),3000);};
+
+  const saveProfile=async()=>{
+    setSaving(true);
+    try{
+      const slugVal=slug.trim()||fullName.trim().toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/(^-|-$)/g,"");
+      const data={
+        id:user.id,
+        full_name:fullName.trim(),
+        email:email.trim(),
+        phone:phone.trim()||null,
+        company:company.trim()||null,
+        timezone,
+        slug:slugVal,
+      };
+      await db.upsertProfile(data);
+      flash("Settings saved successfully");
+    }catch(e){
+      flash(e.message,"err");
+    }finally{setSaving(false);}
+  };
+
+  const handleDelete=async()=>{
+    if(deleteConfirm!=="DELETE MY ACCOUNT")return;
+    try{
+      await db.deleteAccount(user.id);
+      flash("Account deleted");
+      setTimeout(()=>onLogout(),1500);
+    }catch(e){flash("Delete failed: "+e.message,"err");}
+  };
+
+  const fs={width:"100%",padding:"12px 14px",background:C.inp,border:`1px solid ${C.brd}`,borderRadius:10,color:C.txt,fontSize:15};
+  const ls={display:"block",color:C.lt,fontSize:13,fontWeight:600,marginBottom:6};
+
+  return(
+    <div style={{minHeight:"100vh",background:C.bg,color:C.txt}}>
+      {/* Header */}
+      <div style={{display:"flex",alignItems:"center",gap:12,padding:"16px 20px",borderBottom:`1px solid ${C.brd}`,background:C.card}}>
+        <button onClick={onBack} style={{background:"none",border:"none",color:C.mut,fontSize:22,cursor:"pointer",padding:0,lineHeight:1}}>←</button>
+        <MDRLogo size={28}/>
+        <span style={{fontWeight:700,fontSize:17}}>Account Settings</span>
+      </div>
+
+      <div style={{maxWidth:500,margin:"0 auto",padding:"24px 20px"}}>
+        {/* Status message */}
+        {msg&&(
+          <div style={{background:msgType==="ok"?"rgba(34,197,94,0.1)":"#2d1214",border:`1px solid ${msgType==="ok"?"rgba(34,197,94,0.3)":"#5c2023"}`,borderRadius:8,padding:"10px 14px",marginBottom:16,color:msgType==="ok"?C.ok:C.err,fontSize:13,fontWeight:600}}>
+            {msg}
+          </div>
+        )}
+
+        {loading?(
+          <p style={{textAlign:"center",color:C.mut,padding:40}}>Loading profile...</p>
+        ):(
+          <>
+            {/* Profile Section */}
+            <div style={{marginBottom:28}}>
+              <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:16}}>
+                <div style={{width:48,height:48,borderRadius:"50%",background:C.org,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:700,fontSize:20,color:"#fff",flexShrink:0}}>
+                  {fullName?fullName.charAt(0).toUpperCase():"?"}
+                </div>
+                <div>
+                  <div style={{fontWeight:700,fontSize:16,color:C.txt}}>{fullName||"Inspector"}</div>
+                  <div style={{fontSize:12,color:C.mut}}>{email}</div>
+                </div>
+              </div>
+
+              <div style={{background:C.card,border:`1px solid ${C.brd}`,borderRadius:12,padding:20}}>
+                <div style={{fontWeight:700,fontSize:15,color:C.txt,marginBottom:16,display:"flex",alignItems:"center",gap:8}}>
+                  <span style={{color:C.org}}>👤</span> Profile Information
+                </div>
+
+                <div style={{marginBottom:16}}>
+                  <label style={ls}>Full Name *</label>
+                  <input type="text" value={fullName} onChange={e=>setFullName(e.target.value)} placeholder="Jesse Saltzman" style={fs}/>
+                </div>
+
+                <div style={{marginBottom:16}}>
+                  <label style={ls}>Email</label>
+                  <input type="email" value={email} onChange={e=>setEmail(e.target.value)} style={{...fs,opacity:0.6}} disabled/>
+                  <div style={{fontSize:11,color:C.mut,marginTop:4}}>Email cannot be changed here</div>
+                </div>
+
+                <div style={{marginBottom:16}}>
+                  <label style={ls}>Phone Number</label>
+                  <input type="tel" value={phone} onChange={e=>setPhone(e.target.value)} placeholder="(619) 555-0123" style={fs}/>
+                </div>
+
+                <div style={{marginBottom:16}}>
+                  <label style={ls}>Company / Firm</label>
+                  <input type="text" value={company} onChange={e=>setCompany(e.target.value)} placeholder="Saltzman Inspections LLC" style={fs}/>
+                </div>
+
+                <div style={{marginBottom:0}}>
+                  <label style={ls}>Scheduling Profile Slug</label>
+                  <input type="text" value={slug} onChange={e=>setSlug(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g,""))} placeholder="jesse-saltzman" style={fs}/>
+                  <div style={{fontSize:11,color:C.blu,marginTop:4}}>Your scheduling URL: hub.html?i={slug||"your-slug"}</div>
+                </div>
+              </div>
+            </div>
+
+            {/* Timezone Section */}
+            <div style={{marginBottom:28}}>
+              <div style={{background:C.card,border:`1px solid ${C.brd}`,borderRadius:12,padding:20}}>
+                <div style={{fontWeight:700,fontSize:15,color:C.txt,marginBottom:16,display:"flex",alignItems:"center",gap:8}}>
+                  <span style={{color:C.org}}>🕐</span> Timezone
+                </div>
+                <div style={{marginBottom:8}}>
+                  <label style={ls}>Your Timezone</label>
+                  <select value={timezone} onChange={e=>setTimezone(e.target.value)} style={{...fs,cursor:"pointer"}}>
+                    {TZ_OPTIONS.map(tz=>(
+                      <option key={tz} value={tz}>{TZ_LABELS[tz]||tz}</option>
+                    ))}
+                  </select>
+                </div>
+                <div style={{fontSize:12,color:C.mut}}>
+                  Current time: {new Date().toLocaleTimeString("en-US",{timeZone:timezone,hour:"numeric",minute:"2-digit",hour12:true})}
+                </div>
+              </div>
+            </div>
+
+            {/* Notifications Section */}
+            <div style={{marginBottom:28}}>
+              <div style={{background:C.card,border:`1px solid ${C.brd}`,borderRadius:12,padding:20}}>
+                <div style={{fontWeight:700,fontSize:15,color:C.txt,marginBottom:16,display:"flex",alignItems:"center",gap:8}}>
+                  <span style={{color:C.org}}>🔔</span> Notifications
+                </div>
+                <div style={{fontSize:13,color:C.mut,lineHeight:1.6}}>
+                  Push notifications and email reminders will be available soon. Your reminder settings are configured per-job during job creation.
+                </div>
+              </div>
+            </div>
+
+            {/* Subscription Section */}
+            <div style={{marginBottom:28}}>
+              <div style={{background:C.card,border:`1px solid ${C.brd}`,borderRadius:12,padding:20}}>
+                <div style={{fontWeight:700,fontSize:15,color:C.txt,marginBottom:12,display:"flex",alignItems:"center",gap:8}}>
+                  <span style={{color:C.org}}>⭐</span> Subscription
+                </div>
+                <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:12}}>
+                  <div>
+                    <div style={{fontSize:14,fontWeight:600,color:C.txt}}>Early Access</div>
+                    <div style={{fontSize:12,color:C.ok,fontWeight:600}}>Active</div>
+                  </div>
+                  <div style={{background:"rgba(34,197,94,0.1)",border:"1px solid rgba(34,197,94,0.3)",borderRadius:8,padding:"6px 12px"}}>
+                    <span style={{fontSize:12,fontWeight:700,color:C.ok}}>FREE</span>
+                  </div>
+                </div>
+                <div style={{fontSize:12,color:C.mut,lineHeight:1.5}}>
+                  You're part of the early access group. Paid tiers coming soon with additional features.
+                </div>
+              </div>
+            </div>
+
+            {/* Save Button */}
+            <button className="btn-o" onClick={saveProfile} disabled={saving||!fullName.trim()} style={{width:"100%",padding:"14px 0",background:fullName.trim()?C.org:C.brd,border:`1px solid ${fullName.trim()?C.blu:C.brd}`,borderRadius:10,color:"#fff",fontSize:16,fontWeight:700,cursor:fullName.trim()&&!saving?"pointer":"default",opacity:saving?0.7:1,marginBottom:28}}>
+              {saving?"Saving...":"Save Settings"}
+            </button>
+
+            {/* Danger Zone */}
+            <div style={{marginBottom:28}}>
+              <div style={{background:C.card,border:"1px solid #5c2023",borderRadius:12,padding:20}}>
+                <div style={{fontWeight:700,fontSize:15,color:C.err,marginBottom:12,display:"flex",alignItems:"center",gap:8}}>
+                  <span>⚠️</span> Danger Zone
+                </div>
+
+                {!showDelete?(
+                  <button onClick={()=>setShowDelete(true)} style={{width:"100%",padding:"12px 16px",background:"transparent",border:"1px solid #5c2023",borderRadius:8,color:C.err,fontSize:14,fontWeight:600,cursor:"pointer"}}>
+                    Delete My Account
+                  </button>
+                ):(
+                  <div>
+                    <div style={{fontSize:13,color:C.err,lineHeight:1.5,marginBottom:12}}>
+                      This will permanently delete your account, all jobs, all reports, and all data. This action cannot be undone.
+                    </div>
+                    <div style={{marginBottom:12}}>
+                      <label style={{...ls,color:C.err}}>Type "DELETE MY ACCOUNT" to confirm</label>
+                      <input type="text" value={deleteConfirm} onChange={e=>setDeleteConfirm(e.target.value)} placeholder="DELETE MY ACCOUNT" style={{...fs,borderColor:"#5c2023"}}/>
+                    </div>
+                    <div style={{display:"flex",gap:10}}>
+                      <button onClick={()=>{setShowDelete(false);setDeleteConfirm("");}} style={{flex:1,padding:"10px 0",background:C.inp,border:`1px solid ${C.brd}`,borderRadius:8,color:C.lt,fontSize:14,fontWeight:600,cursor:"pointer"}}>
+                        Cancel
+                      </button>
+                      <button onClick={handleDelete} disabled={deleteConfirm!=="DELETE MY ACCOUNT"} style={{flex:1,padding:"10px 0",background:deleteConfirm==="DELETE MY ACCOUNT"?"#ef4444":C.brd,border:"none",borderRadius:8,color:"#fff",fontSize:14,fontWeight:700,cursor:deleteConfirm==="DELETE MY ACCOUNT"?"pointer":"default",opacity:deleteConfirm==="DELETE MY ACCOUNT"?1:0.5}}>
+                        Delete Permanently
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Sign Out */}
+            <button onClick={onLogout} style={{width:"100%",padding:"14px 16px",background:"transparent",border:`1px solid ${C.brd}`,borderRadius:10,color:C.err,fontSize:15,fontWeight:600,cursor:"pointer",marginBottom:20,display:"flex",alignItems:"center",justifyContent:"center",gap:8}}>
+              <span>🚪</span> Sign Out
+            </button>
+
+            <div style={{textAlign:"center",padding:"12px 0 24px",color:"#444",fontSize:11}}>
+              My Daily Reports v1.0 • Built in San Diego, CA
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ── Create Job ── */
 function CreateJob({user, onBack, onCreated}){
   const [jn,setJn]=useState("");
   const [addr,setAddr]=useState("");
   const [tf,setTf]=useState(null);
+  const [freqOn,setFreqOn]=useState(false);
   const [sched,setSched]=useState("");
   const [days,setDays]=useState([]);
   const [remOn,setRemOn]=useState(false);
@@ -55,16 +355,14 @@ function CreateJob({user, onBack, onCreated}){
   const [err,setErr]=useState("");
   const [drag,setDrag]=useState(false);
   const [parsing,setParsing]=useState(false);
-  const [editFields,setEditFields]=useState([]);
-  const [lockFields,setLockFields]=useState([]);
-  const [showLocked,setShowLocked]=useState(false);
+  const [fields,setFields]=useState([]); // unified field list: {name, value, mode: "edit"|"lock"|"auto-date"|"auto-num"}
 
   const DS=["Mon","Tue","Wed","Thu","Fri","Sat","Sun"];
   const TS=["12:00 PM","1:00 PM","2:00 PM","3:00 PM","4:00 PM","5:00 PM","6:00 PM","7:00 PM","8:00 PM","9:00 PM"];
 
   const togDay=(d)=>{setSched("custom");setDays(p=>p.includes(d)?p.filter(x=>x!==d):[...p,d]);};
   const preset=(p)=>{setSched(p);setDays([]);if(p==="as_needed")setRemOn(false);};
-  const effSch=()=>{if(sched==="weekly"||sched==="as_needed")return sched;if(days.length===5&&["Mon","Tue","Wed","Thu","Fri"].every(d=>days.includes(d))&&!days.includes("Sat")&&!days.includes("Sun"))return"daily_mf";if(days.length===7)return"daily_7";if(days.length>0)return"custom";return sched||"daily_mf";};
+  const effSch=()=>{if(!freqOn)return"as_needed";if(sched==="weekly"||sched==="as_needed")return sched;if(days.length===5&&["Mon","Tue","Wed","Thu","Fri"].every(d=>days.includes(d))&&!days.includes("Sat")&&!days.includes("Sun"))return"daily_mf";if(days.length===7)return"daily_7";if(days.length>0)return"custom";return sched||"as_needed";};
 
   const readFileAsBase64=async(f)=>{return new Promise((res)=>{const r=new FileReader();r.onload=()=>res(r.result.split(",")[1]);r.readAsDataURL(f);});};
 
@@ -83,21 +381,31 @@ function CreateJob({user, onBack, onCreated}){
   };
 
   const parseFields=async(f)=>{
-    setParsing(true);setErr("");setEditFields([]);setLockFields([]);
+    setParsing(true);setErr("");setFields([]);
     try{
       const isPdf=f.name.toLowerCase().endsWith(".pdf");
       let payload;
       if(isPdf){const base64=await readFileAsBase64(f);payload={file_base64:base64,file_name:f.name};}
       else{const docText=await extractDocxText(f);payload={file_text:docText,file_name:f.name};}
-      const resp=await fetch("https://wluvkmpncafugdbunlkw.supabase.co/functions/v1/parse-template",{
+      const resp=await fetch(`${SB_URL}/functions/v1/parse-template`,{
         method:"POST",
         headers:{"Content-Type":"application/json","Authorization":"Bearer "+SB_KEY,"apikey":SB_KEY},
         body:JSON.stringify(payload)
       });
       const parsed=await resp.json();
       if(parsed.error)throw new Error(parsed.error);
-      setEditFields(parsed.editable||[]);
-      setLockFields(parsed.locked||[]);
+      // Merge editable + locked into one unified list
+      const all=[];
+      (parsed.editable||[]).forEach(f=>{
+        let mode="edit";
+        if(f.autoFill==="date")mode="auto-date";
+        else if(f.autoFill==="increment")mode="auto-num";
+        all.push({name:f.name,value:f.value||"",mode});
+      });
+      (parsed.locked||[]).forEach(f=>{
+        all.push({name:f.name,value:f.value||"",mode:"lock"});
+      });
+      setFields(all);
     }catch(e){
       console.error("Parse error:",e);
       setErr("Could not parse template fields. You can still create the job and configure fields later.");
@@ -106,33 +414,55 @@ function CreateJob({user, onBack, onCreated}){
 
   const doFile=(f)=>{const e=f.name.split(".").pop().toLowerCase();if(!["docx","pdf"].includes(e)){setErr("Only .docx and .pdf");return;}setTf(f);setErr("");parseFields(f);};
 
-  // Move field from editable → locked (one way, opens locked section)
-  const moveToLocked=(name)=>{
-    const f=editFields.find(x=>x.name===name);
-    if(f){
-      setEditFields(p=>p.filter(x=>x.name!==name));
-      setLockFields(p=>[...p,{...f,autoFill:undefined,voiceEnabled:undefined,value:f.value||""}]);
-      setShowLocked(true);
-    }
+  // Field management
+  const setFieldMode=(name,mode)=>{setFields(p=>p.map(f=>f.name===name?{...f,mode}:f));};
+  const setFieldValue=(name,val)=>{setFields(p=>p.map(f=>f.name===name?{...f,value:val}:f));};
+
+  // Mode button style helper
+  const modeBtn=(fieldName,mode,label,color)=>{
+    const active=fields.find(f=>f.name===fieldName)?.mode===mode;
+    return(
+      <button onClick={()=>setFieldMode(fieldName,mode)} style={{
+        padding:"3px 8px",fontSize:10,fontWeight:700,borderRadius:4,cursor:"pointer",
+        background:active?color:"transparent",
+        border:`1px solid ${active?color:C.brd}`,
+        color:active?"#fff":(color===C.brd?C.mut:color),
+        whiteSpace:"nowrap"
+      }}>{label}</button>
+    );
   };
 
-  // Edit the default value of a locked field inline — no disappearing
-  const updateLockValue=(name,val)=>{
-    setLockFields(p=>p.map(f=>f.name===name?{...f,value:val}:f));
-  };
-
-  const ok=jn.trim()&&(sched||days.length>0);
+  const ok=jn.trim();
 
   const create=async()=>{
     if(!ok)return;setSaving(true);setErr("");
     try{
       const es=effSch();
       const fnPattern=tf?tf.name.replace(/\.[^.]+$/,""):`DR_##__${jn.trim().replace(/\s+/g,"_")}`;
-      const job=await db.mkJob({user_id:user.id,name:jn.trim(),site_address:addr.trim()||null,report_filename_pattern:fnPattern,schedule:es,schedule_days:es==="custom"?days:[],reminder_enabled:remOn,reminder_time:remOn?remT:null,reminder_hours_before:remOn?remH:null,scheduling_enabled:schedOn,field_config:{editable:editFields,locked:lockFields}});
+      const editFields=fields.filter(f=>f.mode==="edit").map(f=>({name:f.name,value:f.value,voiceEnabled:true}));
+      const lockFields=fields.filter(f=>f.mode==="lock").map(f=>({name:f.name,value:f.value}));
+      const autoFields=fields.filter(f=>f.mode==="auto-date"||f.mode==="auto-num").map(f=>({name:f.name,value:f.value,autoFill:f.mode==="auto-date"?"date":"increment"}));
+      const job=await db.mkJob({user_id:user.id,name:jn.trim(),site_address:addr.trim()||null,report_filename_pattern:fnPattern,schedule:es,schedule_days:es==="custom"?days:[],reminder_enabled:remOn,reminder_time:remOn?remT:null,reminder_hours_before:remOn?remH:null,scheduling_enabled:schedOn,field_config:{editable:[...editFields,...autoFields],locked:lockFields}});
       if(tf&&job?.id){const ext=tf.name.split(".").pop().toLowerCase();const sp=await db.ulTpl(user.id,job.id,tf);await db.mkTpl({user_id:user.id,job_id:job.id,name:tf.name,original_filename:tf.name,file_type:ext,storage_path:sp});}
       onCreated();
     }catch(e){setErr(e.message);}finally{setSaving(false);}
   };
+
+  // Toggle box component
+  const ToggleBox=({icon,label,desc,on,setOn,children})=>(
+    <div style={{marginBottom:12,background:C.inp,border:`1px solid ${C.brd}`,borderRadius:12,overflow:"hidden"}}>
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:16}}>
+        <div style={{display:"flex",alignItems:"center",gap:10}}>
+          <span style={{fontSize:18}}>{icon}</span>
+          <span style={{fontSize:14,fontWeight:600,color:C.lt}}>{label}</span>
+        </div>
+        <button onClick={()=>setOn(!on)} style={{width:48,height:28,borderRadius:14,border:"none",cursor:"pointer",background:on?C.org:C.brd,position:"relative"}}>
+          <div style={{width:22,height:22,borderRadius:"50%",background:"#fff",position:"absolute",top:3,left:on?23:3,transition:"left 0.2s"}}/>
+        </button>
+      </div>
+      {on&&<div style={{padding:"0 16px 16px",borderTop:`1px solid ${C.brd}`}}>{desc&&<div style={{fontSize:12,color:C.mut,marginTop:12,marginBottom:12}}>{desc}</div>}{children}</div>}
+    </div>
+  );
 
   const fs={width:"100%",padding:"12px 14px",background:C.inp,border:`1px solid ${C.brd}`,borderRadius:10,color:C.txt,fontSize:15};
   const ls={display:"block",color:C.lt,fontSize:13,fontWeight:600,marginBottom:6};
@@ -141,14 +471,19 @@ function CreateJob({user, onBack, onCreated}){
     <div style={{minHeight:"100vh",background:C.bg,color:C.txt}}>
       <div style={{display:"flex",alignItems:"center",gap:12,padding:"16px 20px",borderBottom:`1px solid ${C.brd}`,background:C.card}}>
         <button onClick={onBack} style={{background:"none",border:"none",color:C.mut,fontSize:22,cursor:"pointer",padding:0,lineHeight:1}}>←</button>
+        <MDRLogo size={28}/>
         <span style={{fontWeight:700,fontSize:17}}>New Job</span>
       </div>
       <div style={{maxWidth:500,margin:"0 auto",padding:"24px 20px"}}>
         {err&&<div style={{background:"#2d1214",border:"1px solid #5c2023",borderRadius:8,padding:"10px 14px",marginBottom:16,color:C.err,fontSize:13}}>{err}</div>}
 
+        {/* Job Name — required */}
         <div style={{marginBottom:20}}><label style={ls}>Job Name *</label><input type="text" placeholder="Oceanside District Office" value={jn} onChange={e=>setJn(e.target.value)} style={fs}/></div>
+
+        {/* Site Address — optional */}
         <div style={{marginBottom:20}}><label style={ls}>Site Address</label><input type="text" placeholder="2111 Mission Ave, Oceanside CA 92058" value={addr} onChange={e=>setAddr(e.target.value)} style={fs}/></div>
 
+        {/* Upload Template */}
         <div style={{marginBottom:20}}>
           <label style={ls}>Upload Template</label>
           {!tf?(
@@ -164,12 +499,13 @@ function CreateJob({user, onBack, onCreated}){
               <div style={{display:"flex",alignItems:"center",gap:12}}>
                 <div style={{fontSize:24}}>📄</div>
                 <div style={{flex:1}}><div style={{fontSize:14,fontWeight:600,color:C.txt}}>{tf.name}</div><div style={{fontSize:12,color:C.mut}}>{(tf.size/1024).toFixed(0)} KB</div></div>
-                <button onClick={()=>{setTf(null);setEditFields([]);setLockFields([]);}} style={{background:"none",border:"none",color:"#ef4444",cursor:"pointer",fontSize:18}}>✕</button>
+                <button onClick={()=>{setTf(null);setFields([]);}} style={{background:"none",border:"none",color:"#ef4444",cursor:"pointer",fontSize:18}}>✕</button>
               </div>
             </div>
           )}
         </div>
 
+        {/* AI Parsing indicator */}
         {parsing&&(
           <div style={{background:C.inp,border:`1px solid ${C.brd}`,borderRadius:12,padding:"20px",marginBottom:20,textAlign:"center"}}>
             <div style={{fontSize:24,marginBottom:8}}>🔍</div>
@@ -178,113 +514,92 @@ function CreateJob({user, onBack, onCreated}){
           </div>
         )}
 
-        {!parsing&&(editFields.length>0||lockFields.length>0)&&(
+        {/* ── Unified Field List ── */}
+        {!parsing&&fields.length>0&&(
           <div style={{marginBottom:20}}>
-
-            {/* EDITABLE FIELDS */}
-            <div style={{background:C.inp,border:`1px solid ${C.brd}`,borderRadius:12,overflow:"hidden",marginBottom:10}}>
-              <div style={{padding:"12px 16px",borderBottom:`1px solid ${C.brd}`,background:"rgba(232,116,42,0.1)"}}>
-                <div style={{fontWeight:700,fontSize:14,color:C.org}}>Editable Fields ({editFields.length})</div>
-                <div style={{fontSize:12,color:C.mut,marginTop:2}}>You'll fill these for each report</div>
-              </div>
-              <div style={{padding:8,maxHeight:200,overflowY:"auto"}}>
-                {editFields.map(f=>(
-                  <div key={f.name} style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"10px 12px",background:C.card,border:`1px solid ${C.brd}`,borderRadius:8,marginBottom:6}}>
-                    <div style={{display:"flex",alignItems:"center",gap:8,flex:1,flexWrap:"wrap"}}>
-                      <span style={{fontSize:14,fontWeight:600,color:C.txt}}>{f.name}</span>
-                      {f.autoFill==="date"&&<span style={{fontSize:10,fontWeight:700,background:"rgba(90,143,192,0.2)",color:C.blu,padding:"2px 6px",borderRadius:4}}>Auto-Date</span>}
-                      {f.autoFill==="increment"&&<span style={{fontSize:10,fontWeight:700,background:"rgba(90,143,192,0.2)",color:C.blu,padding:"2px 6px",borderRadius:4}}>Auto-#</span>}
-                      {f.voiceEnabled&&<span style={{fontSize:10,fontWeight:700,background:"rgba(34,197,94,0.2)",color:C.ok,padding:"2px 6px",borderRadius:4}}>🎤 Voice</span>}
-                    </div>
-                    <button onClick={()=>moveToLocked(f.name)} style={{background:"none",border:`1px solid ${C.brd}`,borderRadius:6,padding:"4px 8px",color:C.mut,fontSize:11,cursor:"pointer",whiteSpace:"nowrap"}}>→ Lock</button>
-                  </div>
-                ))}
-                {editFields.length===0&&<div style={{padding:12,textAlign:"center",color:C.mut,fontSize:13}}>No editable fields</div>}
-              </div>
-            </div>
-
-            {/* LOCKED FIELDS — inline value editing, no Edit button */}
             <div style={{background:C.inp,border:`1px solid ${C.brd}`,borderRadius:12,overflow:"hidden"}}>
-              <button onClick={()=>setShowLocked(!showLocked)} style={{width:"100%",display:"flex",alignItems:"center",justifyContent:"space-between",padding:"12px 16px",background:"none",border:"none",cursor:"pointer"}}>
-                <div>
-                  <div style={{fontWeight:700,fontSize:14,color:C.mut,textAlign:"left"}}>Locked Fields ({lockFields.length})</div>
-                  <div style={{fontSize:12,color:C.mut,marginTop:2,textAlign:"left"}}>Same value every report — set default values here</div>
-                </div>
-                <span style={{color:C.mut,fontSize:14,transform:showLocked?"rotate(180deg)":"none",transition:"transform 0.2s"}}>▼</span>
-              </button>
-              {showLocked&&(
-                <div style={{padding:8,borderTop:`1px solid ${C.brd}`,maxHeight:300,overflowY:"auto"}}>
-                  {lockFields.map(f=>(
-                    <div key={f.name} style={{padding:"10px 12px",background:C.card,border:`1px solid ${C.brd}`,borderRadius:8,marginBottom:6}}>
-                      <div style={{fontSize:12,fontWeight:700,color:C.mut,marginBottom:6,textTransform:"uppercase",letterSpacing:0.5}}>{f.name}</div>
+              <div style={{padding:"12px 16px",borderBottom:`1px solid ${C.brd}`,background:"rgba(232,116,42,0.06)"}}>
+                <div style={{fontWeight:700,fontSize:14,color:C.org}}>Template Fields ({fields.length})</div>
+                <div style={{fontSize:11,color:C.mut,marginTop:3}}>Set each field to Edit, Lock, or Auto-Date. Locked fields keep the same value every report.</div>
+              </div>
+              <div style={{padding:8,maxHeight:500,overflowY:"auto"}}>
+                {fields.map(f=>(
+                  <div key={f.name} style={{padding:"10px 12px",background:C.card,border:`1px solid ${C.brd}`,borderRadius:8,marginBottom:6}}>
+                    {/* Row 1: Field name + mode buttons */}
+                    <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:8}}>
+                      <span style={{fontSize:13,fontWeight:700,color:C.txt,flex:1,marginRight:8}}>{f.name}</span>
+                      <div style={{display:"flex",gap:4,flexShrink:0}}>
+                        {modeBtn(f.name,"edit","Edit",C.org)}
+                        {modeBtn(f.name,"lock","Lock",C.mut)}
+                        {modeBtn(f.name,"auto-date","Auto-Date",C.blu)}
+                        {modeBtn(f.name,"auto-num","Auto-#",C.blu)}
+                      </div>
+                    </div>
+                    {/* Row 2: Value input — always visible */}
+                    {f.mode!=="auto-date"&&f.mode!=="auto-num"&&(
                       <input
                         type="text"
-                        value={f.value||""}
-                        onChange={e=>updateLockValue(f.name,e.target.value)}
-                        placeholder="Set default value..."
-                        style={{width:"100%",padding:"8px 10px",background:C.bg,border:`1px solid ${C.brd}`,borderRadius:6,color:C.txt,fontSize:14}}
+                        value={f.value}
+                        onChange={e=>setFieldValue(f.name,e.target.value)}
+                        placeholder={f.mode==="lock"?"Set locked value...":"Default value (optional)"}
+                        style={{width:"100%",padding:"8px 10px",background:C.bg,border:`1px solid ${C.brd}`,borderRadius:6,color:C.txt,fontSize:13}}
                       />
-                    </div>
-                  ))}
-                  {lockFields.length===0&&<div style={{padding:12,textAlign:"center",color:C.mut,fontSize:13}}>No locked fields yet</div>}
-                </div>
-              )}
+                    )}
+                    {f.mode==="auto-date"&&(
+                      <div style={{fontSize:11,color:C.blu,fontStyle:"italic",padding:"4px 0"}}>Will auto-fill today's date on each report</div>
+                    )}
+                    {f.mode==="auto-num"&&(
+                      <div style={{fontSize:11,color:C.blu,fontStyle:"italic",padding:"4px 0"}}>Will auto-increment (1, 2, 3...) on each report</div>
+                    )}
+                  </div>
+                ))}
+              </div>
             </div>
           </div>
         )}
 
-        <div style={{marginBottom:20}}>
-          <label style={{...ls,marginBottom:10}}>Report Frequency *</label>
+        {/* ── Three Toggle Boxes ── */}
+
+        {/* 1. Report Frequency */}
+        <ToggleBox icon="📊" label="Report Frequency" on={freqOn} setOn={setFreqOn} desc="Set how often you'll file reports for this job">
           <div style={{display:"flex",gap:6,marginBottom:10,flexWrap:"wrap"}}>
-            {DS.map(d=>{const a=days.includes(d);return<button key={d} onClick={()=>togDay(d)} style={{width:44,height:44,borderRadius:"50%",border:a?`2px solid ${C.org}`:`1px solid ${C.brd}`,background:a?C.org:"transparent",color:a?"#fff":C.mut,fontWeight:600,fontSize:12,cursor:"pointer"}}>{d}</button>;})}
+            {DS.map(d=>{const a=days.includes(d);return<button key={d} onClick={()=>togDay(d)} style={{width:42,height:42,borderRadius:"50%",border:a?`2px solid ${C.org}`:`1px solid ${C.brd}`,background:a?C.org:"transparent",color:a?"#fff":C.mut,fontWeight:600,fontSize:11,cursor:"pointer"}}>{d}</button>;})}
           </div>
           <div style={{display:"flex",gap:8}}>
-            {[{k:"weekly",l:"Weekly"},{k:"as_needed",l:"As Needed"}].map(({k,l})=><button key={k} onClick={()=>preset(k)} style={{padding:"8px 16px",borderRadius:8,border:sched===k?`2px solid ${C.org}`:`1px solid ${C.brd}`,background:sched===k?C.org:"transparent",color:sched===k?"#fff":C.mut,fontWeight:600,fontSize:13,cursor:"pointer"}}>{l}</button>)}
+            {[{k:"weekly",l:"Weekly"},{k:"as_needed",l:"As Needed"}].map(({k,l})=><button key={k} onClick={()=>preset(k)} style={{padding:"8px 14px",borderRadius:8,border:sched===k?`2px solid ${C.org}`:`1px solid ${C.brd}`,background:sched===k?C.org:"transparent",color:sched===k?"#fff":C.mut,fontWeight:600,fontSize:12,cursor:"pointer"}}>{l}</button>)}
           </div>
-        </div>
+        </ToggleBox>
 
-        {sched!=="as_needed"&&(sched||days.length>0)&&(
-          <div style={{marginBottom:24,background:C.inp,border:`1px solid ${C.brd}`,borderRadius:12,padding:16}}>
-            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:remOn?14:0}}>
-              <span style={{fontSize:14,fontWeight:600,color:C.lt}}>Reminders</span>
-              <button onClick={()=>setRemOn(!remOn)} style={{width:48,height:28,borderRadius:14,border:"none",cursor:"pointer",background:remOn?C.org:C.brd,position:"relative"}}><div style={{width:22,height:22,borderRadius:"50%",background:"#fff",position:"absolute",top:3,left:remOn?23:3,transition:"left 0.2s"}}/></button>
-            </div>
-            {remOn&&(
-              <div style={{display:"flex",gap:10}}>
-                <div style={{flex:1}}><label style={{display:"block",color:C.mut,fontSize:11,marginBottom:4}}>Submit by</label><select value={remT} onChange={e=>setRemT(e.target.value)} style={{width:"100%",padding:"8px 10px",background:C.bg,border:`1px solid ${C.brd}`,borderRadius:8,color:C.txt,fontSize:13}}>{TS.map(t=><option key={t} value={t}>{t}</option>)}</select></div>
-                <div style={{flex:1}}><label style={{display:"block",color:C.mut,fontSize:11,marginBottom:4}}>Remind me</label><select value={remH} onChange={e=>setRemH(Number(e.target.value))} style={{width:"100%",padding:"8px 10px",background:C.bg,border:`1px solid ${C.brd}`,borderRadius:8,color:C.txt,fontSize:13}}>{[1,2,3,4,6].map(h=><option key={h} value={h}>{h} hr{h>1?"s":""} before</option>)}</select></div>
-              </div>
-            )}
+        {/* 2. Reminders — only if frequency is on */}
+        <ToggleBox icon="🔔" label="Reminders" on={remOn} setOn={setRemOn} desc="Get reminded before your report is due">
+          <div style={{display:"flex",gap:10}}>
+            <div style={{flex:1}}><label style={{display:"block",color:C.mut,fontSize:11,marginBottom:4}}>Submit by</label><select value={remT} onChange={e=>setRemT(e.target.value)} style={{width:"100%",padding:"8px 10px",background:C.bg,border:`1px solid ${C.brd}`,borderRadius:8,color:C.txt,fontSize:13}}>{TS.map(t=><option key={t} value={t}>{t}</option>)}</select></div>
+            <div style={{flex:1}}><label style={{display:"block",color:C.mut,fontSize:11,marginBottom:4}}>Remind me</label><select value={remH} onChange={e=>setRemH(Number(e.target.value))} style={{width:"100%",padding:"8px 10px",background:C.bg,border:`1px solid ${C.brd}`,borderRadius:8,color:C.txt,fontSize:13}}>{[1,2,3,4,6].map(h=><option key={h} value={h}>{h} hr{h>1?"s":""} before</option>)}</select></div>
           </div>
-        )}
+        </ToggleBox>
 
-        <div style={{marginBottom:24,background:C.inp,border:`1px solid ${C.brd}`,borderRadius:12,padding:16}}>
-          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:schedOn?14:0}}>
-            <div style={{display:"flex",alignItems:"center",gap:10}}>
-              <span style={{fontSize:18}}>📅</span>
-              <span style={{fontSize:14,fontWeight:600,color:C.lt}}>Inspection Scheduling</span>
-            </div>
-            <button onClick={()=>setSchedOn(!schedOn)} style={{width:48,height:28,borderRadius:14,border:"none",cursor:"pointer",background:schedOn?C.org:C.brd,position:"relative"}}><div style={{width:22,height:22,borderRadius:"50%",background:"#fff",position:"absolute",top:3,left:schedOn?23:3,transition:"left 0.2s"}}/></button>
+        {/* 3. Inspection Scheduling */}
+        <ToggleBox icon="📅" label="Inspection Scheduling" on={schedOn} setOn={setSchedOn}>
+          <div style={{background:C.bg,border:`1px solid ${C.brd}`,borderRadius:8,padding:"12px 14px",marginTop:12}}>
+            <p style={{fontSize:13,color:C.lt,lineHeight:1.5}}>Let your GC and subs request inspections through a shared calendar.</p>
+            <p style={{fontSize:12,color:C.blu,marginTop:8,fontWeight:600}}>You'll set up the calendar link and team contacts on the job dashboard after creating this job.</p>
           </div>
-          {schedOn&&(
-            <div style={{background:C.bg,border:`1px solid ${C.brd}`,borderRadius:8,padding:"12px 14px"}}>
-              <p style={{fontSize:13,color:C.lt,lineHeight:1.5}}>Let your GC and subs request inspections through a shared calendar.</p>
-              <p style={{fontSize:12,color:C.blu,marginTop:8,fontWeight:600}}>You'll set up the calendar link and team contacts on the job dashboard after creating this job.</p>
-            </div>
-          )}
-        </div>
+        </ToggleBox>
 
-        <button className="btn-o" onClick={create} disabled={!ok||saving} style={{width:"100%",padding:"14px 0",background:ok?C.org:C.brd,border:ok?`1px solid ${C.blu}`:`1px solid ${C.brd}`,borderRadius:10,color:"#fff",fontSize:16,fontWeight:700,cursor:ok&&!saving?"pointer":"default",opacity:saving?0.7:1}}>{saving?"Creating...":"Create Job"}</button>
+        {/* Create Button — only requires job name */}
+        <button className="btn-o" onClick={create} disabled={!ok||saving} style={{width:"100%",padding:"14px 0",background:ok?C.org:C.brd,border:ok?`1px solid ${C.blu}`:`1px solid ${C.brd}`,borderRadius:10,color:"#fff",fontSize:16,fontWeight:700,cursor:ok&&!saving?"pointer":"default",opacity:saving?0.7:1,marginTop:8}}>{saving?"Creating...":"Create Job"}</button>
       </div>
     </div>
   );
 }
 
+/* ── Archived Jobs ── */
 function ArchivedJobs({jobs, onBack, onSelect}){
   return(
     <div style={{minHeight:"100vh",background:C.bg,color:C.txt}}>
       <div style={{display:"flex",alignItems:"center",gap:12,padding:"16px 20px",borderBottom:`1px solid ${C.brd}`,background:C.card}}>
         <button onClick={onBack} style={{background:"none",border:"none",color:C.mut,fontSize:22,cursor:"pointer",padding:0,lineHeight:1}}>←</button>
+        <MDRLogo size={28}/>
         <span style={{fontWeight:700,fontSize:17}}>Archived Jobs</span>
         <span style={{fontSize:13,color:C.mut,marginLeft:"auto"}}>{jobs.length} job{jobs.length!==1?"s":""}</span>
       </div>
@@ -302,6 +617,261 @@ function ArchivedJobs({jobs, onBack, onSelect}){
   );
 }
 
+/* ── Job Detail (Job Dashboard) ── */
+function JobDetail({job, user, onBack, onDeleted}){
+  const [showDel,setShowDel]=useState(false);
+  const [deleting,setDeleting]=useState(false);
+  const [showJobSet,setShowJobSet]=useState(false);
+  const [rpts,setRpts]=useState([]);
+  const [loading,setLoading]=useState(true);
+  const [showCompleted,setShowCompleted]=useState(false);
+  const [showWorking,setShowWorking]=useState(false);
+  const [showPhotos,setShowPhotos]=useState(false);
+  const [showEditJob,setShowEditJob]=useState(false);
+  const [inspections,setInspections]=useState([]);
+  const [editName,setEditName]=useState(job.name||"");
+  const [editAddr,setEditAddr]=useState(job.site_address||"");
+  const [editSaving,setEditSaving]=useState(false);
+
+  useEffect(()=>{
+    (async()=>{
+      try{
+        const r=await fetch(`${SB_URL}/rest/v1/reports?select=*&job_id=eq.${job.id}&order=report_date.desc`,{headers:db._h()});
+        if(r.ok)setRpts(await r.json());
+        const ir=await fetch(`${SB_URL}/rest/v1/inspections?select=id,date,type,status&job_id=eq.${job.id}&order=date.asc`,{headers:db._h()});
+        if(ir.ok){const d=await ir.json();setInspections(d);}
+      }catch(e){console.error(e);}
+      finally{setLoading(false);}
+    })();
+  },[job.id]);
+
+  const tz=Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const today=new Date().toLocaleDateString("en-CA",{timeZone:tz});
+  const todayRpt=rpts.find(r=>r.report_date===today);
+  const submitted=rpts.filter(r=>r.status==="submitted");
+  const working=rpts.filter(r=>r.status!=="submitted");
+  const nextNum=submitted.length+working.length+1;
+
+  // Upcoming inspections (next 7 days)
+  const weekOut=new Date(Date.now()+7*86400000).toISOString().split("T")[0];
+  const upcoming=inspections.filter(i=>i.date>=today&&i.date<=weekOut);
+
+  const doDelete=async()=>{
+    setDeleting(true);
+    try{await db.deleteJob(job.id);onDeleted();}
+    catch(e){alert("Delete failed: "+e.message);setDeleting(false);}
+  };
+
+  const saveJobEdit=async()=>{
+    setEditSaving(true);
+    try{
+      const r=await fetch(`${SB_URL}/rest/v1/jobs?id=eq.${job.id}`,{method:"PATCH",headers:db._h(),body:JSON.stringify({name:editName.trim(),site_address:editAddr.trim()||null})});
+      if(!r.ok)throw new Error("Save failed");
+      job.name=editName.trim();job.site_address=editAddr.trim()||null;
+      setShowEditJob(false);
+    }catch(e){alert(e.message);}
+    finally{setEditSaving(false);}
+  };
+
+  const startReport=()=>{alert("Report fill/edit screen coming next — DR#"+nextNum);};
+
+  const fs={width:"100%",padding:"12px 14px",background:C.inp,border:`1px solid ${C.brd}`,borderRadius:10,color:C.txt,fontSize:15};
+  const ls={display:"block",color:C.lt,fontSize:13,fontWeight:600,marginBottom:6};
+
+  // Collapsible folder
+  const Folder=({icon,label,count,color,open,setOpen,children})=>(
+    <div style={{marginBottom:12}}>
+      <button onClick={()=>setOpen(!open)} style={{width:"100%",display:"flex",alignItems:"center",gap:12,padding:"16px 18px",background:C.card,border:`1px solid ${C.brd}`,borderRadius:open?"12px 12px 0 0":12,cursor:"pointer",textAlign:"left"}}>
+        <span style={{fontSize:20}}>{icon}</span>
+        <span style={{flex:1,fontWeight:700,fontSize:15,color:color||C.txt}}>{label}</span>
+        <span style={{fontSize:13,fontWeight:600,color:C.mut,background:C.inp,borderRadius:10,padding:"2px 10px",marginRight:8}}>{count}</span>
+        <span style={{color:C.mut,fontSize:14,transform:open?"rotate(180deg)":"none",transition:"transform 0.2s"}}>▼</span>
+      </button>
+      {open&&<div style={{background:C.card,border:`1px solid ${C.brd}`,borderTop:"none",borderRadius:"0 0 12px 12px",padding:"4px 16px 12px"}}>{children}</div>}
+    </div>
+  );
+
+  if(loading)return(<div style={{minHeight:"100vh",background:C.bg,display:"flex",alignItems:"center",justifyContent:"center"}}><p style={{color:C.mut}}>Loading...</p></div>);
+
+  return(
+    <div style={{minHeight:"100vh",background:C.bg,color:C.txt}}>
+      {/* Header */}
+      <div style={{display:"flex",alignItems:"center",gap:12,padding:"16px 20px",borderBottom:`1px solid ${C.brd}`,background:C.card}}>
+        <button onClick={onBack} style={{background:"none",border:"none",color:C.mut,fontSize:22,cursor:"pointer",padding:0,lineHeight:1}}>←</button>
+        <MDRLogo size={28}/>
+        <div style={{flex:1}}>
+          <div style={{fontWeight:700,fontSize:17}}>{job.name}</div>
+          {job.site_address&&<div style={{fontSize:12,color:C.mut}}>{job.site_address}</div>}
+        </div>
+        <button onClick={()=>setShowJobSet(!showJobSet)} style={{width:34,height:34,borderRadius:8,background:C.inp,border:`1px solid ${showJobSet?C.org:C.brd}`,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",fontSize:14,color:C.mut}}>⚙️</button>
+      </div>
+
+      <div style={{maxWidth:600,margin:"0 auto",padding:"20px"}}>
+
+        {/* ── Today's Report ── */}
+        <div style={{background:C.card,border:`1px solid ${C.brd}`,borderRadius:12,padding:20,marginBottom:16}}>
+          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:14}}>
+            <div style={{display:"flex",alignItems:"center",gap:10}}>
+              <span style={{fontSize:22}}>📝</span>
+              <div>
+                <div style={{fontWeight:700,fontSize:16,color:C.txt}}>Today's Report</div>
+                <div style={{fontSize:12,color:C.mut}}>{new Date().toLocaleDateString("en-US",{weekday:"long",month:"short",day:"numeric",timeZone:tz})}</div>
+              </div>
+            </div>
+            {todayRpt&&(
+              <div style={{display:"flex",alignItems:"center",gap:6}}>
+                <div style={{width:10,height:10,borderRadius:"50%",background:todayRpt.status==="submitted"?C.ok:C.org}}/>
+                <span style={{fontSize:12,fontWeight:700,color:todayRpt.status==="submitted"?C.ok:C.org}}>{todayRpt.status==="submitted"?"Submitted":"In Progress"}</span>
+              </div>
+            )}
+          </div>
+          {todayRpt?(
+            <button onClick={startReport} className="btn-o" style={{width:"100%",padding:"14px 0",background:todayRpt.status==="submitted"?"transparent":C.org,border:`1px solid ${todayRpt.status==="submitted"?C.brd:C.blu}`,borderRadius:10,color:todayRpt.status==="submitted"?C.lt:"#fff",fontSize:16,fontWeight:700,cursor:"pointer"}}>
+              {todayRpt.status==="submitted"?"View Submitted Report":"Continue Report"}
+            </button>
+          ):(
+            <div>
+              <button onClick={startReport} className="btn-o" style={{width:"100%",padding:"14px 0",background:C.org,border:`1px solid ${C.blu}`,borderRadius:10,color:"#fff",fontSize:16,fontWeight:700,cursor:"pointer"}}>
+                Start Today's Report — DR#{nextNum}
+              </button>
+              <div style={{fontSize:11,color:C.mut,textAlign:"center",marginTop:8}}>Editable until midnight • {tz.split("/").pop().replace(/_/g," ")}</div>
+            </div>
+          )}
+        </div>
+
+        {/* ── Scheduling Calendar Preview ── */}
+        {job.scheduling_enabled&&(
+          <div style={{background:C.card,border:`1px solid ${C.brd}`,borderRadius:12,padding:20,marginBottom:16}}>
+            <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:12}}>
+              <span style={{fontSize:20}}>📅</span>
+              <span style={{fontWeight:700,fontSize:15,color:C.txt}}>Upcoming Inspections</span>
+              <span style={{fontSize:11,color:C.mut,marginLeft:"auto"}}>Next 7 days</span>
+            </div>
+            {upcoming.length===0?(
+              <div style={{textAlign:"center",padding:"12px 0",color:C.mut,fontSize:13}}>No inspections scheduled this week</div>
+            ):(
+              upcoming.map((insp,i)=>(
+                <div key={insp.id||i} style={{display:"flex",alignItems:"center",gap:12,padding:"10px 0",borderBottom:i<upcoming.length-1?`1px solid ${C.brd}`:"none"}}>
+                  <div style={{width:44,textAlign:"center",flexShrink:0}}>
+                    <div style={{fontSize:10,fontWeight:700,color:C.org,textTransform:"uppercase"}}>{new Date(insp.date+"T12:00:00").toLocaleDateString("en-US",{weekday:"short",timeZone:tz})}</div>
+                    <div style={{fontSize:18,fontWeight:700,color:C.txt}}>{new Date(insp.date+"T12:00:00").getDate()}</div>
+                  </div>
+                  <div style={{flex:1}}>
+                    <div style={{fontSize:14,fontWeight:600,color:C.lt}}>{insp.type||"Inspection"}</div>
+                    <div style={{fontSize:11,color:C.mut}}>{insp.status||"Requested"}</div>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        )}
+
+        {/* ── Photo Gallery ── */}
+        <Folder icon="📸" label="Photos" count={0} color={C.blu} open={showPhotos} setOpen={setShowPhotos}>
+          <div style={{textAlign:"center",padding:"20px 0"}}>
+            <div style={{fontSize:36,marginBottom:8}}>📷</div>
+            <p style={{fontSize:14,fontWeight:600,color:C.lt,marginBottom:4}}>Job Photo Gallery</p>
+            <p style={{fontSize:12,color:C.mut,marginBottom:14}}>Store photos for this job to use in future reports</p>
+            <button className="btn-o" style={{padding:"10px 24px",background:C.org,border:"none",borderRadius:8,color:"#fff",fontSize:14,fontWeight:600,cursor:"pointer"}}>Take or Upload Photo</button>
+          </div>
+        </Folder>
+
+        {/* ── Working Copies Folder ── */}
+        <Folder icon="✏️" label="Working Copies" count={working.length} color={C.org} open={showWorking} setOpen={setShowWorking}>
+          {working.length===0?(
+            <div style={{textAlign:"center",padding:"16px 0",color:C.mut,fontSize:13}}>No drafts in progress</div>
+          ):(
+            working.map((r,i)=>(
+              <button key={r.id} onClick={startReport} style={{width:"100%",display:"flex",alignItems:"center",gap:12,padding:"12px 4px",background:"none",border:"none",borderBottom:i<working.length-1?`1px solid ${C.brd}`:"none",cursor:"pointer",textAlign:"left"}}>
+                <div style={{width:10,height:10,borderRadius:"50%",background:C.org,flexShrink:0}}/>
+                <div style={{flex:1}}>
+                  <div style={{fontSize:14,fontWeight:600,color:C.lt}}>DR#{r.report_number||"?"} — {new Date(r.report_date+"T12:00:00").toLocaleDateString("en-US",{weekday:"short",month:"short",day:"numeric",timeZone:tz})}</div>
+                  <div style={{fontSize:11,color:C.mut}}>Last edited {r.updated_at?new Date(r.updated_at).toLocaleTimeString("en-US",{hour:"numeric",minute:"2-digit",timeZone:tz}):""}</div>
+                </div>
+                <span style={{color:C.org,fontSize:13,fontWeight:600}}>Edit ›</span>
+              </button>
+            ))
+          )}
+        </Folder>
+
+        {/* ── Completed Reports Folder ── */}
+        <Folder icon="✅" label="Completed Reports" count={submitted.length} color={C.ok} open={showCompleted} setOpen={setShowCompleted}>
+          {submitted.length===0?(
+            <div style={{textAlign:"center",padding:"16px 0",color:C.mut,fontSize:13}}>No submitted reports yet</div>
+          ):(
+            submitted.map((r,i)=>(
+              <div key={r.id} style={{display:"flex",alignItems:"center",gap:12,padding:"12px 4px",borderBottom:i<submitted.length-1?`1px solid ${C.brd}`:"none"}}>
+                <div style={{width:10,height:10,borderRadius:"50%",background:C.ok,flexShrink:0}}/>
+                <div style={{flex:1}}>
+                  <div style={{fontSize:14,fontWeight:600,color:C.lt}}>DR#{r.report_number||submitted.length-i} — {new Date(r.report_date+"T12:00:00").toLocaleDateString("en-US",{weekday:"short",month:"short",day:"numeric",timeZone:tz})}</div>
+                  <div style={{fontSize:11,color:C.mut}}>Submitted {r.submitted_at?new Date(r.submitted_at).toLocaleString("en-US",{month:"short",day:"numeric",hour:"numeric",minute:"2-digit",timeZone:tz}):r.report_date}</div>
+                </div>
+                <div style={{display:"flex",gap:6,flexShrink:0}}>
+                  <button style={{padding:"5px 10px",fontSize:11,fontWeight:700,borderRadius:6,border:`1px solid ${C.brd}`,background:"transparent",color:C.lt,cursor:"pointer"}}>Download</button>
+                  <button style={{padding:"5px 10px",fontSize:11,fontWeight:700,borderRadius:6,border:`1px solid ${C.brd}`,background:"transparent",color:C.blu,cursor:"pointer"}}>Resend</button>
+                </div>
+              </div>
+            ))
+          )}
+        </Folder>
+
+        {/* ── Edit Job (inline) ── */}
+        {showEditJob&&(
+          <div style={{background:C.card,border:`1px solid ${C.org}`,borderRadius:12,padding:20,marginBottom:16}}>
+            <div style={{fontWeight:700,fontSize:15,color:C.org,marginBottom:16,display:"flex",alignItems:"center",gap:8}}>
+              <span>✏️</span> Edit Job
+            </div>
+            <div style={{marginBottom:16}}><label style={ls}>Job Name *</label><input type="text" value={editName} onChange={e=>setEditName(e.target.value)} style={fs}/></div>
+            <div style={{marginBottom:16}}><label style={ls}>Site Address</label><input type="text" value={editAddr} onChange={e=>setEditAddr(e.target.value)} style={fs}/></div>
+            <div style={{display:"flex",gap:10}}>
+              <button onClick={()=>setShowEditJob(false)} style={{flex:1,padding:"12px 0",background:C.inp,border:`1px solid ${C.brd}`,borderRadius:8,color:C.lt,fontSize:14,fontWeight:600,cursor:"pointer"}}>Cancel</button>
+              <button onClick={saveJobEdit} disabled={editSaving||!editName.trim()} className="btn-o" style={{flex:1,padding:"12px 0",background:editName.trim()?C.org:C.brd,border:"none",borderRadius:8,color:"#fff",fontSize:14,fontWeight:700,cursor:editName.trim()&&!editSaving?"pointer":"default",opacity:editSaving?0.6:1}}>
+                {editSaving?"Saving...":"Save Changes"}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* ── Job Settings Panel ── */}
+        {showJobSet&&(
+          <div style={{background:C.card,border:`1px solid ${C.brd}`,borderRadius:12,overflow:"hidden",marginBottom:16}}>
+            <div style={{padding:"14px 18px",borderBottom:`1px solid ${C.brd}`,background:"rgba(232,116,42,0.06)"}}>
+              <div style={{fontWeight:700,fontSize:15,color:C.org}}>Job Settings</div>
+            </div>
+            <button onClick={()=>{setShowEditJob(!showEditJob);setEditName(job.name);setEditAddr(job.site_address||"");}} style={{width:"100%",display:"flex",alignItems:"center",gap:10,padding:"14px 18px",background:"none",border:"none",borderBottom:`1px solid ${C.brd}`,cursor:"pointer",textAlign:"left"}}>
+              <span style={{fontSize:16}}>✏️</span><span style={{fontSize:14,fontWeight:600,color:C.lt}}>Edit Job Details</span>
+            </button>
+            {job.scheduling_enabled&&(
+              <button onClick={()=>alert("Edit project team coming soon")} style={{width:"100%",display:"flex",alignItems:"center",gap:10,padding:"14px 18px",background:"none",border:"none",borderBottom:`1px solid ${C.brd}`,cursor:"pointer",textAlign:"left"}}>
+                <span style={{fontSize:16}}>👥</span><span style={{fontSize:14,fontWeight:600,color:C.lt}}>Edit Project Team</span>
+              </button>
+            )}
+            <button onClick={()=>alert("Edit field config coming soon")} style={{width:"100%",display:"flex",alignItems:"center",gap:10,padding:"14px 18px",background:"none",border:"none",borderBottom:`1px solid ${C.brd}`,cursor:"pointer",textAlign:"left"}}>
+              <span style={{fontSize:16}}>📋</span><span style={{fontSize:14,fontWeight:600,color:C.lt}}>Edit Template Fields</span>
+            </button>
+            <div style={{padding:"14px 18px",borderTop:`1px solid #5c2023`}}>
+              {!showDel?(
+                <button onClick={()=>setShowDel(true)} style={{width:"100%",padding:"10px 16px",background:"transparent",border:"1px solid #5c2023",borderRadius:8,color:C.err,fontSize:13,fontWeight:600,cursor:"pointer"}}>Delete This Job</button>
+              ):(
+                <div>
+                  <p style={{fontSize:12,color:C.err,lineHeight:1.5,marginBottom:10}}>Permanently delete "{job.name}" and all its reports, templates, and data. Cannot be undone.</p>
+                  <div style={{display:"flex",gap:10}}>
+                    <button onClick={()=>setShowDel(false)} style={{flex:1,padding:"10px 0",background:C.inp,border:`1px solid ${C.brd}`,borderRadius:8,color:C.lt,fontSize:13,fontWeight:600,cursor:"pointer"}}>Cancel</button>
+                    <button onClick={doDelete} disabled={deleting} style={{flex:1,padding:"10px 0",background:"#ef4444",border:"none",borderRadius:8,color:"#fff",fontSize:13,fontWeight:700,cursor:deleting?"default":"pointer",opacity:deleting?0.6:1}}>
+                      {deleting?"Deleting...":"Delete Permanently"}
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ── Dashboard ── */
 function Dashboard({user, onLogout}){
   const [jobs,setJobs]=useState([]);
   const [rpts,setRpts]=useState([]);
@@ -312,9 +882,10 @@ function Dashboard({user, onLogout}){
   const [showDD,setShowDD]=useState(false);
   const [showArch,setShowArch]=useState(false);
   const [showCal,setShowCal]=useState(false);
+  const [showAcct,setShowAcct]=useState(false);
 
   useEffect(()=>{load();},[]);
-  const load=async()=>{setLoading(true);try{const a=await db.jobs();setJobs(a);const ids=a.filter(j=>!j.is_archived).map(j=>j.id);if(ids.length)setRpts(await db.todayRpts(ids));}catch(e){console.error(e);}finally{setLoading(false);}};
+  const load=async()=>{setLoading(true);try{const a=await db.jobs(user.id);setJobs(a);const ids=a.filter(j=>!j.is_archived).map(j=>j.id);if(ids.length)setRpts(await db.todayRpts(ids));}catch(e){console.error(e);}finally{setLoading(false);}};
   const act=jobs.filter(j=>!j.is_archived);
   const arch=jobs.filter(j=>j.is_archived);
   const top3=act.slice(0,3);
@@ -323,45 +894,55 @@ function Dashboard({user, onLogout}){
 
   const doShare=async()=>{const url=window.location.href;if(navigator.share){try{await navigator.share({title:"My Daily Reports",text:"Voice-to-PDF inspection reports",url});}catch(e){}}else{try{await navigator.clipboard.writeText(url);alert("Link copied!");}catch(e){alert("Could not copy link.");}}};
 
+  if(showAcct)return<AccountSettings user={user} onBack={()=>setShowAcct(false)} onLogout={onLogout}/>;
   if(showNew)return<CreateJob user={user} onBack={()=>setShowNew(false)} onCreated={()=>{setShowNew(false);load();}}/>;
   if(showArch)return<ArchivedJobs jobs={arch} onBack={()=>setShowArch(false)} onSelect={(j)=>{setSelJob(j);setShowArch(false);}}/>;
 
   if(selJob)return(
-    <div style={{minHeight:"100vh",background:C.bg,color:C.txt}}>
-      <div style={{display:"flex",alignItems:"center",gap:12,padding:"16px 20px",borderBottom:`1px solid ${C.brd}`,background:C.card}}>
-        <button onClick={()=>setSelJob(null)} style={{background:"none",border:"none",color:C.mut,fontSize:22,cursor:"pointer",padding:0,lineHeight:1}}>←</button>
-        <div style={{flex:1}}><div style={{fontWeight:700,fontSize:17}}>{selJob.name}</div><div style={{fontSize:12,color:C.mut}}>{SL[selJob.schedule]||selJob.schedule}</div></div>
-        <button style={{background:"none",border:"none",color:C.mut,fontSize:18,cursor:"pointer"}}>⚙️</button>
-      </div>
-      <div style={{maxWidth:600,margin:"40px auto",padding:"0 20px",textAlign:"center"}}>
-        <div style={{background:C.card,border:`1px solid ${C.brd}`,borderRadius:12,padding:24}}>
-          <p style={{fontWeight:600,color:C.org,marginBottom:8}}>Job: {selJob.name}</p>
-          <p style={{color:C.mut,fontSize:13}}>Job detail view coming next — Today's Report, Working Copies, Submitted Reports.</p>
-        </div>
-      </div>
-    </div>
+    <JobDetail job={selJob} user={user} onBack={()=>{setSelJob(null);load();}} onDeleted={()=>{setSelJob(null);load();}}/>
   );
 
   return(
     <div style={{minHeight:"100vh",background:C.bg,color:C.txt,position:"relative"}} onClick={e=>{if(showSet&&!e.target.closest('[data-s]'))setShowSet(false);if(showDD&&!e.target.closest('[data-d]'))setShowDD(false);}}>
-      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"16px 20px",borderBottom:`1px solid ${C.brd}`,background:C.card}} data-s>
-        <div style={{display:"flex",alignItems:"center",gap:12}}>
-          <div style={{width:36,height:36,borderRadius:8,background:C.org,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:700,fontSize:16,color:"#fff"}}>M</div>
-          <span style={{fontWeight:700,fontSize:18}}>My Daily Reports</span>
+      {/* ── Header: Dropdown (left) | Logo (center) | Settings (right) ── */}
+      <div style={{display:"grid",gridTemplateColumns:"1fr auto 1fr",alignItems:"center",padding:"12px 16px",borderBottom:`1px solid ${C.brd}`,background:C.card}} data-s>
+        <div style={{justifySelf:"start"}} data-d>
+          <button onClick={()=>setShowDD(!showDD)} style={{display:"flex",alignItems:"center",gap:6,padding:"8px 12px",background:C.inp,border:`1px solid ${showDD?C.org:C.brd}`,borderRadius:8,cursor:"pointer",color:C.txt}}>
+            <span style={{fontSize:13,fontWeight:600,maxWidth:120,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{selJob?selJob.name:"Jobs"}</span>
+            <span style={{color:C.mut,fontSize:11,transform:showDD?"rotate(180deg)":"none",transition:"transform 0.2s"}}>▼</span>
+          </button>
         </div>
-        <div style={{display:"flex",alignItems:"center",gap:10}}>
-          <button onClick={doShare} style={{width:36,height:36,borderRadius:8,background:C.inp,border:`1px solid ${C.brd}`,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",fontSize:16,color:C.mut}}>↗</button>
-          <button onClick={()=>setShowSet(!showSet)} style={{width:36,height:36,borderRadius:8,background:C.inp,border:`1px solid ${C.brd}`,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",fontSize:16,color:C.mut}}>⚙️</button>
+
+        <div style={{display:"flex",alignItems:"center",gap:8,justifySelf:"center"}}>
+          <MDRLogo size={34}/>
+          <span style={{fontWeight:700,fontSize:16,color:C.txt,letterSpacing:-0.3}}>My Daily Reports</span>
+        </div>
+
+        <div style={{justifySelf:"end",display:"flex",alignItems:"center",gap:8}}>
+          <button onClick={doShare} style={{width:34,height:34,borderRadius:8,background:C.inp,border:`1px solid ${C.brd}`,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",fontSize:14,color:C.mut}}>↗</button>
+          <button onClick={()=>setShowSet(!showSet)} style={{width:34,height:34,borderRadius:8,background:C.inp,border:`1px solid ${C.brd}`,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",fontSize:14,color:C.mut}}>⚙️</button>
         </div>
       </div>
 
+      {/* Job dropdown */}
+      {showDD&&(
+        <div style={{position:"absolute",left:16,top:62,background:C.card,border:`1px solid ${C.brd}`,borderRadius:12,marginTop:4,zIndex:90,boxShadow:"0 8px 24px rgba(0,0,0,0.5)",maxHeight:400,overflowY:"auto",minWidth:240}} data-d>
+          {act.length===0&&<div style={{padding:16,textAlign:"center",color:C.mut,fontSize:14}}>No active jobs</div>}
+          {act.map(j=>{const s=stat(j.id,j.schedule);return(
+            <button key={j.id} onClick={()=>{setSelJob(j);setShowDD(false);}} style={{width:"100%",display:"flex",alignItems:"center",gap:12,padding:"14px 16px",background:"none",border:"none",borderBottom:`1px solid ${C.brd}`,cursor:"pointer",textAlign:"left"}}>
+              {dot(s)}<div style={{flex:1}}><div style={{fontSize:15,fontWeight:600,color:C.txt}}>{j.name}</div><span style={{fontSize:11,color:C.mut}}>{SL[j.schedule]||j.schedule}</span></div>
+            </button>);})}
+        </div>
+      )}
+
+      {/* Settings dropdown */}
       {showSet&&(
-        <div style={{position:"absolute",top:68,right:20,background:C.card,border:`1px solid ${C.brd}`,borderRadius:12,padding:"8px 0",minWidth:220,zIndex:100,boxShadow:"0 8px 24px rgba(0,0,0,0.5)"}} data-s>
+        <div style={{position:"absolute",top:62,right:16,background:C.card,border:`1px solid ${C.brd}`,borderRadius:12,padding:"8px 0",minWidth:220,zIndex:100,boxShadow:"0 8px 24px rgba(0,0,0,0.5)"}} data-s>
           <div style={{padding:"12px 16px",borderBottom:`1px solid ${C.brd}`}}>
             <div style={{fontWeight:600,fontSize:14,color:C.txt,marginBottom:2}}>{user?.user_metadata?.full_name||"Inspector"}</div>
             <div style={{fontSize:12,color:C.mut}}>{user?.email}</div>
           </div>
-          <button onClick={()=>{setShowSet(false);alert("Account settings coming soon");}} style={{width:"100%",padding:"12px 16px",background:"none",border:"none",textAlign:"left",color:C.lt,fontSize:14,cursor:"pointer",display:"flex",alignItems:"center",gap:10}}><span>👤</span> Account Settings</button>
+          <button onClick={()=>{setShowSet(false);setShowAcct(true);}} style={{width:"100%",padding:"12px 16px",background:"none",border:"none",textAlign:"left",color:C.lt,fontSize:14,cursor:"pointer",display:"flex",alignItems:"center",gap:10}}><span>👤</span> Account Settings</button>
           <button onClick={()=>{setShowSet(false);alert("Notifications coming soon");}} style={{width:"100%",padding:"12px 16px",background:"none",border:"none",textAlign:"left",color:C.lt,fontSize:14,cursor:"pointer",display:"flex",alignItems:"center",gap:10}}><span>🔔</span> Notifications</button>
           <button onClick={()=>{setShowCal(!showCal);setShowSet(false);}} style={{width:"100%",padding:"12px 16px",background:"none",border:"none",textAlign:"left",color:C.lt,fontSize:14,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
             <span style={{display:"flex",alignItems:"center",gap:10}}><span>📅</span> Show Calendar</span>
@@ -372,23 +953,7 @@ function Dashboard({user, onLogout}){
         </div>
       )}
 
-      <div style={{padding:"12px 20px",position:"relative"}} data-d>
-        <button onClick={()=>setShowDD(!showDD)} style={{width:"100%",display:"flex",alignItems:"center",justifyContent:"space-between",padding:"12px 16px",background:C.card,border:`1px solid ${showDD?C.org:C.brd}`,borderRadius:10,cursor:"pointer",color:C.txt}}>
-          <span style={{fontSize:15,fontWeight:600}}>Select a Job</span>
-          <span style={{color:C.mut,fontSize:14,transform:showDD?"rotate(180deg)":"none",transition:"transform 0.2s"}}>▼</span>
-        </button>
-        {showDD&&(
-          <div style={{position:"absolute",left:20,right:20,top:"100%",background:C.card,border:`1px solid ${C.brd}`,borderRadius:12,marginTop:4,zIndex:90,boxShadow:"0 8px 24px rgba(0,0,0,0.5)",maxHeight:400,overflowY:"auto"}}>
-            {act.length===0&&<div style={{padding:16,textAlign:"center",color:C.mut,fontSize:14}}>No active jobs</div>}
-            {act.map(j=>{const s=stat(j.id,j.schedule);return(
-              <button key={j.id} onClick={()=>{setSelJob(j);setShowDD(false);}} style={{width:"100%",display:"flex",alignItems:"center",gap:12,padding:"14px 16px",background:"none",border:"none",borderBottom:`1px solid ${C.brd}`,cursor:"pointer",textAlign:"left"}}>
-                {dot(s)}<div style={{flex:1}}><div style={{fontSize:15,fontWeight:600,color:C.txt}}>{j.name}</div><span style={{fontSize:11,color:C.mut}}>{SL[j.schedule]||j.schedule}</span></div>
-              </button>);})}
-          </div>
-        )}
-      </div>
-
-      <div style={{maxWidth:600,margin:"0 auto",padding:"0 20px 20px"}}>
+      <div style={{maxWidth:600,margin:"0 auto",padding:"16px 20px 20px"}}>
         <button className="btn-o" onClick={()=>setShowNew(true)} style={{width:"100%",padding:"14px 0",background:C.org,border:`1px solid ${C.blu}`,borderRadius:10,color:"#fff",fontSize:16,fontWeight:700,cursor:"pointer",marginBottom:20}}>+ New Job</button>
 
         {showCal&&(
