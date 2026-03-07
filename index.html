@@ -25,7 +25,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
-<script>if(window.pdfjsLib)window.pdfjsLib.GlobalWorkerOptions.workerSrc="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";</script>
+<script>if(window.pdfjsLib){window.pdfjsLib.GlobalWorkerOptions.workerSrc="";}</script>
 <script type="text/babel">
 const { useState, useEffect, useRef, useCallback } = React;
 const SB_URL = "https://wluvkmpncafugdbunlkw.supabase.co";
@@ -937,14 +937,18 @@ function ReportEditor({job, user, onBack, reportDate}){
       let pageImages=[];
       try{
         if(window.pdfjsLib){
-          const pdfJsDoc=await window.pdfjsLib.getDocument({data:filledPdfBytes.slice(0)}).promise;
+          const copyBuf=new Uint8Array(filledPdfBytes).buffer;
+          const loadTask=window.pdfjsLib.getDocument({data:copyBuf,disableAutoFetch:true,disableStream:true});
+          const pdfJsDoc=await loadTask.promise;
           for(let i=1;i<=pdfJsDoc.numPages;i++){
             const pg=await pdfJsDoc.getPage(i);
-            const vp=pg.getViewport({scale:2});
+            const vp=pg.getViewport({scale:1.5});
             const cvs=document.createElement("canvas");
             cvs.width=vp.width;cvs.height=vp.height;
-            await pg.render({canvasContext:cvs.getContext("2d"),viewport:vp}).promise;
-            pageImages.push(cvs.toDataURL("image/png"));
+            const ctx2d=cvs.getContext("2d");
+            await pg.render({canvasContext:ctx2d,viewport:vp}).promise;
+            pageImages.push(cvs.toDataURL("image/jpeg",0.85));
+            cvs.width=0;cvs.height=0;
           }
         }
       }catch(imgErr){console.error("Page render error:",imgErr);}
@@ -1003,17 +1007,19 @@ function ReportEditor({job, user, onBack, reportDate}){
 
   // ── PDF Preview Screen ──
   if(previewPdf){
+    const previewSwipeRef=React.createRef();
+    const handlePreviewTouch=(()=>{let sx=0;return{onTouchStart:e=>{sx=e.touches[0].clientX;},onTouchEnd:e=>{const dx=e.changedTouches[0].clientX-sx;if(dx>80)setPreviewPdf(null);}};})();
     return(
-      <div style={{minHeight:"100vh",background:C.bg,color:C.txt,display:"flex",flexDirection:"column"}}>
-        <div style={{display:"flex",alignItems:"center",gap:12,padding:"16px 20px",borderBottom:`1px solid ${C.brd}`,background:C.card}}>
-          <button onClick={()=>setPreviewPdf(null)} style={{background:"none",border:"none",color:C.mut,fontSize:22,cursor:"pointer",padding:0,lineHeight:1}}>←</button>
+      <div style={{minHeight:"100vh",background:C.bg,color:C.txt,display:"flex",flexDirection:"column"}} {...handlePreviewTouch}>
+        <div style={{display:"flex",alignItems:"center",gap:10,padding:"12px 16px",borderBottom:`1px solid ${C.brd}`,background:C.card}}>
+          <button onClick={()=>setPreviewPdf(null)} style={{background:"none",border:"none",color:C.blu,fontSize:28,cursor:"pointer",padding:"8px 12px",lineHeight:1,borderRadius:8,minWidth:48,minHeight:48,display:"flex",alignItems:"center",justifyContent:"center"}}>←</button>
           <MDRLogo size={28}/>
           <div style={{flex:1}}>
             <div style={{fontWeight:700,fontSize:17}}>Review Report</div>
             <div style={{fontSize:12,color:C.mut}}>{previewPdf.filename}</div>
           </div>
         </div>
-        <div style={{flex:1,overflow:"auto",WebkitOverflowScrolling:"touch",paddingBottom:80}}>
+        <div style={{flex:1,overflow:"auto",WebkitOverflowScrolling:"touch",paddingBottom:90}}>
           {previewPdf.images&&previewPdf.images.length>0?(
             <div style={{padding:"12px 16px"}}>
               {previewPdf.images.map((src,i)=>(
@@ -1023,12 +1029,12 @@ function ReportEditor({job, user, onBack, reportDate}){
           ):(
             <div style={{textAlign:"center",padding:40,color:C.mut}}>
               <div style={{fontSize:48,marginBottom:12}}>📄</div>
-              <div style={{fontSize:14,marginBottom:8}}>PDF generated — preview not available on this device</div>
-              <div style={{fontSize:12}}>Tap Submit & Send to finalize</div>
+              <div style={{fontSize:14,marginBottom:8}}>PDF preview could not render</div>
+              <div style={{fontSize:12}}>You can still Submit & Send below</div>
             </div>
           )}
         </div>
-        <div style={{position:"fixed",bottom:0,left:0,right:0,display:"flex",gap:10,padding:"12px 20px",borderTop:`1px solid ${C.brd}`,background:C.card,zIndex:100}}>
+        <div style={{position:"fixed",bottom:0,left:0,right:0,display:"flex",gap:10,padding:"14px 20px",borderTop:`1px solid ${C.brd}`,background:C.card,zIndex:100}}>
           <button onClick={()=>setPreviewPdf(null)} style={{flex:1,padding:"14px 0",background:"transparent",border:`1px solid ${C.brd}`,borderRadius:10,color:C.lt,fontSize:15,fontWeight:700,cursor:"pointer"}}>
             Go Back & Edit
           </button>
@@ -1047,7 +1053,7 @@ function ReportEditor({job, user, onBack, reportDate}){
       {toast&&<div style={{position:"fixed",top:60,left:"50%",transform:"translateX(-50%)",background:C.card,border:`1px solid ${C.ok}`,borderRadius:10,padding:"10px 20px",fontSize:14,fontWeight:600,color:C.ok,zIndex:9999}}>{toast}</div>}
       {/* Header */}
       <div style={{display:"flex",alignItems:"center",gap:12,padding:"16px 20px",borderBottom:`1px solid ${C.brd}`,background:C.card}}>
-        <button onClick={onBack} style={{background:"none",border:"none",color:C.mut,fontSize:22,cursor:"pointer",padding:0,lineHeight:1}}>←</button>
+        <button onClick={onBack} style={{background:"none",border:"none",color:C.blu,fontSize:28,cursor:"pointer",padding:"8px 12px",lineHeight:1,borderRadius:8,minWidth:48,minHeight:48,display:"flex",alignItems:"center",justifyContent:"center"}}>←</button>
         <MDRLogo size={28}/>
         <div style={{flex:1}}>
           <div style={{fontWeight:700,fontSize:17}}>{reportStatus==="submitted"?"Submitted Report":"Today's Report"}</div>
