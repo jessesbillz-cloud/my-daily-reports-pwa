@@ -901,7 +901,9 @@ function ReportEditor({job, user, onBack, reportDate}){
   };
 
   const [submitting,setSubmitting]=useState(false);
+  const [viewLoading,setViewLoading]=useState(false);
   const [viewingReport,setViewingReport]=useState(null); // array of page image data URLs
+  const [submitSuccess,setSubmitSuccess]=useState(null); // {pdfBlob, pdfFilename, teamEmails} after submit
   const [toast,setToast]=useState("");
 
   const showToast=(msg)=>{setToast(msg);setTimeout(()=>setToast(""),2500);};
@@ -935,15 +937,25 @@ function ReportEditor({job, user, onBack, reportDate}){
 
   // View Report — renders original template with pdf.js, overlays field values + notes on canvas
   const viewReport=async()=>{
-    setSubmitting(true);
+    setViewLoading(true);
     try{
       const tplRecord=await db.getTemplate(job.id);
       if(!tplRecord||!tplRecord.storage_path)throw new Error("No template found.");
+      // Check if template is a PDF — docx/other formats can't be previewed with pdf.js
+      if(tplRecord.file_type&&tplRecord.file_type!=="pdf"){
+        throw new Error("View Report preview requires a PDF template. Your template is a "+tplRecord.file_type.toUpperCase()+" file. Submit the report to generate the final PDF.");
+      }
       const tplResp=await fetch(`${SB_URL}/storage/v1/object/report-source-docs/${tplRecord.storage_path}`,{
         headers:{apikey:SB_KEY,Authorization:`Bearer ${AUTH_TOKEN||SB_KEY}`}
       });
       if(!tplResp.ok)throw new Error("Could not download template.");
       const tplBytes=await tplResp.arrayBuffer();
+      // Validate PDF magic bytes
+      const header=new Uint8Array(tplBytes.slice(0,5));
+      const headerStr=String.fromCharCode(...header);
+      if(!headerStr.startsWith("%PDF")){
+        throw new Error("Template file is not a valid PDF. It may be a DOCX or other format. Submit the report to generate the final PDF.");
+      }
       if(!window.pdfjsLib)throw new Error("PDF viewer not loaded.");
       const allFields=buildEditableFields();
       const pjDoc=await window.pdfjsLib.getDocument({data:tplBytes}).promise;
@@ -1006,7 +1018,7 @@ function ReportEditor({job, user, onBack, reportDate}){
     }catch(e){
       console.error("View report error:",e);
       showToast("Error: "+e.message);
-    }finally{setSubmitting(false);}
+    }finally{setViewLoading(false);}
   };
 
   // Submit Report — generates filled PDF with pdf-lib, uploads, emails, all in one step
@@ -1149,24 +1161,45 @@ function ReportEditor({job, user, onBack, reportDate}){
       const summaryTable=fieldSummary?`<table style="margin:16px 0;border-collapse:collapse;">${fieldSummary}</table>`:"";
       const emailHtml=`<div style="font-family:-apple-system,sans-serif;max-width:600px;margin:0 auto;"><div style="background:#e8742a;padding:20px 24px;border-radius:8px 8px 0 0;"><h1 style="color:#fff;margin:0;font-size:20px;">My Daily Reports</h1></div><div style="background:#f9f9f9;padding:24px;border:1px solid #e0e0e0;border-top:none;border-radius:0 0 8px 8px;"><p style="color:#333;font-size:16px;line-height:1.6;margin:0 0 8px;">Hi,</p><p style="color:#333;font-size:15px;line-height:1.6;margin:0 0 16px;">${userName} has submitted the daily field report for <strong>${job.name}</strong> on ${todayDisplay}.</p>${summaryTable}<p style="color:#555;font-size:14px;margin:16px 0 0;">The full PDF report is attached to this email.${photoNote?"":" No site photos were included."}</p>${photoNote}</div><p style="color:#999;font-size:11px;text-align:center;margin-top:16px;">Sent via My Daily Reports &bull; mydailyreports.com</p></div>`;
 
+      // Store PDF info and show post-submit options instead of auto-emailing
       const teamEmails=job.team_emails||[];
-      const userEmail=user.email;
-      const recipients=[...new Set([userEmail,...teamEmails])].filter(Boolean);
-      if(recipients.length>0){
-        try{
-          await fetch(`${SB_URL}/functions/v1/send-report`,{
-            method:"POST",headers:{"Content-Type":"application/json",Authorization:`Bearer ${SB_KEY}`,apikey:SB_KEY},
-            body:JSON.stringify({to:recipients,subject:`${job.name} — Daily Report ${todayDisplay}`,html_body:emailHtml,pdf_base64:pdfBase64,pdf_filename:pdfFilename})
-          });
-        }catch(emailErr){console.error("Email send error:",emailErr);}
-      }
-
+      setSubmitSuccess({pdfBlob,pdfFilename,pdfBase64,emailHtml,teamEmails,jobName:job.name,todayDisplay,userName});
       showToast("Report submitted!");
-      setTimeout(()=>onBack(),1500);
     }catch(e){
       console.error("Submit error:",e);
       showToast("Submit failed: "+e.message);
     }finally{setSubmitting(false);}
+  };
+
+  // Post-submit: Download PDF to device
+  const downloadPdf=()=>{
+    if(!submitSuccess)return;
+    const url=URL.createObjectURL(submitSuccess.pdfBlob);
+    const a=document.createElement("a");a.href=url;a.download=submitSuccess.pdfFilename;
+    document.body.appendChild(a);a.click();document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    showToast("PDF downloaded!");
+  };
+
+  // Post-submit: Email to project team
+  const [emailing,setEmailing]=useState(false);
+  const emailToTeam=async()=>{
+    if(!submitSuccess)return;
+    setEmailing(true);
+    try{
+      const userEmail=user.email;
+      const recipients=[...new Set([userEmail,...submitSuccess.teamEmails])].filter(Boolean);
+      if(recipients.length===0){showToast("No team emails configured. Add them in Job Settings.");setEmailing(false);return;}
+      const r=await fetch(`${SB_URL}/functions/v1/send-report`,{
+        method:"POST",headers:{"Content-Type":"application/json",Authorization:`Bearer ${SB_KEY}`,apikey:SB_KEY},
+        body:JSON.stringify({to:recipients,subject:`${submitSuccess.jobName} — Daily Report ${submitSuccess.todayDisplay}`,html_body:submitSuccess.emailHtml,pdf_base64:submitSuccess.pdfBase64,pdf_filename:submitSuccess.pdfFilename})
+      });
+      if(!r.ok)throw new Error("Email send failed");
+      showToast("Report emailed to "+recipients.length+" recipient"+(recipients.length>1?"s":"")+"!");
+    }catch(e){
+      console.error("Email error:",e);
+      showToast("Email failed: "+e.message);
+    }finally{setEmailing(false);}
   };
 
   const fs={width:"100%",padding:"12px 14px",background:C.inp,border:`1px solid ${C.brd}`,borderRadius:10,color:C.txt,fontSize:15};
@@ -1197,6 +1230,66 @@ function ReportEditor({job, user, onBack, reportDate}){
           <button onClick={()=>setViewingReport(null)} style={{width:"100%",padding:"14px 0",background:C.blu,border:"none",borderRadius:10,color:"#fff",fontSize:15,fontWeight:700,cursor:"pointer"}}>
             Back to Editing
           </button>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Post-Submit Success Screen — Download or Email options ──
+  if(submitSuccess){
+    const teamCount=submitSuccess.teamEmails.length;
+    const hasTeam=teamCount>0||user.email;
+    return(
+      <div style={{minHeight:"100vh",background:C.bg,color:C.txt,display:"flex",flexDirection:"column"}}>
+        {toast&&<div style={{position:"fixed",top:60,left:"50%",transform:"translateX(-50%)",background:C.card,border:`1px solid ${C.ok}`,borderRadius:10,padding:"10px 20px",fontSize:14,fontWeight:600,color:C.ok,zIndex:9999}}>{toast}</div>}
+        <div style={{display:"flex",alignItems:"center",gap:10,padding:"12px 16px",borderBottom:`1px solid ${C.brd}`,background:C.card}}>
+          <MDRLogo size={28}/>
+          <div style={{flex:1}}>
+            <div style={{fontWeight:700,fontSize:17}}>Report Submitted</div>
+            <div style={{fontSize:12,color:C.mut}}>{submitSuccess.pdfFilename}</div>
+          </div>
+        </div>
+        <div style={{flex:1,padding:"24px 20px",display:"flex",flexDirection:"column",alignItems:"center",gap:20}}>
+          <div style={{width:64,height:64,borderRadius:"50%",background:C.ok+"22",display:"flex",alignItems:"center",justifyContent:"center",fontSize:32}}>✓</div>
+          <div style={{textAlign:"center"}}>
+            <div style={{fontSize:18,fontWeight:700,marginBottom:6}}>Report Saved Successfully</div>
+            <div style={{fontSize:14,color:C.mut}}>Choose how to deliver your report</div>
+          </div>
+
+          <div style={{width:"100%",maxWidth:400,display:"flex",flexDirection:"column",gap:12}}>
+            {/* Download to device */}
+            <button onClick={downloadPdf} style={{width:"100%",padding:"16px 20px",background:C.blu,border:"none",borderRadius:12,color:"#fff",fontSize:15,fontWeight:700,cursor:"pointer",display:"flex",alignItems:"center",gap:12}}>
+              <span style={{fontSize:22}}>⬇</span>
+              <div style={{textAlign:"left"}}>
+                <div>Download PDF</div>
+                <div style={{fontSize:11,fontWeight:400,opacity:0.8}}>Save to your device</div>
+              </div>
+            </button>
+
+            {/* Email to team */}
+            <button onClick={emailToTeam} disabled={emailing} style={{width:"100%",padding:"16px 20px",background:C.org,border:"none",borderRadius:12,color:"#fff",fontSize:15,fontWeight:700,cursor:emailing?"default":"pointer",opacity:emailing?0.7:1,display:"flex",alignItems:"center",gap:12}}>
+              <span style={{fontSize:22}}>✉</span>
+              <div style={{textAlign:"left"}}>
+                <div>{emailing?"Sending...":"Email to Project Team"}</div>
+                <div style={{fontSize:11,fontWeight:400,opacity:0.8}}>
+                  {teamCount>0
+                    ?`Send to ${teamCount+1} recipient${teamCount+1>1?"s":""} (you + ${teamCount} team)`
+                    :user.email?"Send to "+user.email:"No team emails configured"}
+                </div>
+              </div>
+            </button>
+
+            {/* Both */}
+            <button onClick={()=>{downloadPdf();emailToTeam();}} disabled={emailing} style={{width:"100%",padding:"14px 20px",background:"transparent",border:`1px solid ${C.brd}`,borderRadius:12,color:C.lt,fontSize:14,fontWeight:600,cursor:emailing?"default":"pointer",opacity:emailing?0.7:1}}>
+              Download & Email Both
+            </button>
+          </div>
+
+          <div style={{width:"100%",maxWidth:400,borderTop:`1px solid ${C.brd}`,paddingTop:16,marginTop:8}}>
+            <button onClick={()=>{setSubmitSuccess(null);onBack();}} style={{width:"100%",padding:"14px 0",background:C.card,border:`1px solid ${C.brd}`,borderRadius:10,color:C.mut,fontSize:14,fontWeight:600,cursor:"pointer"}}>
+              Done — Back to Job
+            </button>
+          </div>
         </div>
       </div>
     );
@@ -1344,15 +1437,15 @@ function ReportEditor({job, user, onBack, reportDate}){
         <div style={{display:"flex",flexDirection:"column",gap:10,marginBottom:20}}>
           <div style={{display:"flex",gap:10}}>
             {reportStatus!=="submitted"&&(
-              <button onClick={saveWorking} disabled={saving||submitting} className="btn-o" style={{flex:1,padding:"14px 0",background:C.blu,border:"none",borderRadius:10,color:"#fff",fontSize:15,fontWeight:700,cursor:saving?"default":"pointer",opacity:saving?0.6:1}}>
+              <button onClick={saveWorking} disabled={saving||submitting||viewLoading} className="btn-o" style={{flex:1,padding:"14px 0",background:C.blu,border:"none",borderRadius:10,color:"#fff",fontSize:15,fontWeight:700,cursor:saving?"default":"pointer",opacity:saving?0.6:1}}>
                 {saving?"Saving...":"Save Working Copy"}
               </button>
             )}
-            <button onClick={viewReport} disabled={submitting} style={{flex:1,padding:"14px 0",background:"transparent",border:`1px solid ${C.brd}`,borderRadius:10,color:C.lt,fontSize:15,fontWeight:700,cursor:submitting?"default":"pointer",opacity:submitting?0.6:1}}>
-              {submitting?"Loading...":"View Report"}
+            <button onClick={viewReport} disabled={viewLoading||submitting} style={{flex:1,padding:"14px 0",background:"transparent",border:`1px solid ${C.brd}`,borderRadius:10,color:C.lt,fontSize:15,fontWeight:700,cursor:viewLoading?"default":"pointer",opacity:viewLoading?0.6:1}}>
+              {viewLoading?"Loading...":"View Report"}
             </button>
           </div>
-          <button onClick={submitReport} disabled={submitting} className="btn-o" style={{width:"100%",padding:"14px 0",background:C.org,border:"none",borderRadius:10,color:"#fff",fontSize:15,fontWeight:700,cursor:submitting?"default":"pointer",opacity:submitting?0.6:1}}>
+          <button onClick={submitReport} disabled={submitting||viewLoading} className="btn-o" style={{width:"100%",padding:"14px 0",background:C.org,border:"none",borderRadius:10,color:"#fff",fontSize:15,fontWeight:700,cursor:submitting?"default":"pointer",opacity:submitting?0.6:1}}>
             {submitting?"Submitting...":reportStatus==="submitted"?"Update & Resubmit":"Submit Report"}
           </button>
         </div>
