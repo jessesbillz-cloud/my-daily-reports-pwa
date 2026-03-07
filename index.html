@@ -28,7 +28,45 @@ const { useState, useEffect, useRef, useCallback } = React;
 const SB_URL = "https://wluvkmpncafugdbunlkw.supabase.co";
 const SB_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndsdXZrbXBuY2FmdWdkYnVubGt3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzIzMDU1MTUsImV4cCI6MjA4Nzg4MTUxNX0.HZpQ2xVGpf4EQ0BVDmIEuPqW5T_eNG5OqBNAqT03rH8";
 const C = {bg:"#0f0f0f",card:"#1a1a1a",brd:"#333",inp:"#222",org:"#e8742a",orgH:"#d4691f",blu:"#5a8fc0",txt:"#fff",mut:"#888",lt:"#ccc",err:"#ef4444",ok:"#22c55e"};
-const DEV_USER = {id:"00000000-0000-0000-0000-000000000001",email:"saltzman.jesse@gmail.com",user_metadata:{full_name:"Jesse Saltzman"}};
+// DEV_USER will be set after auto-login
+let DEV_USER = null;
+const DEV_EMAIL = "saltzman.jesse@gmail.com";
+const DEV_PASS = "MDR_dev_2026!";
+let AUTH_TOKEN = null;
+
+async function devLogin(){
+  // Try to sign in first
+  let r = await fetch(`${SB_URL}/auth/v1/token?grant_type=password`,{
+    method:"POST",
+    headers:{"Content-Type":"application/json",apikey:SB_KEY},
+    body:JSON.stringify({email:DEV_EMAIL,password:DEV_PASS})
+  });
+  let d = await r.json();
+  if(d.access_token){
+    AUTH_TOKEN=d.access_token;
+    DEV_USER={id:d.user.id,email:d.user.email,user_metadata:d.user.user_metadata||{full_name:"Jesse Saltzman"}};
+    return DEV_USER;
+  }
+  // If sign-in failed, try to sign up
+  r = await fetch(`${SB_URL}/auth/v1/signup`,{
+    method:"POST",
+    headers:{"Content-Type":"application/json",apikey:SB_KEY},
+    body:JSON.stringify({email:DEV_EMAIL,password:DEV_PASS,data:{full_name:"Jesse Saltzman"}})
+  });
+  d = await r.json();
+  if(d.access_token){
+    AUTH_TOKEN=d.access_token;
+    DEV_USER={id:d.user.id,email:d.user.email,user_metadata:d.user.user_metadata||{full_name:"Jesse Saltzman"}};
+    return DEV_USER;
+  }
+  // If signup requires email confirm, user exists but wrong password, or other issue
+  // Fall back to the user object from signup response
+  if(d.id){
+    DEV_USER={id:d.id,email:d.email,user_metadata:d.user_metadata||{full_name:"Jesse Saltzman"}};
+    return DEV_USER;
+  }
+  throw new Error("Auth failed: "+(d.error_description||d.msg||d.error||"Unknown error"));
+}
 
 const SL={daily_mf:"Daily M-F",daily_7:"Daily 7 Days",weekly:"Weekly",as_needed:"As Needed",custom:"Custom"};
 
@@ -63,11 +101,11 @@ function MDRLogo({size=36}){
 
 /* ── Database Layer ── */
 const db = {
-  _h(){return{"Content-Type":"application/json",apikey:SB_KEY,Authorization:`Bearer ${SB_KEY}`,Prefer:"return=representation"};},
+  _h(){return{"Content-Type":"application/json",apikey:SB_KEY,Authorization:`Bearer ${AUTH_TOKEN||SB_KEY}`,Prefer:"return=representation"};},
   async jobs(userId){const r=await fetch(`${SB_URL}/rest/v1/jobs?user_id=eq.${userId}&select=*&order=created_at.asc`,{headers:this._h()});if(!r.ok)throw new Error("Failed");return await r.json();},
   async todayRpts(ids){if(!ids.length)return[];const t=new Date().toISOString().split("T")[0];const q=ids.map(i=>`"${i}"`).join(",");const r=await fetch(`${SB_URL}/rest/v1/reports?select=id,job_id,status,report_date&report_date=eq.${t}&job_id=in.(${q})`,{headers:this._h()});if(!r.ok)return[];return await r.json();},
   async mkJob(d){const r=await fetch(`${SB_URL}/rest/v1/jobs`,{method:"POST",headers:this._h(),body:JSON.stringify(d)});if(!r.ok){const e=await r.json();throw new Error(e.message||"Failed");}return(await r.json())[0];},
-  async ulTpl(uid,jid,f){const ext=f.name.split(".").pop().toLowerCase();const p=`${uid}/${jid}/template.${ext}`;const r=await fetch(`${SB_URL}/storage/v1/object/report-source-docs/${p}`,{method:"POST",headers:{apikey:SB_KEY,Authorization:`Bearer ${SB_KEY}`,"Content-Type":f.type||"application/octet-stream"},body:f});if(!r.ok)throw new Error("Upload failed");return p;},
+  async ulTpl(uid,jid,f){const ext=f.name.split(".").pop().toLowerCase();const p=`${uid}/${jid}/template.${ext}`;const r=await fetch(`${SB_URL}/storage/v1/object/report-source-docs/${p}`,{method:"POST",headers:{apikey:SB_KEY,Authorization:`Bearer ${AUTH_TOKEN||SB_KEY}`,"Content-Type":f.type||"application/octet-stream"},body:f});if(!r.ok)throw new Error("Upload failed");return p;},
   async mkTpl(d){const r=await fetch(`${SB_URL}/rest/v1/templates`,{method:"POST",headers:this._h(),body:JSON.stringify(d)});if(!r.ok)throw new Error("Template save failed");return(await r.json())[0];},
   async getProfile(userId){const r=await fetch(`${SB_URL}/rest/v1/profiles?id=eq.${userId}&select=*`,{headers:this._h()});if(!r.ok)return null;const d=await r.json();return d[0]||null;},
   async upsertProfile(d){const r=await fetch(`${SB_URL}/rest/v1/profiles`,{method:"POST",headers:{...this._h(),Prefer:"return=representation,resolution=merge-duplicates"},body:JSON.stringify(d)});if(!r.ok)throw new Error("Profile save failed");return(await r.json())[0];},
@@ -379,7 +417,7 @@ function CreateJob({user, onBack, onCreated}){
       else{const docText=await extractDocxText(f);payload={file_text:docText,file_name:f.name};}
       const resp=await fetch(`${SB_URL}/functions/v1/parse-template`,{
         method:"POST",
-        headers:{"Content-Type":"application/json","Authorization":"Bearer "+SB_KEY,"apikey":SB_KEY},
+        headers:{"Content-Type":"application/json","Authorization":"Bearer "+(AUTH_TOKEN||SB_KEY),"apikey":SB_KEY},
         body:JSON.stringify(payload)
       });
       const parsed=await resp.json();
@@ -550,8 +588,16 @@ function CreateJob({user, onBack, onCreated}){
 
         {/* ── Three Toggle Boxes ── */}
 
-        {/* 1. Report Frequency */}
-        <ToggleBox icon="📊" label="Report Frequency" on={freqOn} setOn={setFreqOn} desc="Set how often you'll file reports for this job">
+        {/* 1. Inspection Scheduling */}
+        <ToggleBox icon="📅" label="Inspection Scheduling" on={schedOn} setOn={setSchedOn}>
+          <div style={{background:C.bg,border:`1px solid ${C.brd}`,borderRadius:8,padding:"12px 14px",marginTop:12}}>
+            <p style={{fontSize:13,color:C.lt,lineHeight:1.5}}>Let your GC and subs request inspections through a shared calendar.</p>
+            <p style={{fontSize:12,color:C.blu,marginTop:8,fontWeight:600}}>You'll set up the calendar link and team contacts on the job dashboard after creating this job.</p>
+          </div>
+        </ToggleBox>
+
+        {/* 2. Report Frequency */}
+        <ToggleBox icon="📊" label="Report Frequency" on={freqOn} setOn={v=>{setFreqOn(v);if(!v)setRemOn(false);}} desc="Set how often you'll file reports for this job">
           <div style={{display:"flex",gap:6,marginBottom:10,flexWrap:"wrap"}}>
             {DS.map(d=>{const a=days.includes(d);return<button key={d} onClick={()=>togDay(d)} style={{width:42,height:42,borderRadius:"50%",border:a?`2px solid ${C.org}`:`1px solid ${C.brd}`,background:a?C.org:"transparent",color:a?"#fff":C.mut,fontWeight:600,fontSize:11,cursor:"pointer"}}>{d}</button>;})}
           </div>
@@ -560,21 +606,15 @@ function CreateJob({user, onBack, onCreated}){
           </div>
         </ToggleBox>
 
-        {/* 2. Reminders — only if frequency is on */}
-        <ToggleBox icon="🔔" label="Reminders" on={remOn} setOn={setRemOn} desc="Get reminded before your report is due">
-          <div style={{display:"flex",gap:10}}>
-            <div style={{flex:1}}><label style={{display:"block",color:C.mut,fontSize:11,marginBottom:4}}>Submit by</label><select value={remT} onChange={e=>setRemT(e.target.value)} style={{width:"100%",padding:"8px 10px",background:C.bg,border:`1px solid ${C.brd}`,borderRadius:8,color:C.txt,fontSize:13}}>{TS.map(t=><option key={t} value={t}>{t}</option>)}</select></div>
-            <div style={{flex:1}}><label style={{display:"block",color:C.mut,fontSize:11,marginBottom:4}}>Remind me</label><select value={remH} onChange={e=>setRemH(Number(e.target.value))} style={{width:"100%",padding:"8px 10px",background:C.bg,border:`1px solid ${C.brd}`,borderRadius:8,color:C.txt,fontSize:13}}>{[1,2,3,4,6].map(h=><option key={h} value={h}>{h} hr{h>1?"s":""} before</option>)}</select></div>
-          </div>
-        </ToggleBox>
-
-        {/* 3. Inspection Scheduling */}
-        <ToggleBox icon="📅" label="Inspection Scheduling" on={schedOn} setOn={setSchedOn}>
-          <div style={{background:C.bg,border:`1px solid ${C.brd}`,borderRadius:8,padding:"12px 14px",marginTop:12}}>
-            <p style={{fontSize:13,color:C.lt,lineHeight:1.5}}>Let your GC and subs request inspections through a shared calendar.</p>
-            <p style={{fontSize:12,color:C.blu,marginTop:8,fontWeight:600}}>You'll set up the calendar link and team contacts on the job dashboard after creating this job.</p>
-          </div>
-        </ToggleBox>
+        {/* 3. Reminders — only visible when Report Frequency is on */}
+        {freqOn&&(
+          <ToggleBox icon="🔔" label="Reminders" on={remOn} setOn={setRemOn} desc="Get reminded before your report is due">
+            <div style={{display:"flex",gap:10}}>
+              <div style={{flex:1}}><label style={{display:"block",color:C.mut,fontSize:11,marginBottom:4}}>Submit by</label><select value={remT} onChange={e=>setRemT(e.target.value)} style={{width:"100%",padding:"8px 10px",background:C.bg,border:`1px solid ${C.brd}`,borderRadius:8,color:C.txt,fontSize:13}}>{TS.map(t=><option key={t} value={t}>{t}</option>)}</select></div>
+              <div style={{flex:1}}><label style={{display:"block",color:C.mut,fontSize:11,marginBottom:4}}>Remind me</label><select value={remH} onChange={e=>setRemH(Number(e.target.value))} style={{width:"100%",padding:"8px 10px",background:C.bg,border:`1px solid ${C.brd}`,borderRadius:8,color:C.txt,fontSize:13}}>{[1,2,3,4,6].map(h=><option key={h} value={h}>{h} hr{h>1?"s":""} before</option>)}</select></div>
+            </div>
+          </ToggleBox>
+        )}
 
         {/* Create Button — only requires job name */}
         <button className="btn-o" onClick={create} disabled={!ok||saving} style={{width:"100%",padding:"14px 0",background:ok?C.org:C.brd,border:ok?`1px solid ${C.blu}`:`1px solid ${C.brd}`,borderRadius:10,color:"#fff",fontSize:16,fontWeight:700,cursor:ok&&!saving?"pointer":"default",opacity:saving?0.7:1,marginTop:8}}>{saving?"Creating...":"Create Job"}</button>
@@ -1113,7 +1153,31 @@ function Dashboard({user, onLogout}){
   );
 }
 
-function App(){return<Dashboard user={DEV_USER} onLogout={()=>alert("Auth disabled during dev")}/>;}
+function App(){
+  const [user,setUser]=useState(null);
+  const [authErr,setAuthErr]=useState("");
+  const [booting,setBooting]=useState(true);
+
+  useEffect(()=>{
+    devLogin().then(u=>{setUser(u);setBooting(false);}).catch(e=>{setAuthErr(e.message);setBooting(false);});
+  },[]);
+
+  if(booting)return(
+    <div style={{minHeight:"100vh",background:C.bg,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:16}}>
+      <MDRLogo size={64}/>
+      <div style={{color:C.mut,fontSize:14}}>Signing in...</div>
+    </div>
+  );
+  if(authErr)return(
+    <div style={{minHeight:"100vh",background:C.bg,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:16,padding:20}}>
+      <MDRLogo size={64}/>
+      <div style={{color:C.err,fontSize:14,textAlign:"center",maxWidth:400}}>{authErr}</div>
+      <button onClick={()=>window.location.reload()} className="btn-o" style={{padding:"12px 24px",background:C.org,border:"none",borderRadius:8,color:"#fff",fontWeight:700,cursor:"pointer"}}>Retry</button>
+    </div>
+  );
+  if(!user)return null;
+  return<Dashboard user={user} onLogout={()=>{AUTH_TOKEN=null;DEV_USER=null;window.location.reload();}}/>;
+}
 ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
 </script>
 </body>
