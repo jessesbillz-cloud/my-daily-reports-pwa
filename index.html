@@ -1169,16 +1169,16 @@ function JobDetail({job, user, onBack, onDeleted}){
           {working.length===0?(
             <div style={{textAlign:"center",padding:"16px 0",color:C.mut,fontSize:13}}>No drafts in progress</div>
           ):(
-            working.map((r,i)=>(
+            working.map((r,i)=>{const rptName=job.report_filename_pattern?job.report_filename_pattern.replace("##",String(r.report_number||1).padStart(2,"0")):("DR#"+(r.report_number||"?"));return(
               <button key={r.id} onClick={openReport} style={{width:"100%",display:"flex",alignItems:"center",gap:12,padding:"12px 4px",background:"none",border:"none",borderBottom:i<working.length-1?`1px solid ${C.brd}`:"none",cursor:"pointer",textAlign:"left"}}>
                 <div style={{width:10,height:10,borderRadius:"50%",background:C.org,flexShrink:0}}/>
                 <div style={{flex:1}}>
-                  <div style={{fontSize:14,fontWeight:600,color:C.lt}}>DR#{r.report_number||"?"} — {new Date(r.report_date+"T12:00:00").toLocaleDateString("en-US",{weekday:"short",month:"short",day:"numeric",timeZone:tz})}</div>
+                  <div style={{fontSize:14,fontWeight:600,color:C.lt}}>{rptName} — {new Date(r.report_date+"T12:00:00").toLocaleDateString("en-US",{weekday:"short",month:"short",day:"numeric",timeZone:tz})}</div>
                   <div style={{fontSize:11,color:C.mut}}>Last edited {r.updated_at?new Date(r.updated_at).toLocaleTimeString("en-US",{hour:"numeric",minute:"2-digit",timeZone:tz}):""}</div>
                 </div>
                 <span style={{color:C.org,fontSize:13,fontWeight:600}}>Edit ›</span>
-              </button>
-            ))
+              </button>);})
+
           )}
         </Folder>
 
@@ -1187,11 +1187,11 @@ function JobDetail({job, user, onBack, onDeleted}){
           {submitted.length===0?(
             <div style={{textAlign:"center",padding:"16px 0",color:C.mut,fontSize:13}}>No submitted reports yet</div>
           ):(
-            submitted.map((r,i)=>(
+            submitted.map((r,i)=>{const rptName=job.report_filename_pattern?job.report_filename_pattern.replace("##",String(r.report_number||1).padStart(2,"0")):("DR#"+(r.report_number||submitted.length-i));return(
               <div key={r.id} style={{display:"flex",alignItems:"center",gap:12,padding:"12px 4px",borderBottom:i<submitted.length-1?`1px solid ${C.brd}`:"none"}}>
                 <div style={{width:10,height:10,borderRadius:"50%",background:C.ok,flexShrink:0}}/>
                 <div style={{flex:1}}>
-                  <div style={{fontSize:14,fontWeight:600,color:C.lt}}>DR#{r.report_number||submitted.length-i} — {new Date(r.report_date+"T12:00:00").toLocaleDateString("en-US",{weekday:"short",month:"short",day:"numeric",timeZone:tz})}</div>
+                  <div style={{fontSize:14,fontWeight:600,color:C.lt}}>{rptName} — {new Date(r.report_date+"T12:00:00").toLocaleDateString("en-US",{weekday:"short",month:"short",day:"numeric",timeZone:tz})}</div>
                   <div style={{fontSize:11,color:C.mut}}>Submitted {r.submitted_at?new Date(r.submitted_at).toLocaleString("en-US",{month:"short",day:"numeric",hour:"numeric",minute:"2-digit",timeZone:tz}):r.report_date}</div>
                 </div>
                 <div style={{display:"flex",gap:6,flexShrink:0}}>
@@ -1199,7 +1199,7 @@ function JobDetail({job, user, onBack, onDeleted}){
                   <button style={{padding:"5px 10px",fontSize:11,fontWeight:700,borderRadius:6,border:`1px solid ${C.brd}`,background:"transparent",color:C.blu,cursor:"pointer"}}>Resend</button>
                 </div>
               </div>
-            ))
+            );})
           )}
         </Folder>
 
