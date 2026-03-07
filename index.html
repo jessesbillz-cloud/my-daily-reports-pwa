@@ -110,18 +110,7 @@ const db = {
   async mkJob(d){const r=await fetch(`${SB_URL}/rest/v1/jobs`,{method:"POST",headers:this._h(),body:JSON.stringify(d)});if(!r.ok){const e=await r.json();throw new Error(e.message||"Failed");}return(await r.json())[0];},
   async ulTpl(uid,jid,blob,ext){const p=`${uid}/${jid}/template.${ext||"pdf"}`;const ct=blob.type||"application/octet-stream";let r=await fetch(`${SB_URL}/storage/v1/object/report-source-docs/${p}`,{method:"POST",headers:{apikey:SB_KEY,Authorization:`Bearer ${AUTH_TOKEN||SB_KEY}`,"Content-Type":ct},body:blob});if(!r.ok){r=await fetch(`${SB_URL}/storage/v1/object/report-source-docs/${p}`,{method:"PUT",headers:{apikey:SB_KEY,Authorization:`Bearer ${AUTH_TOKEN||SB_KEY}`,"Content-Type":ct},body:blob});if(!r.ok)throw new Error("Upload failed");}return p;},
   async mkTpl(d){
-    // Try full payload first
-    let r=await fetch(`${SB_URL}/rest/v1/templates`,{method:"POST",headers:this._h(),body:JSON.stringify(d)});
-    if(r.ok)return(await r.json())[0];
-    // Strip optional columns that may not exist and retry
-    const extras=["page_images","original_filename"];
-    let d2={...d};
-    for(const col of extras)delete d2[col];
-    r=await fetch(`${SB_URL}/rest/v1/templates`,{method:"POST",headers:this._h(),body:JSON.stringify(d2)});
-    if(r.ok)return(await r.json())[0];
-    // Last resort: only send the bare minimum columns
-    const minimal={user_id:d.user_id,job_id:d.job_id,storage_path:d.storage_path,file_type:d.file_type,name:d.name};
-    r=await fetch(`${SB_URL}/rest/v1/templates`,{method:"POST",headers:this._h(),body:JSON.stringify(minimal)});
+    const r=await fetch(`${SB_URL}/rest/v1/templates`,{method:"POST",headers:this._h(),body:JSON.stringify(d)});
     if(r.ok)return(await r.json())[0];
     const err=await r.json().catch(()=>({}));
     throw new Error(err.message||"Template save failed");
@@ -594,7 +583,9 @@ function CreateJob({user, onBack, onCreated}){
             pagePaths=await db.saveTemplatePages(user.id,job.id,imgs);
           }catch(pgErr){console.error("Template page render:",pgErr);}
         }
-        await db.mkTpl({user_id:user.id,job_id:job.id,name:tf.name,file_type:ext,storage_path:sp});
+        const tplData={user_id:user.id,job_id:job.id,name:tf.name,original_filename:tf.name,file_type:ext,storage_path:sp,field_config:fields.length?fields:[]};
+        if(pagePaths.length>0)tplData.structure_map={page_images:pagePaths};
+        await db.mkTpl(tplData);
       }
       onCreated();
     }catch(e){setErr(e.message);}finally{setSaving(false);}
@@ -1012,9 +1003,10 @@ function ReportEditor({job, user, onBack, reportDate}){
       // ── 7. Build preview: load cached template page images, overlay field values as HTML ──
       let templatePageUrls=[];
       let templatePageDims={w:612,h:792};// default letter size in pts
-      if(tplRecord.page_images&&tplRecord.page_images.length>0){
+      const cachedPages=tplRecord.structure_map&&tplRecord.structure_map.page_images;
+      if(cachedPages&&cachedPages.length>0){
         // Use cached page images from job creation
-        templatePageUrls=tplRecord.page_images.map(p=>db.getTemplatePageUrl(p)+"?t="+Date.now());
+        templatePageUrls=cachedPages.map(p=>db.getTemplatePageUrl(p)+"?t="+Date.now());
       }else if(isPdfTemplate&&window.pdfjsLib&&tplBytesCopy){
         // Fallback: render template pages on-the-fly with pdf.js for jobs created before caching
         try{
@@ -1033,7 +1025,7 @@ function ReportEditor({job, user, onBack, reportDate}){
           if(user?.id&&job?.id){
             db.saveTemplatePages(user.id,job.id,rendered).then(paths=>{
               if(paths.length>0){
-                fetch(`${SB_URL}/rest/v1/templates?job_id=eq.${job.id}`,{method:"PATCH",headers:db._h(),body:JSON.stringify({page_images:paths})}).catch(()=>{});
+                fetch(`${SB_URL}/rest/v1/templates?job_id=eq.${job.id}`,{method:"PATCH",headers:db._h(),body:JSON.stringify({structure_map:{page_images:paths}})}).catch(()=>{});
               }
             }).catch(()=>{});
           }
