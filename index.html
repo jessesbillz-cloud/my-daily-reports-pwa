@@ -33,44 +33,103 @@ const { useState, useEffect, useRef, useCallback } = React;
 const SB_URL = "https://wluvkmpncafugdbunlkw.supabase.co";
 const SB_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndsdXZrbXBuY2FmdWdkYnVubGt3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzIzMDU1MTUsImV4cCI6MjA4Nzg4MTUxNX0.HZpQ2xVGpf4EQ0BVDmIEuPqW5T_eNG5OqBNAqT03rH8";
 const C = {bg:"#0f0f0f",card:"#1a1a1a",brd:"#333",inp:"#222",org:"#e8742a",orgH:"#d4691f",blu:"#5a8fc0",txt:"#fff",mut:"#888",lt:"#ccc",err:"#ef4444",ok:"#22c55e"};
-// DEV_USER will be set after auto-login
-let DEV_USER = null;
-const DEV_EMAIL = "saltzman.jesse@gmail.com";
-const DEV_PASS = "MDR_dev_2026!";
 let AUTH_TOKEN = null;
 
-async function devLogin(){
-  // Try to sign in first
-  let r = await fetch(`${SB_URL}/auth/v1/token?grant_type=password`,{
-    method:"POST",
-    headers:{"Content-Type":"application/json",apikey:SB_KEY},
-    body:JSON.stringify({email:DEV_EMAIL,password:DEV_PASS})
+// Auth helper — sign in with email/password
+async function authSignIn(email,password){
+  const r=await fetch(`${SB_URL}/auth/v1/token?grant_type=password`,{
+    method:"POST",headers:{"Content-Type":"application/json",apikey:SB_KEY},
+    body:JSON.stringify({email,password})
   });
-  let d = await r.json();
+  const d=await r.json();
   if(d.access_token){
     AUTH_TOKEN=d.access_token;
-    DEV_USER={id:d.user.id,email:d.user.email,user_metadata:d.user.user_metadata||{full_name:"Jesse Saltzman"}};
-    return DEV_USER;
+    return {id:d.user.id,email:d.user.email,user_metadata:d.user.user_metadata||{}};
   }
-  // If sign-in failed, try to sign up
-  r = await fetch(`${SB_URL}/auth/v1/signup`,{
-    method:"POST",
-    headers:{"Content-Type":"application/json",apikey:SB_KEY},
-    body:JSON.stringify({email:DEV_EMAIL,password:DEV_PASS,data:{full_name:"Jesse Saltzman"}})
+  throw new Error(d.error_description||d.msg||d.error||"Invalid email or password");
+}
+
+// Auth helper — sign up with email/password
+async function authSignUp(email,password,fullName){
+  const r=await fetch(`${SB_URL}/auth/v1/signup`,{
+    method:"POST",headers:{"Content-Type":"application/json",apikey:SB_KEY},
+    body:JSON.stringify({email,password,data:{full_name:fullName}})
   });
-  d = await r.json();
+  const d=await r.json();
   if(d.access_token){
     AUTH_TOKEN=d.access_token;
-    DEV_USER={id:d.user.id,email:d.user.email,user_metadata:d.user.user_metadata||{full_name:"Jesse Saltzman"}};
-    return DEV_USER;
+    return {id:d.user.id,email:d.user.email,user_metadata:d.user.user_metadata||{full_name:fullName}};
   }
-  // If signup requires email confirm, user exists but wrong password, or other issue
-  // Fall back to the user object from signup response
-  if(d.id){
-    DEV_USER={id:d.id,email:d.email,user_metadata:d.user_metadata||{full_name:"Jesse Saltzman"}};
-    return DEV_USER;
+  // Supabase returns user object without access_token when email confirmation is required
+  if(d.id&&!d.access_token){
+    throw new Error("CHECK_EMAIL");
   }
-  throw new Error("Auth failed: "+(d.error_description||d.msg||d.error||"Unknown error"));
+  throw new Error(d.error_description||d.msg||d.error||"Signup failed");
+}
+
+// Auth helper — check for existing session (refresh token in Supabase cookie/localStorage)
+async function authGetSession(){
+  const stored=localStorage.getItem("mdr_session");
+  if(!stored)return null;
+  try{
+    const session=JSON.parse(stored);
+    // Try to refresh the token
+    const r=await fetch(`${SB_URL}/auth/v1/token?grant_type=refresh_token`,{
+      method:"POST",headers:{"Content-Type":"application/json",apikey:SB_KEY},
+      body:JSON.stringify({refresh_token:session.refresh_token})
+    });
+    const d=await r.json();
+    if(d.access_token){
+      AUTH_TOKEN=d.access_token;
+      localStorage.setItem("mdr_session",JSON.stringify({refresh_token:d.refresh_token}));
+      return {id:d.user.id,email:d.user.email,user_metadata:d.user.user_metadata||{}};
+    }
+  }catch(e){}
+  localStorage.removeItem("mdr_session");
+  return null;
+}
+
+// Save session for persistence
+function authSaveSession(refreshToken){
+  if(refreshToken)localStorage.setItem("mdr_session",JSON.stringify({refresh_token:refreshToken}));
+}
+
+// Sign in and save session
+async function authSignInAndSave(email,password){
+  const r=await fetch(`${SB_URL}/auth/v1/token?grant_type=password`,{
+    method:"POST",headers:{"Content-Type":"application/json",apikey:SB_KEY},
+    body:JSON.stringify({email,password})
+  });
+  const d=await r.json();
+  if(d.access_token){
+    AUTH_TOKEN=d.access_token;
+    authSaveSession(d.refresh_token);
+    return {id:d.user.id,email:d.user.email,user_metadata:d.user.user_metadata||{}};
+  }
+  throw new Error(d.error_description||d.msg||d.error||"Invalid email or password");
+}
+
+// Sign up and save session
+async function authSignUpAndSave(email,password,fullName){
+  const r=await fetch(`${SB_URL}/auth/v1/signup`,{
+    method:"POST",headers:{"Content-Type":"application/json",apikey:SB_KEY},
+    body:JSON.stringify({email,password,data:{full_name:fullName}})
+  });
+  const d=await r.json();
+  if(d.access_token){
+    AUTH_TOKEN=d.access_token;
+    authSaveSession(d.refresh_token);
+    return {id:d.user.id,email:d.user.email,user_metadata:d.user.user_metadata||{full_name:fullName}};
+  }
+  if(d.id&&!d.access_token){
+    throw new Error("CHECK_EMAIL");
+  }
+  throw new Error(d.error_description||d.msg||d.error||"Signup failed");
+}
+
+function authLogout(){
+  AUTH_TOKEN=null;
+  localStorage.removeItem("mdr_session");
 }
 
 const SL={daily_mf:"Daily M-F",daily_7:"Daily 7 Days",weekly:"Weekly",as_needed:"As Needed",custom:"Custom"};
@@ -2453,43 +2512,154 @@ function SetupWizard({user, onComplete}){
   );
 }
 
+/* ── Login / Signup Screen ── */
+function LoginScreen({onAuth}){
+  const [mode,setMode]=useState("login"); // "login" or "signup"
+  const [email,setEmail]=useState("");
+  const [password,setPassword]=useState("");
+  const [fullName,setFullName]=useState("");
+  const [loading,setLoading]=useState(false);
+  const [err,setErr]=useState("");
+  const [checkEmail,setCheckEmail]=useState(false);
+
+  const fs={width:"100%",padding:"14px 16px",background:C.inp,border:`1px solid ${C.brd}`,borderRadius:10,color:C.txt,fontSize:15};
+
+  const handleSubmit=async(e)=>{
+    e.preventDefault();
+    setErr("");setLoading(true);
+    try{
+      if(mode==="login"){
+        const u=await authSignInAndSave(email.trim(),password);
+        onAuth(u);
+      }else{
+        if(!fullName.trim()){setErr("Full name is required");setLoading(false);return;}
+        if(password.length<6){setErr("Password must be at least 6 characters");setLoading(false);return;}
+        const u=await authSignUpAndSave(email.trim(),password,fullName.trim());
+        onAuth(u);
+      }
+    }catch(err){
+      if(err.message==="CHECK_EMAIL"){
+        setCheckEmail(true);
+      }else{
+        setErr(err.message);
+      }
+    }finally{setLoading(false);}
+  };
+
+  if(checkEmail){
+    return(
+      <div style={{minHeight:"100vh",background:C.bg,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:20}}>
+        <div style={{maxWidth:380,width:"100%",textAlign:"center"}}>
+          <MDRLogo size={72}/>
+          <div style={{fontSize:22,fontWeight:800,color:C.txt,marginTop:16}}>Check Your Email</div>
+          <div style={{color:C.mut,fontSize:14,marginTop:10,lineHeight:1.5}}>
+            We sent a confirmation link to <strong style={{color:C.org}}>{email}</strong>. Tap the link in your email, then come back here and sign in.
+          </div>
+          <button onClick={()=>{setCheckEmail(false);setMode("login");setPassword("");}} className="btn-o" style={{marginTop:24,width:"100%",padding:"14px 0",background:C.org,border:"none",borderRadius:10,color:"#fff",fontSize:15,fontWeight:700,cursor:"pointer"}}>
+            Back to Sign In
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return(
+    <div style={{minHeight:"100vh",background:C.bg,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:20}}>
+      <div style={{maxWidth:380,width:"100%"}}>
+        <div style={{textAlign:"center",marginBottom:32}}>
+          <MDRLogo size={72}/>
+          <div style={{fontSize:24,fontWeight:800,color:C.txt,marginTop:12}}>My Daily Reports</div>
+          <div style={{color:C.mut,fontSize:14,marginTop:4}}>Jobsite reporting made simple</div>
+        </div>
+
+        {/* Toggle */}
+        <div style={{display:"flex",background:C.inp,borderRadius:10,padding:3,marginBottom:24}}>
+          <button onClick={()=>{setMode("login");setErr("");}} style={{flex:1,padding:"10px 0",background:mode==="login"?C.card:"transparent",border:"none",borderRadius:8,color:mode==="login"?C.txt:C.mut,fontSize:14,fontWeight:700,cursor:"pointer"}}>Sign In</button>
+          <button onClick={()=>{setMode("signup");setErr("");}} style={{flex:1,padding:"10px 0",background:mode==="signup"?C.card:"transparent",border:"none",borderRadius:8,color:mode==="signup"?C.txt:C.mut,fontSize:14,fontWeight:700,cursor:"pointer"}}>Create Account</button>
+        </div>
+
+        <form onSubmit={handleSubmit} style={{display:"flex",flexDirection:"column",gap:14}}>
+          {mode==="signup"&&(
+            <input type="text" placeholder="Full Name" value={fullName} onChange={e=>setFullName(e.target.value)} style={fs} required/>
+          )}
+          <input type="email" placeholder="Email Address" value={email} onChange={e=>setEmail(e.target.value)} style={fs} required/>
+          <input type="password" placeholder="Password" value={password} onChange={e=>setPassword(e.target.value)} style={fs} required minLength={6}/>
+
+          {err&&<div style={{color:C.err,fontSize:13,textAlign:"center"}}>{err}</div>}
+
+          <button type="submit" disabled={loading} className="btn-o" style={{width:"100%",padding:"14px 0",background:C.org,border:"none",borderRadius:10,color:"#fff",fontSize:16,fontWeight:700,cursor:loading?"default":"pointer",opacity:loading?0.7:1,marginTop:4}}>
+            {loading?(mode==="login"?"Signing In...":"Creating Account..."):(mode==="login"?"Sign In":"Create Account")}
+          </button>
+        </form>
+
+        <div style={{textAlign:"center",marginTop:20,color:C.mut,fontSize:13}}>
+          {mode==="login"?"Don't have an account? ":"Already have an account? "}
+          <span onClick={()=>{setMode(mode==="login"?"signup":"login");setErr("");}} style={{color:C.org,cursor:"pointer",fontWeight:600}}>
+            {mode==="login"?"Sign up free":"Sign in"}
+          </span>
+        </div>
+
+        <div style={{textAlign:"center",marginTop:24,color:C.mut,fontSize:11}}>
+          Free during beta — no credit card required
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function App(){
   const [user,setUser]=useState(null);
-  const [authErr,setAuthErr]=useState("");
   const [booting,setBooting]=useState(true);
   const [setupDone,setSetupDone]=useState(null); // null=loading, true/false
 
+  // On mount, try to restore existing session
   useEffect(()=>{
-    devLogin().then(async(u)=>{
-      setUser(u);
-      // Check if setup is complete
-      try{
-        const p=await db.getProfile(u.id);
-        setSetupDone(p?.setup_complete===true);
-      }catch(e){
-        setSetupDone(false);
+    authGetSession().then(async(u)=>{
+      if(u){
+        setUser(u);
+        try{
+          const p=await db.getProfile(u.id);
+          setSetupDone(p?.setup_complete===true);
+        }catch(e){
+          setSetupDone(false);
+        }
       }
       setBooting(false);
-    }).catch(e=>{setAuthErr(e.message);setBooting(false);});
+    }).catch(()=>setBooting(false));
   },[]);
+
+  // Called after successful login/signup
+  const handleAuth=async(u)=>{
+    setUser(u);
+    try{
+      const p=await db.getProfile(u.id);
+      setSetupDone(p?.setup_complete===true);
+    }catch(e){
+      setSetupDone(false);
+    }
+  };
+
+  const handleLogout=()=>{
+    authLogout();
+    setUser(null);
+    setSetupDone(null);
+  };
 
   if(booting)return(
     <div style={{minHeight:"100vh",background:C.bg,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:16}}>
       <MDRLogo size={64}/>
-      <div style={{color:C.mut,fontSize:14}}>Signing in...</div>
+      <div style={{color:C.mut,fontSize:14}}>Loading...</div>
     </div>
   );
-  if(authErr)return(
-    <div style={{minHeight:"100vh",background:C.bg,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:16,padding:20}}>
-      <MDRLogo size={64}/>
-      <div style={{color:C.err,fontSize:14,textAlign:"center",maxWidth:400}}>{authErr}</div>
-      <button onClick={()=>window.location.reload()} className="btn-o" style={{padding:"12px 24px",background:C.org,border:"none",borderRadius:8,color:"#fff",fontWeight:700,cursor:"pointer"}}>Retry</button>
-    </div>
-  );
-  if(!user)return null;
-  // Gate: if setup not complete, show wizard
+
+  // Not logged in — show login screen
+  if(!user)return<LoginScreen onAuth={handleAuth}/>;
+
+  // Logged in but setup not complete — show wizard
   if(setupDone===false)return<SetupWizard user={user} onComplete={()=>setSetupDone(true)}/>;
-  return<Dashboard user={user} onLogout={()=>{AUTH_TOKEN=null;DEV_USER=null;window.location.reload();}}/>;
+
+  // Fully set up — show dashboard
+  return<Dashboard user={user} onLogout={handleLogout}/>;
 }
 ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
 </script>
