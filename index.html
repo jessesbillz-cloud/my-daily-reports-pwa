@@ -687,10 +687,10 @@ function CreateJob({user, onBack, onCreated}){
 
         {/* ── Three Toggle Boxes ── */}
 
-        {/* 1. Inspection Scheduling */}
-        <ToggleBox icon="📅" label="Inspection Scheduling" on={schedOn} setOn={setSchedOn}>
+        {/* 1. Jobsite Scheduling */}
+        <ToggleBox icon="📅" label="Jobsite Scheduling" on={schedOn} setOn={setSchedOn}>
           <div style={{background:C.bg,border:`1px solid ${C.brd}`,borderRadius:8,padding:"12px 14px",marginTop:12}}>
-            <p style={{fontSize:13,color:C.lt,lineHeight:1.5}}>Let your GC and subs request inspections through a shared calendar.</p>
+            <p style={{fontSize:13,color:C.lt,lineHeight:1.5}}>Let your GC and subs request site visits through a shared calendar.</p>
             <p style={{fontSize:12,color:C.blu,marginTop:8,fontWeight:600}}>You'll set up the calendar link and team contacts on the job dashboard after creating this job.</p>
           </div>
         </ToggleBox>
@@ -967,7 +967,14 @@ function ReportEditor({job, user, onBack, reportDate}){
       const uint8=new Uint8Array(filledPdfBytes);
       let binary="";for(let i=0;i<uint8.length;i++)binary+=String.fromCharCode(uint8[i]);
       const pdfBase64=btoa(binary);
-      const baseName=job.report_filename_pattern?job.report_filename_pattern.replace(/\.\w+$/,"").replace("##","01"):("DR_"+job.name.replace(/\s+/g,"_")+"_"+todayISO);
+      // Get correct report number — count existing reports for this job + 1
+      let rptNumber=1;
+      try{const cntR=await fetch(`${SB_URL}/rest/v1/reports?select=id&job_id=eq.${job.id}`,{headers:db._h()});const allR=cntR.ok?await cntR.json():[];rptNumber=allR.length+1;}catch(e){}
+      // If this report already exists (editing), use its existing number
+      if(draftId){try{const exR=await fetch(`${SB_URL}/rest/v1/reports?select=report_number&id=eq.${draftId}`,{headers:db._h()});const exD=exR.ok?await exR.json():[];if(exD[0]?.report_number)rptNumber=exD[0].report_number;}catch(e){}}
+      const rptNum=String(rptNumber).padStart(2,"0");
+      const tzDate=new Date().toLocaleDateString("en-US",{month:"2-digit",day:"2-digit",year:"numeric",timeZone:tz}).replace(/\//g,"");
+      const baseName=job.report_filename_pattern?job.report_filename_pattern.replace(/\.\w+$/,"").replace("##",rptNum).replace(/__/g,"_"+tzDate+"_"):("DR_"+rptNum+"_"+job.name.replace(/\s+/g,"_")+"_"+tzDate);
       const pdfFilename=baseName+".pdf";
 
       // ── 7. Build preview: load cached template page images, overlay field values as HTML ──
@@ -976,6 +983,29 @@ function ReportEditor({job, user, onBack, reportDate}){
       if(tplRecord.page_images&&tplRecord.page_images.length>0){
         // Use cached page images from job creation
         templatePageUrls=tplRecord.page_images.map(p=>db.getTemplatePageUrl(p)+"?t="+Date.now());
+      }else if(isPdfTemplate&&window.pdfjsLib&&tplBytes){
+        // Fallback: render template pages on-the-fly with pdf.js for jobs created before caching
+        try{
+          const pjDoc=await window.pdfjsLib.getDocument({data:tplBytes.slice(0)}).promise;
+          const rendered=[];
+          for(let pi=1;pi<=pjDoc.numPages;pi++){
+            const pg=await pjDoc.getPage(pi);
+            const vp=pg.getViewport({scale:1.5});
+            const cvs=document.createElement("canvas");cvs.width=vp.width;cvs.height=vp.height;
+            await pg.render({canvasContext:cvs.getContext("2d"),viewport:vp}).promise;
+            rendered.push(cvs.toDataURL("image/jpeg",0.85));
+            cvs.width=0;cvs.height=0;
+          }
+          templatePageUrls=rendered;
+          // Background-cache these images for future use
+          if(user?.id&&job?.id){
+            db.saveTemplatePages(user.id,job.id,rendered).then(paths=>{
+              if(paths.length>0){
+                fetch(`${SB_URL}/rest/v1/templates?job_id=eq.${job.id}`,{method:"PATCH",headers:db._h(),body:JSON.stringify({page_images:paths})}).catch(()=>{});
+              }
+            }).catch(()=>{});
+          }
+        }catch(pjErr){console.error("Fallback page render:",pjErr);}
       }
       // Get actual page dimensions from the PDF
       if(pages.length>0){
@@ -1015,7 +1045,7 @@ function ReportEditor({job, user, onBack, reportDate}){
       const photoNote=photos.length>0?`<p style="color:#555;font-size:14px;margin:12px 0 0;">${photos.length} site photo${photos.length>1?"s":""} included in the attached PDF.</p>`:"";
       const fieldSummary=editFields.filter(f=>vals[f.name]).map(f=>`<tr><td style="padding:4px 12px 4px 0;color:#888;font-size:13px;white-space:nowrap;">${f.name}</td><td style="padding:4px 0;color:#333;font-size:13px;">${vals[f.name]}</td></tr>`).join("");
       const summaryTable=fieldSummary?`<table style="margin:16px 0;border-collapse:collapse;">${fieldSummary}</table>`:"";
-      const emailHtml=`<div style="font-family:-apple-system,sans-serif;max-width:600px;margin:0 auto;"><div style="background:#e8742a;padding:20px 24px;border-radius:8px 8px 0 0;"><h1 style="color:#fff;margin:0;font-size:20px;">My Daily Reports</h1></div><div style="background:#f9f9f9;padding:24px;border:1px solid #e0e0e0;border-top:none;border-radius:0 0 8px 8px;"><p style="color:#333;font-size:16px;line-height:1.6;margin:0 0 8px;">Hi,</p><p style="color:#333;font-size:15px;line-height:1.6;margin:0 0 16px;">${userName} has submitted the daily inspection report for <strong>${job.name}</strong> on ${todayDisplay}.</p>${summaryTable}<p style="color:#555;font-size:14px;margin:16px 0 0;">The full PDF report is attached to this email.${photoNote?"":" No site photos were included."}</p>${photoNote}</div><p style="color:#999;font-size:11px;text-align:center;margin-top:16px;">Sent via My Daily Reports &bull; mydailyreports.com</p></div>`;
+      const emailHtml=`<div style="font-family:-apple-system,sans-serif;max-width:600px;margin:0 auto;"><div style="background:#e8742a;padding:20px 24px;border-radius:8px 8px 0 0;"><h1 style="color:#fff;margin:0;font-size:20px;">My Daily Reports</h1></div><div style="background:#f9f9f9;padding:24px;border:1px solid #e0e0e0;border-top:none;border-radius:0 0 8px 8px;"><p style="color:#333;font-size:16px;line-height:1.6;margin:0 0 8px;">Hi,</p><p style="color:#333;font-size:15px;line-height:1.6;margin:0 0 16px;">${userName} has submitted the daily field report for <strong>${job.name}</strong> on ${todayDisplay}.</p>${summaryTable}<p style="color:#555;font-size:14px;margin:16px 0 0;">The full PDF report is attached to this email.${photoNote?"":" No site photos were included."}</p>${photoNote}</div><p style="color:#999;font-size:11px;text-align:center;margin-top:16px;">Sent via My Daily Reports &bull; mydailyreports.com</p></div>`;
 
       // Send email
       const teamEmails=job.team_emails||[];
@@ -1424,17 +1454,19 @@ function JobDetail({job, user, onBack, onDeleted}){
           {submitted.length===0?(
             <div style={{textAlign:"center",padding:"16px 0",color:C.mut,fontSize:13}}>No submitted reports yet</div>
           ):(
-            submitted.map((r,i)=>{const rptName=job.report_filename_pattern?job.report_filename_pattern.replace("##",String(r.report_number||1).padStart(2,"0")):("DR#"+(r.report_number||submitted.length-i));return(
-              <div key={r.id} style={{display:"flex",alignItems:"center",gap:12,padding:"12px 4px",borderBottom:i<submitted.length-1?`1px solid ${C.brd}`:"none"}}>
+            submitted.map((r,i)=>{
+              const rptDate=new Date(r.report_date+"T12:00:00").toLocaleDateString("en-US",{month:"2-digit",day:"2-digit",year:"numeric",timeZone:tz}).replace(/\//g,"");
+              const rptNum=String(r.report_number||i+1).padStart(2,"0");
+              const rptName=job.report_filename_pattern?job.report_filename_pattern.replace(/\.\w+$/,"").replace("##",rptNum).replace(/__/g,"_"+rptDate+"_"):("DR_"+rptNum+"_"+rptDate);
+              return(
+              <button key={r.id} onClick={()=>openReport(r.report_date)} style={{width:"100%",display:"flex",alignItems:"center",gap:12,padding:"14px 16px",marginBottom:i<submitted.length-1?0:0,borderBottom:i<submitted.length-1?`1px solid ${C.brd}`:"none",background:"transparent",border:"none",borderBottomWidth:i<submitted.length-1?1:0,borderBottomStyle:"solid",borderBottomColor:C.brd,cursor:"pointer",textAlign:"left"}}>
                 <div style={{width:10,height:10,borderRadius:"50%",background:C.ok,flexShrink:0}}/>
-                <div style={{flex:1}}>
-                  <div style={{fontSize:14,fontWeight:600,color:C.lt}}>{rptName} — {new Date(r.report_date+"T12:00:00").toLocaleDateString("en-US",{weekday:"short",month:"short",day:"numeric",timeZone:tz})}</div>
-                  <div style={{fontSize:11,color:C.mut}}>Submitted {r.updated_at?new Date(r.updated_at).toLocaleString("en-US",{month:"short",day:"numeric",hour:"numeric",minute:"2-digit",timeZone:tz}):r.report_date}</div>
+                <div style={{flex:1,minWidth:0}}>
+                  <div style={{fontSize:14,fontWeight:600,color:C.lt,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{rptName}</div>
+                  <div style={{fontSize:12,color:C.mut,marginTop:2}}>{new Date(r.report_date+"T12:00:00").toLocaleDateString("en-US",{weekday:"short",month:"short",day:"numeric",timeZone:tz})} — Submitted {r.updated_at?new Date(r.updated_at).toLocaleString("en-US",{month:"short",day:"numeric",hour:"numeric",minute:"2-digit",timeZone:tz}):""}</div>
                 </div>
-                <div style={{display:"flex",gap:6,flexShrink:0}}>
-                  <button onClick={()=>openReport(r.report_date)} style={{padding:"5px 10px",fontSize:11,fontWeight:700,borderRadius:6,border:`1px solid ${C.org}`,background:"transparent",color:C.org,cursor:"pointer"}}>Edit</button>
-                </div>
-              </div>
+                <div style={{color:C.blu,fontSize:20,flexShrink:0}}>›</div>
+              </button>
             );})
           )}
         </Folder>
@@ -1501,9 +1533,9 @@ function JobDetail({job, user, onBack, onDeleted}){
             <button onClick={()=>alert("Edit field config coming soon")} style={{width:"100%",display:"flex",alignItems:"center",gap:10,padding:"14px 18px",background:"none",border:"none",borderBottom:`1px solid ${C.brd}`,cursor:"pointer",textAlign:"left"}}>
               <span style={{fontSize:16}}>📋</span><span style={{fontSize:14,fontWeight:600,color:C.lt}}>Edit Template Fields</span>
             </button>
-            <button onClick={()=>alert("Inspection scheduling calendar setup coming soon. Once enabled, your GC and subs can request inspections through a shared link.")} style={{width:"100%",display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,padding:"14px 18px",background:"none",border:"none",borderBottom:`1px solid ${C.brd}`,cursor:"pointer",textAlign:"left"}}>
+            <button onClick={()=>alert("Jobsite scheduling calendar setup coming soon. Once enabled, your GC and subs can request site visits through a shared link.")} style={{width:"100%",display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,padding:"14px 18px",background:"none",border:"none",borderBottom:`1px solid ${C.brd}`,cursor:"pointer",textAlign:"left"}}>
               <div style={{display:"flex",alignItems:"center",gap:10}}>
-                <span style={{fontSize:16}}>📅</span><span style={{fontSize:14,fontWeight:600,color:C.lt}}>Inspection Scheduling</span>
+                <span style={{fontSize:16}}>📅</span><span style={{fontSize:14,fontWeight:600,color:C.lt}}>Jobsite Scheduling</span>
               </div>
               <span style={{fontSize:11,color:job.scheduling_enabled?C.ok:C.mut,fontWeight:600}}>{job.scheduling_enabled?"ON":"OFF"}</span>
             </button>
@@ -1538,7 +1570,7 @@ const GUIDES=[
     {icon:"📄",title:"Upload a Report Template",body:"During job creation you can upload a .docx or .pdf template. The AI will analyze your document and detect all the fillable fields automatically. You'll then decide which fields to Edit daily, Lock with a permanent value, Auto-Date, or Auto-Number.",tip:"It helps to have a copy of your report open while you're defining fields the first time. The AI parses fields into a single vertical column, but your actual form may have several horizontal columns. Don't worry — you only have to do this once and you're set."},
     {icon:"🔽",title:"Switching Between Jobs",body:"Use the Jobs dropdown in the top-left corner of the dashboard to switch between your active jobs. Tap any job to open its dashboard with today's report, working copies, completed reports, and photos.",tip:null},
   ]},
-  {icon:"📝",color:C.ok,title:"Creating Your First Report",sub:"Step-by-step guide to building a daily inspection report",steps:[
+  {icon:"📝",color:C.ok,title:"Creating Your First Report",sub:"Step-by-step guide to building a daily field report",steps:[
     {icon:"▶️",title:"Start Today's Report",body:"From the job dashboard, tap the big orange \"Start Today's Report\" button. This opens the report editor with all your template fields pre-loaded. Locked fields are already filled in. Auto-date fields show today's date. Auto-number fields increment from your last report.",tip:"Only one report per day per job can be created. Working copies can be edited anytime."},
     {icon:"✏️",title:"Fill In Your Fields",body:"The report editor shows all your editable fields ready to fill in. These are the fields you marked as \"Edit\" during job setup — things like weather conditions, work performed, notes, and observations that change daily.",tip:"Fields that stay the same every report (project name, address, architect, contractor) are already locked in from your job setup."},
     {icon:"🎤",title:"Dictate Your Notes",body:"Tap into any text field and use your phone's built-in keyboard microphone to dictate your notes hands-free. No extra buttons or setup needed — just tap the mic on your keyboard and start talking. All notes you take throughout the day stay saved in your working copy.",tip:"If you close the app and come back, your report picks up right where you left off."},
@@ -1569,13 +1601,13 @@ const GUIDES=[
     {icon:"📦",title:"Archive a Job",body:"When a project is complete, archive the job instead of deleting it. Archived jobs keep all their reports and data but won't appear in your active job list. You can still view archived jobs and re-download their reports anytime.",tip:"Archiving is recommended over deleting. You never know when you might need to reference an old report."},
     {icon:"🗑️",title:"Delete a Job",body:"If you need to permanently remove a job and all its reports, open the job dashboard, tap the gear icon, and scroll to \"Delete This Job\". You'll have to confirm before anything is deleted. This cannot be undone.",tip:null},
   ]},
-  {icon:"📅",color:C.blu,title:"Sharing Your Calendar",sub:"Let your GC and subs request inspections through a shared link",steps:[
-    {icon:"📅",title:"Your Scheduling Calendar",body:"Every inspector gets one shared calendar link. It lives on the main dashboard below your job cards. When you enable Inspection Scheduling on any job, that job automatically shows up on your shared calendar for others to request inspections on.",tip:"You can see which jobs have scheduling enabled by the 📅 icon on their job card."},
+  {icon:"📅",color:C.blu,title:"Sharing Your Calendar",sub:"Let your GC and subs request site visits through a shared link",steps:[
+    {icon:"📅",title:"Your Scheduling Calendar",body:"Every inspector gets one shared calendar link. It lives on the main dashboard below your job cards. When you enable Jobsite Scheduling on any job, that job automatically shows up on your shared calendar for others to request site visits on.",tip:"You can see which jobs have scheduling enabled by the 📅 icon on their job card."},
     {icon:"🔗",title:"Your Calendar Link",body:"Your calendar link is unique to you — the last part comes from your Scheduling Display Name in Account Settings. You can change it anytime. This is the one link you share with everyone — all your scheduling-enabled jobs appear on it.",tip:"Set your Scheduling Display Name to something recognizable so people know it's your calendar when they open the link."},
-    {icon:"↗️",title:"How to Share",body:"Tap the blue \"Share Calendar\" button on the calendar. On iPhone this opens the share sheet — you can text it, email it, AirDrop it, or copy the link. On desktop it copies to your clipboard. Send it to your GC, subs, or anyone who needs to request inspections.",tip:"Share it once per project team. They bookmark it and use it whenever they need to schedule an inspection."},
-    {icon:"👥",title:"Project Team Contacts",body:"In each job's settings (gear icon), you'll find Project Team. Add the email addresses of everyone who should receive your submitted reports. These are also the people who can request inspections through your calendar for that job.",tip:"You can add or remove team members anytime from the job dashboard gear menu."},
-    {icon:"📋",title:"How Requests Work",body:"When someone opens your calendar link, they pick a job, choose a date, and submit an inspection request. You see the request on your calendar and can approve or reschedule it. Once confirmed, both sides get a notification.",tip:"Inspection requests don't automatically create a daily report — you still start your report when you're on site."},
-    {icon:"✅",title:"Enable Scheduling on a Job",body:"When creating a new job, toggle on \"Inspection Scheduling\" in the job setup. For existing jobs, open the job dashboard, tap the gear icon, and find Inspection Scheduling in the settings. Once enabled, the job appears on your shared calendar immediately.",tip:null},
+    {icon:"↗️",title:"How to Share",body:"Tap the blue \"Share Calendar\" button on the calendar. On iPhone this opens the share sheet — you can text it, email it, AirDrop it, or copy the link. On desktop it copies to your clipboard. Send it to your GC, subs, or anyone who needs to request a site visit.",tip:"Share it once per project team. They bookmark it and use it whenever they need to schedule a visit."},
+    {icon:"👥",title:"Project Team Contacts",body:"In each job's settings (gear icon), you'll find Project Team. Add the email addresses of everyone who should receive your submitted reports. These are also the people who can request site visits through your calendar for that job.",tip:"You can add or remove team members anytime from the job dashboard gear menu."},
+    {icon:"📋",title:"How Requests Work",body:"When someone opens your calendar link, they pick a job, choose a date, and submit a scheduling request. You see the request on your calendar and can approve or reschedule it. Once confirmed, both sides get a notification.",tip:"Scheduling requests don't automatically create a daily report — you still start your report when you're on site."},
+    {icon:"✅",title:"Enable Scheduling on a Job",body:"When creating a new job, toggle on \"Jobsite Scheduling\" in the job setup. For existing jobs, open the job dashboard, tap the gear icon, and find Jobsite Scheduling in the settings. Once enabled, the job appears on your shared calendar immediately.",tip:null},
   ]},
   {icon:"⚙️",color:C.mut,title:"Profile & Settings",sub:"Customize your account and app preferences",steps:[
     {icon:"👤",title:"Access Settings",body:"Tap the gear icon in the top-right corner of the dashboard and select \"Account Settings\". Here you can view your profile, set your timezone, configure your scheduling display name, and manage your account.",tip:null},
@@ -1702,7 +1734,7 @@ function Dashboard({user, onLogout}){
   const stat=(id,sc)=>{if(sc==="as_needed")return"none";const r=rpts.find(r=>r.job_id===id);if(!r)return"due";return r.status==="submitted"?"submitted":"working";};
   const dot=(s)=>{if(s==="none")return null;const c=s==="submitted"?C.ok:s==="working"?C.org:"#ef4444";return<div style={{width:10,height:10,borderRadius:"50%",background:c,flexShrink:0}}/>;};
 
-  const doShare=async()=>{const url=window.location.href;if(navigator.share){try{await navigator.share({title:"My Daily Reports",text:"Voice-to-PDF inspection reports",url});}catch(e){}}else{try{await navigator.clipboard.writeText(url);alert("Link copied!");}catch(e){alert("Could not copy link.");}}};
+  const doShare=async()=>{const url=window.location.href;if(navigator.share){try{await navigator.share({title:"My Daily Reports",text:"Voice-to-PDF jobsite reports",url});}catch(e){}}else{try{await navigator.clipboard.writeText(url);alert("Link copied!");}catch(e){alert("Could not copy link.");}}};
 
   if(showAcct)return<AccountSettings user={user} onBack={()=>setShowAcct(false)} onLogout={onLogout}/>;
   if(showNew)return<CreateJob user={user} onBack={()=>setShowNew(false)} onCreated={()=>{setShowNew(false);load();}}/>;
@@ -1720,15 +1752,15 @@ function Dashboard({user, onLogout}){
           <p style={{fontWeight:700,fontSize:16,color:C.txt,marginBottom:16}}>My Daily Reports — Fair Use Policy</p>
           <p style={{marginBottom:14}}>My Daily Reports uses AI-powered document parsing to analyze your uploaded templates and detect fillable fields. Each template upload triggers an API call to process your document. To keep the service fast, reliable, and affordable for all users, the following fair use limits apply:</p>
           <p style={{fontWeight:700,color:C.org,marginBottom:8}}>Job Creation Limits</p>
-          <p style={{marginBottom:14}}>Each account is intended for use by a single inspector managing their own active projects. Users may create a reasonable number of jobs that reflect actual construction inspection work. Accounts that create an excessive number of jobs, upload templates in bulk, or appear to be using the parsing service for purposes other than daily inspection reporting may be subject to rate limiting or account review.</p>
+          <p style={{marginBottom:14}}>Each account is intended for use by a single inspector managing their own active projects. Users may create a reasonable number of jobs that reflect actual jobsite and field reporting work. Accounts that create an excessive number of jobs, upload templates in bulk, or appear to be using the parsing service for purposes other than daily field reporting may be subject to rate limiting or account review.</p>
           <p style={{fontWeight:700,color:C.org,marginBottom:8}}>Template Parsing</p>
           <p style={{marginBottom:14}}>The AI template parsing feature is provided to help you set up your report fields quickly. Each template upload counts as one parsing request. Re-uploading the same template for the same job counts as an additional request. Please configure your fields carefully during initial setup to minimize unnecessary re-parsing.</p>
           <p style={{fontWeight:700,color:C.org,marginBottom:8}}>Scheduling Calendar</p>
-          <p style={{marginBottom:14}}>The shared scheduling calendar is designed for coordinating inspection requests between you and your project teams. It is not intended for use as a general-purpose scheduling tool unrelated to construction inspection work.</p>
+          <p style={{marginBottom:14}}>The shared scheduling calendar is designed for coordinating jobsite visits between you and your project teams. It is not intended for use as a general-purpose scheduling tool unrelated to jobsite and field reporting work.</p>
           <p style={{fontWeight:700,color:C.org,marginBottom:8}}>What Counts as Fair Use</p>
-          <p style={{marginBottom:14}}>Creating jobs for real projects you are actively inspecting, uploading one template per job, adding your actual project team contacts, and using the calendar for legitimate inspection scheduling. Normal use of the app as described in the Training Center is always within fair use.</p>
+          <p style={{marginBottom:14}}>Creating jobs for real projects you are actively working on, uploading one template per job, adding your actual project team contacts, and using the calendar for legitimate jobsite scheduling. Normal use of the app as described in the Training Center is always within fair use.</p>
           <p style={{fontWeight:700,color:C.org,marginBottom:8}}>What May Trigger a Review</p>
-          <p style={{marginBottom:14}}>Creating dozens of jobs in a short time period, repeatedly re-uploading and re-parsing the same templates, automated or scripted account activity, sharing account credentials, or using the service for purposes outside of construction inspection reporting.</p>
+          <p style={{marginBottom:14}}>Creating dozens of jobs in a short time period, repeatedly re-uploading and re-parsing the same templates, automated or scripted account activity, sharing account credentials, or using the service for purposes outside of jobsite and field reporting.</p>
           <p style={{fontWeight:700,color:C.org,marginBottom:8}}>Enforcement</p>
           <p style={{marginBottom:14}}>We reserve the right to temporarily rate-limit parsing requests, suspend scheduling features, or contact you to discuss your usage if it falls outside of normal patterns. We will always attempt to reach out before taking any action on your account.</p>
           <p style={{color:C.mut,fontSize:12,marginTop:20}}>Last updated: March 2026</p>
@@ -1851,7 +1883,7 @@ function Dashboard({user, onLogout}){
                   <button onClick={nextMonth} style={{background:"none",border:"none",color:C.mut,fontSize:18,cursor:"pointer",padding:"0 4px"}}>›</button>
                 </div>
                 {hasScheduling&&(
-                  <button onClick={async()=>{const url=calURL;if(navigator.share){try{await navigator.share({title:"Inspection Calendar",text:"Request inspections here:",url});}catch(e){}}else{try{await navigator.clipboard.writeText(url);alert("Calendar link copied!");}catch(e){alert(url);}}}} style={{padding:"6px 12px",fontSize:12,fontWeight:700,borderRadius:6,background:C.blu,border:"none",color:"#fff",cursor:"pointer",display:"flex",alignItems:"center",gap:4}}>
+                  <button onClick={async()=>{const url=calURL;if(navigator.share){try{await navigator.share({title:"Scheduling Calendar",text:"Request a site visit here:",url});}catch(e){}}else{try{await navigator.clipboard.writeText(url);alert("Calendar link copied!");}catch(e){alert(url);}}}} style={{padding:"6px 12px",fontSize:12,fontWeight:700,borderRadius:6,background:C.blu,border:"none",color:"#fff",cursor:"pointer",display:"flex",alignItems:"center",gap:4}}>
                     <span>↗</span> Share Calendar
                   </button>
                 )}
@@ -1890,13 +1922,13 @@ function Dashboard({user, onLogout}){
                 <div style={{borderTop:`1px solid ${C.brd}`,padding:"12px 16px"}}>
                   <div style={{fontSize:13,fontWeight:700,color:C.txt,marginBottom:8}}>{new Date(selCalDay+"T12:00:00").toLocaleDateString("en-US",{weekday:"long",month:"long",day:"numeric"})}</div>
                   {selDayReqs.length===0?(
-                    <div style={{fontSize:12,color:C.mut}}>No inspection requests for this day.</div>
+                    <div style={{fontSize:12,color:C.mut}}>No scheduling requests for this day.</div>
                   ):(
                     selDayReqs.map(rq=>(
                       <div key={rq.id} style={{background:C.inp,border:`1px solid ${C.brd}`,borderRadius:8,padding:12,marginBottom:8,position:"relative"}}>
                         {rq.status==="confirmed"&&<div style={{position:"absolute",top:8,right:10,fontSize:16}}>✅</div>}
                         <div style={{fontSize:13,fontWeight:700,color:C.txt}}>{rq.jobs?.name||"Job"}</div>
-                        <div style={{fontSize:12,color:C.lt,marginTop:2}}>{rq.inspection_type||"General"} — {rq.requester_name}</div>
+                        <div style={{fontSize:12,color:C.lt,marginTop:2}}>{rq.inspection_type||"General Visit"} — {rq.requester_name}</div>
                         <div style={{fontSize:11,color:C.mut,marginTop:2}}>{rq.requester_email}{rq.requester_company?` · ${rq.requester_company}`:""}</div>
                         {rq.notes&&<div style={{fontSize:11,color:C.mut,marginTop:4,fontStyle:"italic"}}>{rq.notes}</div>}
                         <div style={{display:"flex",gap:8,marginTop:10}}>
@@ -1909,8 +1941,8 @@ function Dashboard({user, onLogout}){
                                 const inspectorName=user?.user_metadata?.full_name||user?.email||"Your inspector";
                                 fetch(`${SB_URL}/functions/v1/send-report`,{
                                   method:"POST",headers:{"Content-Type":"application/json",Authorization:`Bearer ${SB_KEY}`,apikey:SB_KEY},
-                                  body:JSON.stringify({to:[rq.requester_email],subject:`Inspection Confirmed — ${rq.jobs?.name||"Job"} on ${reqDate}`,
-                                    html_body:`<div style="font-family:-apple-system,sans-serif;max-width:600px;margin:0 auto;"><div style="background:#22c55e;padding:20px 24px;border-radius:8px 8px 0 0;"><h1 style="color:#fff;margin:0;font-size:20px;">Inspection Confirmed</h1></div><div style="background:#f9f9f9;padding:24px;border:1px solid #e0e0e0;border-top:none;border-radius:0 0 8px 8px;"><p style="color:#333;font-size:16px;line-height:1.6;margin:0 0 8px;">Hi ${rq.requester_name||"there"},</p><p style="color:#333;font-size:15px;line-height:1.6;margin:0 0 16px;">Your inspection request for <strong>${rq.jobs?.name||"the job"}</strong> has been confirmed by ${inspectorName} for <strong>${reqDate}</strong>.</p><p style="color:#555;font-size:14px;margin:0;">Type: ${rq.inspection_type||"General Inspection"}</p></div><p style="color:#999;font-size:11px;text-align:center;margin-top:16px;">Sent via My Daily Reports &bull; mydailyreports.com</p></div>`
+                                  body:JSON.stringify({to:[rq.requester_email],subject:`Visit Confirmed — ${rq.jobs?.name||"Job"} on ${reqDate}`,
+                                    html_body:`<div style="font-family:-apple-system,sans-serif;max-width:600px;margin:0 auto;"><div style="background:#22c55e;padding:20px 24px;border-radius:8px 8px 0 0;"><h1 style="color:#fff;margin:0;font-size:20px;">Visit Confirmed</h1></div><div style="background:#f9f9f9;padding:24px;border:1px solid #e0e0e0;border-top:none;border-radius:0 0 8px 8px;"><p style="color:#333;font-size:16px;line-height:1.6;margin:0 0 8px;">Hi ${rq.requester_name||"there"},</p><p style="color:#333;font-size:15px;line-height:1.6;margin:0 0 16px;">Your scheduling request for <strong>${rq.jobs?.name||"the job"}</strong> has been confirmed by ${inspectorName} for <strong>${reqDate}</strong>.</p><p style="color:#555;font-size:14px;margin:0;">Type: ${rq.inspection_type||"General Visit"}</p></div><p style="color:#999;font-size:11px;text-align:center;margin-top:16px;">Sent via My Daily Reports &bull; mydailyreports.com</p></div>`
                                   })
                                 }).catch(emailErr=>console.error("Confirmation email error:",emailErr));
                               }
@@ -1943,9 +1975,9 @@ function Dashboard({user, onLogout}){
                       <span style={{marginLeft:10}}>· {calRequests.length} request{calRequests.length!==1?"s":""} this month</span>
                     </div>
                   ):hasScheduling?(
-                    <div style={{fontSize:12,color:C.mut,lineHeight:1.5}}>No inspection requests this month. Calendar active for {act.filter(j=>j.scheduling_enabled).length} job{act.filter(j=>j.scheduling_enabled).length!==1?"s":""}.</div>
+                    <div style={{fontSize:12,color:C.mut,lineHeight:1.5}}>No scheduling requests this month. Calendar active for {act.filter(j=>j.scheduling_enabled).length} job{act.filter(j=>j.scheduling_enabled).length!==1?"s":""}.</div>
                   ):(
-                    <div style={{fontSize:12,color:C.mut,lineHeight:1.5}}>Enable Inspection Scheduling on a job to let your GC and subs request inspections through your shared calendar.</div>
+                    <div style={{fontSize:12,color:C.mut,lineHeight:1.5}}>Enable Jobsite Scheduling on a job to let your GC and subs request site visits through your shared calendar.</div>
                   )}
                 </div>
               )}
