@@ -1303,7 +1303,14 @@ const GUIDES=[
     {icon:"✏️",title:"Edit a Job",body:"From the job dashboard, tap the gear icon in the top-right corner and select \"Edit Job Details\". You can change the job name, site address, template fields, and scheduling settings. Everything about the job is editable from this one place.",tip:null},
     {icon:"📦",title:"Archive a Job",body:"When a project is complete, archive the job instead of deleting it. Archived jobs keep all their reports and data but won't appear in your active job list. You can still view archived jobs and re-download their reports anytime.",tip:"Archiving is recommended over deleting. You never know when you might need to reference an old report."},
     {icon:"🗑️",title:"Delete a Job",body:"If you need to permanently remove a job and all its reports, open the job dashboard, tap the gear icon, and scroll to \"Delete This Job\". You'll have to confirm before anything is deleted. This cannot be undone.",tip:null},
-    {icon:"📅",title:"Inspection Scheduling",body:"If you enabled scheduling for a job, your GC and subs can request inspections through a shared calendar link. You manage the project team contacts and calendar from the job settings. Everyone gets one URL per inspector — all your scheduling-enabled jobs appear on it.",tip:"You can add or edit your project team anytime from the job dashboard gear menu."},
+  ]},
+  {icon:"📅",color:C.blu,title:"Sharing Your Calendar",sub:"Let your GC and subs request inspections through a shared link",steps:[
+    {icon:"📅",title:"Your Scheduling Calendar",body:"Every inspector gets one shared calendar link. It lives on the main dashboard below your job cards. When you enable Inspection Scheduling on any job, that job automatically shows up on your shared calendar for others to request inspections on.",tip:"You can see which jobs have scheduling enabled by the 📅 icon on their job card."},
+    {icon:"🔗",title:"Your Calendar Link",body:"Your calendar link looks like mydailyreports.com/schedule/your-name. The last part comes from your Scheduling Display Name in Account Settings. You can change it anytime. This is the one link you share with everyone — all your scheduling-enabled jobs appear on it.",tip:"Set your Scheduling Display Name to something recognizable so people know it's your calendar when they open the link."},
+    {icon:"↗️",title:"How to Share",body:"Tap the blue \"Share Calendar\" button on the calendar. On iPhone this opens the share sheet — you can text it, email it, AirDrop it, or copy the link. On desktop it copies to your clipboard. Send it to your GC, subs, or anyone who needs to request inspections.",tip:"Share it once per project team. They bookmark it and use it whenever they need to schedule an inspection."},
+    {icon:"👥",title:"Project Team Contacts",body:"In each job's settings (gear icon), you'll find Project Team. Add the email addresses of everyone who should receive your submitted reports. These are also the people who can request inspections through your calendar for that job.",tip:"You can add or remove team members anytime from the job dashboard gear menu."},
+    {icon:"📋",title:"How Requests Work",body:"When someone opens your calendar link, they pick a job, choose a date, and submit an inspection request. You see the request on your calendar and can approve or reschedule it. Once confirmed, both sides get a notification.",tip:"Inspection requests don't automatically create a daily report — you still start your report when you're on site."},
+    {icon:"✅",title:"Enable Scheduling on a Job",body:"When creating a new job, toggle on \"Inspection Scheduling\" in the job setup. For existing jobs, open the job dashboard, tap the gear icon, and find Inspection Scheduling in the settings. Once enabled, the job appears on your shared calendar immediately.",tip:null},
   ]},
   {icon:"⚙️",color:C.mut,title:"Profile & Settings",sub:"Customize your account and app preferences",steps:[
     {icon:"👤",title:"Access Settings",body:"Tap the gear icon in the top-right corner of the dashboard and select \"Account Settings\". Here you can view your profile, set your timezone, configure your scheduling display name, and manage your account.",tip:null},
@@ -1486,6 +1493,7 @@ function Dashboard({user, onLogout}){
                   <div style={{flex:1,minWidth:0}}>
                     <div style={{fontWeight:700,fontSize:14,color:C.txt,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{j.name}</div>
                   </div>
+                  {j.scheduling_enabled&&<span style={{fontSize:14}} title="Scheduling enabled">📅</span>}
                 </div>
                 <div style={{display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}>
                   <span style={{fontSize:10,fontWeight:600,background:C.inp,border:`1px solid ${C.brd}`,borderRadius:4,padding:"2px 6px",color:C.mut}}>{SL[j.schedule]||j.schedule}</span>
@@ -1498,36 +1506,58 @@ function Dashboard({user, onLogout}){
 
         {!loading&&act.length===0&&(<div style={{textAlign:"center",padding:"60px 20px",color:C.mut}}><div style={{fontSize:48,marginBottom:16}}>📋</div><p style={{fontSize:16,fontWeight:600,color:C.lt,marginBottom:6}}>No jobs yet</p><p style={{fontSize:14}}>Tap "+ New Job" to create your first project</p></div>)}
 
-        {/* ── Shared Scheduling Calendar ── */}
-        {!loading&&(
-          <div style={{background:C.card,border:`1px solid ${C.brd}`,borderRadius:12,padding:"16px 18px",marginBottom:12}}>
-            <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:10}}>
-              <div style={{width:36,height:36,borderRadius:8,background:C.inp,border:`1px solid ${C.brd}`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:18,flexShrink:0}}>📅</div>
-              <div style={{flex:1}}>
-                <div style={{fontWeight:700,fontSize:15,color:C.txt}}>Scheduling Calendar</div>
-                <div style={{fontSize:11,color:C.mut}}>Share with your GC and subs to request inspections</div>
+        {/* ── Scheduling Calendar ── */}
+        {!loading&&(()=>{
+          const tz=Intl.DateTimeFormat().resolvedOptions().timeZone;
+          const now=new Date();
+          const monday=new Date(now);monday.setDate(now.getDate()-((now.getDay()+6)%7));
+          const weekDays=Array.from({length:7},(_,i)=>{const d=new Date(monday);d.setDate(monday.getDate()+i);return d;});
+          const todayStr=now.toLocaleDateString("en-CA",{timeZone:tz});
+          const monthLabel=now.toLocaleDateString("en-US",{month:"long",year:"numeric",timeZone:tz});
+          const slug=user?.user_metadata?.full_name?.toLowerCase().replace(/\s+/g,"-")||"inspector";
+          const calURL=`mydailyreports.com/schedule/${slug}`;
+          const hasScheduling=act.some(j=>j.scheduling_enabled);
+          return(
+            <div style={{background:C.card,border:`1px solid ${C.brd}`,borderRadius:12,overflow:"hidden",marginBottom:12}}>
+              {/* Calendar header */}
+              <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"14px 16px",borderBottom:`1px solid ${C.brd}`}}>
+                <div style={{display:"flex",alignItems:"center",gap:8}}>
+                  <span style={{fontSize:18}}>📅</span>
+                  <span style={{fontWeight:700,fontSize:15,color:C.txt}}>{monthLabel}</span>
+                </div>
+                {hasScheduling&&(
+                  <button onClick={async()=>{const url="https://"+calURL;if(navigator.share){try{await navigator.share({title:"Inspection Calendar",text:"Request inspections here:",url});}catch(e){}}else{try{await navigator.clipboard.writeText(url);alert("Calendar link copied!");}catch(e){alert(url);}}}} style={{padding:"6px 12px",fontSize:12,fontWeight:700,borderRadius:6,background:C.blu,border:"none",color:"#fff",cursor:"pointer",display:"flex",alignItems:"center",gap:4}}>
+                    <span>↗</span> Share Calendar
+                  </button>
+                )}
+              </div>
+              {/* Week view */}
+              <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:0}}>
+                {weekDays.map((d,i)=>{
+                  const ds=d.toLocaleDateString("en-CA",{timeZone:tz});
+                  const isToday=ds===todayStr;
+                  const dayName=d.toLocaleDateString("en-US",{weekday:"short",timeZone:tz});
+                  const dayNum=d.getDate();
+                  const isWeekend=d.getDay()===0||d.getDay()===6;
+                  return(
+                    <div key={i} style={{padding:"10px 4px",textAlign:"center",borderRight:i<6?`1px solid ${C.brd}`:"none",background:isToday?C.org+"18":"transparent"}}>
+                      <div style={{fontSize:10,fontWeight:600,color:isWeekend?C.mut+"88":C.mut,textTransform:"uppercase",marginBottom:4}}>{dayName}</div>
+                      <div style={{width:28,height:28,borderRadius:"50%",background:isToday?C.org:"transparent",color:isToday?"#fff":isWeekend?C.mut:C.lt,fontWeight:700,fontSize:14,display:"flex",alignItems:"center",justifyContent:"center",margin:"0 auto"}}>{dayNum}</div>
+                    </div>
+                  );
+                })}
+              </div>
+              {/* Status area */}
+              <div style={{padding:"12px 16px",borderTop:`1px solid ${C.brd}`}}>
+                {hasScheduling?(
+                  <div style={{fontSize:12,color:C.mut,lineHeight:1.5}}>No inspection requests this week. Your calendar link is active for {act.filter(j=>j.scheduling_enabled).length} job{act.filter(j=>j.scheduling_enabled).length!==1?"s":""}.</div>
+                ):(
+                  <div style={{fontSize:12,color:C.mut,lineHeight:1.5}}>Enable Inspection Scheduling on a job to let your GC and subs request inspections through your shared calendar.</div>
+                )}
               </div>
             </div>
-            {act.some(j=>j.scheduling_enabled)?(
-              <div>
-                <div style={{fontSize:12,color:C.mut,marginBottom:10}}>Jobs with scheduling enabled:</div>
-                {act.filter(j=>j.scheduling_enabled).map(j=>(
-                  <div key={j.id} style={{display:"flex",alignItems:"center",gap:8,padding:"8px 0",borderBottom:`1px solid ${C.brd}`}}>
-                    <div style={{width:8,height:8,borderRadius:"50%",background:C.blu,flexShrink:0}}/>
-                    <span style={{fontSize:13,fontWeight:600,color:C.lt,flex:1}}>{j.name}</span>
-                    <span style={{fontSize:11,color:C.blu,fontWeight:600}}>Active</span>
-                  </div>
-                ))}
-                <div style={{marginTop:12,padding:"10px 14px",background:C.inp,borderRadius:8,border:`1px solid ${C.brd}`}}>
-                  <div style={{fontSize:11,color:C.mut,marginBottom:4}}>Your shared calendar link:</div>
-                  <div style={{fontSize:12,color:C.blu,fontWeight:600,wordBreak:"break-all"}}>mydailyreports.com/schedule/{user?.user_metadata?.full_name?.toLowerCase().replace(/\s+/g,"-")||"inspector"}</div>
-                </div>
-              </div>
-            ):(
-              <div style={{fontSize:13,color:C.mut,lineHeight:1.5}}>Enable Inspection Scheduling on any job to let your GC and subs request inspections through a shared calendar link.</div>
-            )}
-          </div>
-        )}
+          );
+        })()}
 
         {/* ── Bottom tiles — two column ── */}
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginTop:4}}>
