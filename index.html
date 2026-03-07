@@ -1411,6 +1411,7 @@ function Dashboard({user, onLogout}){
   const [showArch,setShowArch]=useState(false);
   const [showAcct,setShowAcct]=useState(false);
   const [showTrain,setShowTrain]=useState(false);
+  const [showFairUse,setShowFairUse]=useState(false);
 
   useEffect(()=>{load();},[]);
   const load=async()=>{setLoading(true);try{const a=await db.jobs(user.id);setJobs(a);const ids=a.filter(j=>!j.is_archived).map(j=>j.id);if(ids.length)setRpts(await db.todayRpts(ids));}catch(e){console.error(e);}finally{setLoading(false);}};
@@ -1426,6 +1427,34 @@ function Dashboard({user, onLogout}){
   if(showNew)return<CreateJob user={user} onBack={()=>setShowNew(false)} onCreated={()=>{setShowNew(false);load();}}/>;
   if(showArch)return<ArchivedJobs jobs={arch} onBack={()=>setShowArch(false)} onSelect={(j)=>{setSelJob(j);setShowArch(false);}}/>;
   if(showTrain)return<TrainingCenter onBack={()=>setShowTrain(false)}/>;
+  if(showFairUse)return(
+    <div style={{minHeight:"100vh",background:C.bg,color:C.txt}}>
+      <div style={{display:"flex",alignItems:"center",gap:12,padding:"16px 20px",borderBottom:`1px solid ${C.brd}`,background:C.card}}>
+        <button onClick={()=>setShowFairUse(false)} style={{background:"none",border:"none",color:C.mut,fontSize:22,cursor:"pointer",padding:0,lineHeight:1}}>←</button>
+        <MDRLogo size={28}/>
+        <span style={{fontWeight:700,fontSize:17}}>Fair Use Agreement</span>
+      </div>
+      <div style={{maxWidth:600,margin:"0 auto",padding:"24px 20px"}}>
+        <div style={{fontSize:14,color:C.lt,lineHeight:1.8}}>
+          <p style={{fontWeight:700,fontSize:16,color:C.txt,marginBottom:16}}>My Daily Reports — Fair Use Policy</p>
+          <p style={{marginBottom:14}}>My Daily Reports uses AI-powered document parsing to analyze your uploaded templates and detect fillable fields. Each template upload triggers an API call to process your document. To keep the service fast, reliable, and affordable for all users, the following fair use limits apply:</p>
+          <p style={{fontWeight:700,color:C.org,marginBottom:8}}>Job Creation Limits</p>
+          <p style={{marginBottom:14}}>Each account is intended for use by a single inspector managing their own active projects. Users may create a reasonable number of jobs that reflect actual construction inspection work. Accounts that create an excessive number of jobs, upload templates in bulk, or appear to be using the parsing service for purposes other than daily inspection reporting may be subject to rate limiting or account review.</p>
+          <p style={{fontWeight:700,color:C.org,marginBottom:8}}>Template Parsing</p>
+          <p style={{marginBottom:14}}>The AI template parsing feature is provided to help you set up your report fields quickly. Each template upload counts as one parsing request. Re-uploading the same template for the same job counts as an additional request. Please configure your fields carefully during initial setup to minimize unnecessary re-parsing.</p>
+          <p style={{fontWeight:700,color:C.org,marginBottom:8}}>Scheduling Calendar</p>
+          <p style={{marginBottom:14}}>The shared scheduling calendar is designed for coordinating inspection requests between you and your project teams. It is not intended for use as a general-purpose scheduling tool unrelated to construction inspection work.</p>
+          <p style={{fontWeight:700,color:C.org,marginBottom:8}}>What Counts as Fair Use</p>
+          <p style={{marginBottom:14}}>Creating jobs for real projects you are actively inspecting, uploading one template per job, adding your actual project team contacts, and using the calendar for legitimate inspection scheduling. Normal use of the app as described in the Training Center is always within fair use.</p>
+          <p style={{fontWeight:700,color:C.org,marginBottom:8}}>What May Trigger a Review</p>
+          <p style={{marginBottom:14}}>Creating dozens of jobs in a short time period, repeatedly re-uploading and re-parsing the same templates, automated or scripted account activity, sharing account credentials, or using the service for purposes outside of construction inspection reporting.</p>
+          <p style={{fontWeight:700,color:C.org,marginBottom:8}}>Enforcement</p>
+          <p style={{marginBottom:14}}>We reserve the right to temporarily rate-limit parsing requests, suspend scheduling features, or contact you to discuss your usage if it falls outside of normal patterns. We will always attempt to reach out before taking any action on your account.</p>
+          <p style={{color:C.mut,fontSize:12,marginTop:20}}>Last updated: March 2026</p>
+        </div>
+      </div>
+    </div>
+  );
 
   if(selJob)return(
     <JobDetail job={selJob} user={user} onBack={()=>{setSelJob(null);load();}} onDeleted={()=>{setSelJob(null);load();}}/>
@@ -1506,17 +1535,25 @@ function Dashboard({user, onLogout}){
 
         {!loading&&act.length===0&&(<div style={{textAlign:"center",padding:"60px 20px",color:C.mut}}><div style={{fontSize:48,marginBottom:16}}>📋</div><p style={{fontSize:16,fontWeight:600,color:C.lt,marginBottom:6}}>No jobs yet</p><p style={{fontSize:14}}>Tap "+ New Job" to create your first project</p></div>)}
 
-        {/* ── Scheduling Calendar ── */}
+        {/* ── Scheduling Calendar (full month) ── */}
         {!loading&&(()=>{
           const tz=Intl.DateTimeFormat().resolvedOptions().timeZone;
           const now=new Date();
-          const monday=new Date(now);monday.setDate(now.getDate()-((now.getDay()+6)%7));
-          const weekDays=Array.from({length:7},(_,i)=>{const d=new Date(monday);d.setDate(monday.getDate()+i);return d;});
           const todayStr=now.toLocaleDateString("en-CA",{timeZone:tz});
+          const year=now.getFullYear();const month=now.getMonth();
           const monthLabel=now.toLocaleDateString("en-US",{month:"long",year:"numeric",timeZone:tz});
+          const firstDay=new Date(year,month,1);
+          const lastDay=new Date(year,month+1,0);
+          const startPad=firstDay.getDay(); // 0=Sun
+          const totalDays=lastDay.getDate();
+          const cells=[];
+          for(let i=0;i<startPad;i++)cells.push(null);
+          for(let d=1;d<=totalDays;d++)cells.push(d);
+          while(cells.length%7!==0)cells.push(null);
           const slug=user?.user_metadata?.full_name?.toLowerCase().replace(/\s+/g,"-")||"inspector";
           const calURL=`mydailyreports.com/schedule/${slug}`;
           const hasScheduling=act.some(j=>j.scheduling_enabled);
+          const dayHeaders=["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
           return(
             <div style={{background:C.card,border:`1px solid ${C.brd}`,borderRadius:12,overflow:"hidden",marginBottom:12}}>
               {/* Calendar header */}
@@ -1531,18 +1568,22 @@ function Dashboard({user, onLogout}){
                   </button>
                 )}
               </div>
-              {/* Week view */}
-              <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:0}}>
-                {weekDays.map((d,i)=>{
-                  const ds=d.toLocaleDateString("en-CA",{timeZone:tz});
+              {/* Day headers */}
+              <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)"}}>
+                {dayHeaders.map((d,i)=>(
+                  <div key={d} style={{padding:"8px 0",textAlign:"center",fontSize:10,fontWeight:700,color:(i===0||i===6)?C.mut+"88":C.mut,textTransform:"uppercase",borderBottom:`1px solid ${C.brd}`}}>{d}</div>
+                ))}
+              </div>
+              {/* Month grid */}
+              <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)"}}>
+                {cells.map((day,i)=>{
+                  if(day===null)return<div key={i} style={{padding:"8px 4px",textAlign:"center"}}/>;
+                  const ds=`${year}-${String(month+1).padStart(2,"0")}-${String(day).padStart(2,"0")}`;
                   const isToday=ds===todayStr;
-                  const dayName=d.toLocaleDateString("en-US",{weekday:"short",timeZone:tz});
-                  const dayNum=d.getDate();
-                  const isWeekend=d.getDay()===0||d.getDay()===6;
+                  const isWeekend=i%7===0||i%7===6;
                   return(
-                    <div key={i} style={{padding:"10px 4px",textAlign:"center",borderRight:i<6?`1px solid ${C.brd}`:"none",background:isToday?C.org+"18":"transparent"}}>
-                      <div style={{fontSize:10,fontWeight:600,color:isWeekend?C.mut+"88":C.mut,textTransform:"uppercase",marginBottom:4}}>{dayName}</div>
-                      <div style={{width:28,height:28,borderRadius:"50%",background:isToday?C.org:"transparent",color:isToday?"#fff":isWeekend?C.mut:C.lt,fontWeight:700,fontSize:14,display:"flex",alignItems:"center",justifyContent:"center",margin:"0 auto"}}>{dayNum}</div>
+                    <div key={i} style={{padding:"6px 4px",textAlign:"center",background:isToday?C.org+"18":"transparent"}}>
+                      <div style={{width:28,height:28,borderRadius:"50%",background:isToday?C.org:"transparent",color:isToday?"#fff":isWeekend?C.mut:C.lt,fontWeight:isToday?700:500,fontSize:13,display:"flex",alignItems:"center",justifyContent:"center",margin:"0 auto"}}>{day}</div>
                     </div>
                   );
                 })}
@@ -1550,7 +1591,7 @@ function Dashboard({user, onLogout}){
               {/* Status area */}
               <div style={{padding:"12px 16px",borderTop:`1px solid ${C.brd}`}}>
                 {hasScheduling?(
-                  <div style={{fontSize:12,color:C.mut,lineHeight:1.5}}>No inspection requests this week. Your calendar link is active for {act.filter(j=>j.scheduling_enabled).length} job{act.filter(j=>j.scheduling_enabled).length!==1?"s":""}.</div>
+                  <div style={{fontSize:12,color:C.mut,lineHeight:1.5}}>No inspection requests this month. Your calendar is active for {act.filter(j=>j.scheduling_enabled).length} job{act.filter(j=>j.scheduling_enabled).length!==1?"s":""}.</div>
                 ):(
                   <div style={{fontSize:12,color:C.mut,lineHeight:1.5}}>Enable Inspection Scheduling on a job to let your GC and subs request inspections through your shared calendar.</div>
                 )}
@@ -1573,6 +1614,8 @@ function Dashboard({user, onLogout}){
       </div>
 
       <div style={{textAlign:"center",padding:"24px 20px 32px",color:C.mut,fontSize:12}}>
+        <a href="#" onClick={e=>{e.preventDefault();setShowFairUse(true);}} style={{color:C.mut,textDecoration:"none"}}>Fair Use Agreement</a>
+        <br/><br/>
         <a href="#" onClick={e=>{e.preventDefault();alert("Terms coming soon");}} style={{color:C.mut,textDecoration:"none"}}>Terms of Service</a>
         <span style={{margin:"0 8px"}}>•</span>
         <a href="#" onClick={e=>{e.preventDefault();alert("Privacy coming soon");}} style={{color:C.mut,textDecoration:"none"}}>Privacy Policy</a>
