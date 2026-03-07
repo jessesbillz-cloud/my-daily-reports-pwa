@@ -464,9 +464,11 @@ function AccountSettings({user, onBack, onLogout}){
 
 /* ── Create Job ── */
 function CreateJob({user, onBack, onCreated}){
+  const tz=Intl.DateTimeFormat().resolvedOptions().timeZone;
   const [jn,setJn]=useState("");
   const [addr,setAddr]=useState("");
   const [tf,setTf]=useState(null);
+  const [tfBuf,setTfBuf]=useState(null); // cached ArrayBuffer of template file
   const [freqOn,setFreqOn]=useState(false);
   const [sched,setSched]=useState("");
   const [days,setDays]=useState([]);
@@ -536,7 +538,7 @@ function CreateJob({user, onBack, onCreated}){
     }finally{setParsing(false);}
   };
 
-  const doFile=(f)=>{const e=f.name.split(".").pop().toLowerCase();if(!["docx","pdf"].includes(e)){setErr("Only .docx and .pdf");return;}setTf(f);setErr("");parseFields(f);};
+  const doFile=async(f)=>{const e=f.name.split(".").pop().toLowerCase();if(!["docx","pdf"].includes(e)){setErr("Only .docx and .pdf");return;}setTf(f);setErr("");try{const buf=await f.arrayBuffer();setTfBuf(buf);}catch(bufErr){console.error("File buffer read:",bufErr);}parseFields(f);};
 
   // Field management
   const setFieldMode=(name,mode)=>{setFields(p=>p.map(f=>f.name===name?{...f,mode}:f));};
@@ -571,9 +573,9 @@ function CreateJob({user, onBack, onCreated}){
       const job=await db.mkJob({user_id:user.id,name:jn.trim(),site_address:addr.trim()||null,report_filename_pattern:fnPattern,schedule:es,schedule_days:es==="custom"?days:[],reminder_enabled:remOn,reminder_time:remOn?remT:null,reminder_hours_before:remOn?remH:null,scheduling_enabled:schedOn,field_config:{editable:[...editFields,...autoFields],locked:lockFields}});
       if(tf&&job?.id){
         const ext=tf.name.split(".").pop().toLowerCase();
-        // Read file buffer once, use for both upload and rendering
-        const fileBuf=await tf.arrayBuffer();
-        const fileBlob=new Blob([fileBuf],{type:tf.type||"application/octet-stream"});
+        // Use cached buffer (read once when file was selected) — prevents Safari file-release issues
+        const fileBuf=tfBuf||await tf.arrayBuffer();
+        const fileBlob=new Blob([fileBuf.slice(0)],{type:tf.type||"application/octet-stream"});
         const sp=await db.ulTpl(user.id,job.id,fileBlob,ext);
         let pagePaths=[];
         // Render PDF pages to images for preview cache (non-blocking)
@@ -1065,10 +1067,14 @@ function ReportEditor({job, user, onBack, reportDate}){
 
       // Upload filled PDF to storage
       const storagePath=`${user.id}/${job.id}/reports/${previewPdf.filename}`;
-      await fetch(`${SB_URL}/storage/v1/object/report-source-docs/${storagePath}`,{
+      let upR=await fetch(`${SB_URL}/storage/v1/object/report-source-docs/${storagePath}`,{
         method:"POST",headers:{apikey:SB_KEY,Authorization:`Bearer ${AUTH_TOKEN||SB_KEY}`,"Content-Type":"application/pdf"},
         body:previewPdf.blob
       });
+      if(!upR.ok){await fetch(`${SB_URL}/storage/v1/object/report-source-docs/${storagePath}`,{
+        method:"PUT",headers:{apikey:SB_KEY,Authorization:`Bearer ${AUTH_TOKEN||SB_KEY}`,"Content-Type":"application/pdf"},
+        body:previewPdf.blob
+      });}
 
       // Build email body
       const userName=user.user_metadata?.full_name||user.email?.split("@")[0]||"Inspector";
