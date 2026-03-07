@@ -259,7 +259,6 @@ function AccountSettings({user, onBack, onLogout}){
       const data={
         id:user.id,
         full_name:fullName.trim(),
-        email:email.trim(),
         timezone,
         slug:slugVal,
       };
@@ -2119,7 +2118,7 @@ function SetupWizard({user, onComplete}){
     {title:"How It Works",icon:"📄"},
     {title:"Template Prep",icon:"🔧"},
     {title:"Subscription",icon:"⭐"},
-    {title:"You're Ready",icon:"🚀"},
+    {title:"Create Account",icon:"🚀"},
   ];
 
   const allTemplateRead=readSections.parsing&&readSections.cleanDoc&&readSections.notes&&readSections.photos&&readSections.bestPractices;
@@ -2135,7 +2134,7 @@ function SetupWizard({user, onComplete}){
     try{
       const slugVal=slug.trim()||fullName.trim().toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/(^-|-$)/g,"");
       // Save core profile fields first (columns we know exist)
-      await db.upsertProfile({id:user.id,full_name:fullName.trim(),email:user.email,timezone,slug:slugVal});
+      await db.upsertProfile({id:user.id,full_name:fullName.trim(),timezone,slug:slugVal});
       // Try adding setup_complete flag — column may not exist yet
       try{await db.upsertProfile({id:user.id,setup_complete:true,wizard_completed_at:new Date().toISOString()});}catch(_){}
       onComplete();
@@ -2322,8 +2321,8 @@ function SetupWizard({user, onComplete}){
           <div>
             <div style={{textAlign:"center",padding:"30px 0 20px"}}>
               <div style={{fontSize:56,marginBottom:16}}>🚀</div>
-              <h2 style={{fontSize:22,fontWeight:800,marginBottom:8}}>You're All Set!</h2>
-              <p style={{fontSize:15,color:C.lt,lineHeight:1.6,maxWidth:400,margin:"0 auto"}}>Ready to create your first job and start generating reports.</p>
+              <h2 style={{fontSize:22,fontWeight:800,marginBottom:8}}>Almost There!</h2>
+              <p style={{fontSize:15,color:C.lt,lineHeight:1.6,maxWidth:400,margin:"0 auto"}}>Create your account to start building jobs and generating reports.</p>
             </div>
             <div style={cardS}>
               <div style={{display:"flex",flexDirection:"column",gap:8}}>
@@ -2333,7 +2332,7 @@ function SetupWizard({user, onComplete}){
               </div>
             </div>
             <div style={tipS}>
-              <strong style={{color:C.org}}>Next:</strong> Tap "Go to Dashboard", then "+ New Job" to upload your first template. Check the Training Center anytime for detailed guides.
+              <strong style={{color:C.org}}>Next:</strong> Tap "Create Account" below, then "+ New Job" to upload your first template. Check the Training Center anytime for detailed guides.
             </div>
           </div>
         )}
@@ -2349,7 +2348,7 @@ function SetupWizard({user, onComplete}){
             </button>
           ):(
             <button onClick={saveProfileAndFinish} disabled={saving} className="btn-o" style={{flex:2,padding:"14px 0",background:C.org,border:`1px solid ${C.org}`,borderRadius:10,color:"#fff",fontSize:15,fontWeight:700,cursor:"pointer"}}>
-              {saving?"Saving...":"Go to Dashboard"}
+              {saving?"Creating Account...":"Create Account"}
             </button>
           )}
         </div>
