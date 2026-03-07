@@ -1006,10 +1006,14 @@ function JobDetail({job, user, onBack, onDeleted}){
   const [showPhotos,setShowPhotos]=useState(false);
   const [showEditJob,setShowEditJob]=useState(false);
   const [showReport,setShowReport]=useState(false);
+  const [showTeam,setShowTeam]=useState(false);
   const [inspections,setInspections]=useState([]);
   const [editName,setEditName]=useState(job.name||"");
   const [editAddr,setEditAddr]=useState(job.site_address||"");
   const [editSaving,setEditSaving]=useState(false);
+  const [teamEmails,setTeamEmails]=useState(job.team_emails||[]);
+  const [newEmail,setNewEmail]=useState("");
+  const [teamSaving,setTeamSaving]=useState(false);
 
   const loadReports=useCallback(async()=>{
     try{
@@ -1220,6 +1224,33 @@ function JobDetail({job, user, onBack, onDeleted}){
           </div>
         )}
 
+        {/* ── Project Team (inline) ── */}
+        {showTeam&&(
+          <div style={{background:C.card,border:`1px solid ${C.blu}`,borderRadius:12,padding:20,marginBottom:16}}>
+            <div style={{fontWeight:700,fontSize:15,color:C.blu,marginBottom:6,display:"flex",alignItems:"center",gap:8}}>
+              <span>👥</span> Project Team
+            </div>
+            <div style={{fontSize:12,color:C.mut,marginBottom:16,lineHeight:1.5}}>These people will receive an email with the report attached when you tap Submit Report.</div>
+            {teamEmails.map((email,i)=>(
+              <div key={i} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 0",borderBottom:i<teamEmails.length-1?`1px solid ${C.brd}`:"none"}}>
+                <div style={{width:32,height:32,borderRadius:8,background:C.inp,border:`1px solid ${C.brd}`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:14,flexShrink:0}}>📧</div>
+                <span style={{flex:1,fontSize:14,color:C.lt,wordBreak:"break-all"}}>{email}</span>
+                <button onClick={()=>{const updated=teamEmails.filter((_,j)=>j!==i);setTeamEmails(updated);}} style={{background:"none",border:"none",color:C.err,cursor:"pointer",fontSize:16,padding:"0 4px"}}>✕</button>
+              </div>
+            ))}
+            <div style={{display:"flex",gap:8,marginTop:12}}>
+              <input type="email" value={newEmail} onChange={e=>setNewEmail(e.target.value)} placeholder="name@company.com" onKeyDown={e=>{if(e.key==="Enter"&&newEmail.trim()&&newEmail.includes("@")){setTeamEmails(p=>[...p,newEmail.trim()]);setNewEmail("");}}} style={{flex:1,padding:"10px 12px",background:C.inp,border:`1px solid ${C.brd}`,borderRadius:8,color:C.txt,fontSize:14}}/>
+              <button onClick={()=>{if(newEmail.trim()&&newEmail.includes("@")){setTeamEmails(p=>[...p,newEmail.trim()]);setNewEmail("");}}} style={{padding:"10px 16px",background:C.blu,border:"none",borderRadius:8,color:"#fff",fontSize:13,fontWeight:700,cursor:"pointer"}}>Add</button>
+            </div>
+            <div style={{display:"flex",gap:10,marginTop:16}}>
+              <button onClick={()=>setShowTeam(false)} style={{flex:1,padding:"12px 0",background:C.inp,border:`1px solid ${C.brd}`,borderRadius:8,color:C.lt,fontSize:14,fontWeight:600,cursor:"pointer"}}>Cancel</button>
+              <button onClick={async()=>{setTeamSaving(true);try{await fetch(`${SB_URL}/rest/v1/jobs?id=eq.${job.id}`,{method:"PATCH",headers:db._h(),body:JSON.stringify({team_emails:teamEmails})});job.team_emails=teamEmails;setShowTeam(false);}catch(e){alert("Save failed: "+e.message);}finally{setTeamSaving(false);}}} disabled={teamSaving} className="btn-o" style={{flex:1,padding:"12px 0",background:C.blu,border:"none",borderRadius:8,color:"#fff",fontSize:14,fontWeight:700,cursor:teamSaving?"default":"pointer",opacity:teamSaving?0.6:1}}>
+                {teamSaving?"Saving...":"Save Team"}
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* ── Job Settings Panel ── */}
         {showJobSet&&(
           <div style={{background:C.card,border:`1px solid ${C.brd}`,borderRadius:12,overflow:"hidden",marginBottom:16}}>
@@ -1229,13 +1260,20 @@ function JobDetail({job, user, onBack, onDeleted}){
             <button onClick={()=>{setShowEditJob(!showEditJob);setEditName(job.name);setEditAddr(job.site_address||"");}} style={{width:"100%",display:"flex",alignItems:"center",gap:10,padding:"14px 18px",background:"none",border:"none",borderBottom:`1px solid ${C.brd}`,cursor:"pointer",textAlign:"left"}}>
               <span style={{fontSize:16}}>✏️</span><span style={{fontSize:14,fontWeight:600,color:C.lt}}>Edit Job Details</span>
             </button>
-            {job.scheduling_enabled&&(
-              <button onClick={()=>alert("Edit project team coming soon")} style={{width:"100%",display:"flex",alignItems:"center",gap:10,padding:"14px 18px",background:"none",border:"none",borderBottom:`1px solid ${C.brd}`,cursor:"pointer",textAlign:"left"}}>
-                <span style={{fontSize:16}}>👥</span><span style={{fontSize:14,fontWeight:600,color:C.lt}}>Edit Project Team</span>
-              </button>
-            )}
+            <button onClick={()=>setShowTeam(!showTeam)} style={{width:"100%",display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,padding:"14px 18px",background:"none",border:"none",borderBottom:`1px solid ${C.brd}`,cursor:"pointer",textAlign:"left"}}>
+              <div style={{display:"flex",alignItems:"center",gap:10}}>
+                <span style={{fontSize:16}}>👥</span><span style={{fontSize:14,fontWeight:600,color:C.lt}}>Project Team</span>
+              </div>
+              <span style={{fontSize:11,color:C.mut,background:C.inp,borderRadius:10,padding:"2px 8px"}}>{teamEmails.length}</span>
+            </button>
             <button onClick={()=>alert("Edit field config coming soon")} style={{width:"100%",display:"flex",alignItems:"center",gap:10,padding:"14px 18px",background:"none",border:"none",borderBottom:`1px solid ${C.brd}`,cursor:"pointer",textAlign:"left"}}>
               <span style={{fontSize:16}}>📋</span><span style={{fontSize:14,fontWeight:600,color:C.lt}}>Edit Template Fields</span>
+            </button>
+            <button onClick={()=>alert("Inspection scheduling calendar setup coming soon. Once enabled, your GC and subs can request inspections through a shared link.")} style={{width:"100%",display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,padding:"14px 18px",background:"none",border:"none",borderBottom:`1px solid ${C.brd}`,cursor:"pointer",textAlign:"left"}}>
+              <div style={{display:"flex",alignItems:"center",gap:10}}>
+                <span style={{fontSize:16}}>📅</span><span style={{fontSize:14,fontWeight:600,color:C.lt}}>Inspection Scheduling</span>
+              </div>
+              <span style={{fontSize:11,color:job.scheduling_enabled?C.ok:C.mut,fontWeight:600}}>{job.scheduling_enabled?"ON":"OFF"}</span>
             </button>
             <div style={{padding:"14px 18px",borderTop:`1px solid #5c2023`}}>
               {!showDel?(
