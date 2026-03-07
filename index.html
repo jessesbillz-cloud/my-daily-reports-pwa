@@ -24,6 +24,8 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.9/babel.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script>if(window.pdfjsLib)window.pdfjsLib.GlobalWorkerOptions.workerSrc="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";</script>
 <script type="text/babel">
 const { useState, useEffect, useRef, useCallback } = React;
 const SB_URL = "https://wluvkmpncafugdbunlkw.supabase.co";
@@ -706,13 +708,13 @@ function ArchivedJobs({jobs, onBack, onSelect}){
 }
 
 /* ── Report Editor ── */
-function ReportEditor({job, user, onBack}){
+function ReportEditor({job, user, onBack, reportDate}){
   const fc=job.field_config||{editable:[],locked:[]};
   const initEdit=[...(fc.editable||[])];
   const initLock=[...(fc.locked||[])];
   const tz=Intl.DateTimeFormat().resolvedOptions().timeZone;
-  const todayISO=new Date().toLocaleDateString("en-CA",{timeZone:tz});
-  const todayDisplay=new Date().toLocaleDateString("en-US",{weekday:"long",month:"long",day:"numeric",year:"numeric",timeZone:tz});
+  const todayISO=reportDate||new Date().toLocaleDateString("en-CA",{timeZone:tz});
+  const todayDisplay=new Date(todayISO+"T12:00:00").toLocaleDateString("en-US",{weekday:"long",month:"long",day:"numeric",year:"numeric",timeZone:tz});
 
   // Mutable field lists — locked fields can be unlocked/relocked
   const [lockFields,setLockFields]=useState(initLock);
@@ -984,38 +986,68 @@ function ReportEditor({job, user, onBack}){
   if(loadingDraft)return(<div style={{minHeight:"100vh",background:C.bg,display:"flex",alignItems:"center",justifyContent:"center"}}><p style={{color:C.mut}}>Loading report...</p></div>);
 
   // ── PDF Preview Screen ──
-  if(previewPdf)return(
-    <div style={{minHeight:"100vh",background:C.bg,color:C.txt,display:"flex",flexDirection:"column"}}>
-      <div style={{display:"flex",alignItems:"center",gap:12,padding:"16px 20px",borderBottom:`1px solid ${C.brd}`,background:C.card}}>
-        <button onClick={()=>setPreviewPdf(null)} style={{background:"none",border:"none",color:C.mut,fontSize:22,cursor:"pointer",padding:0,lineHeight:1}}>←</button>
-        <MDRLogo size={28}/>
-        <div style={{flex:1}}>
-          <div style={{fontWeight:700,fontSize:17}}>Review Report</div>
-          <div style={{fontSize:12,color:C.mut}}>{previewPdf.filename}</div>
+  if(previewPdf){
+    const PdfPages=()=>{
+      const containerRef=useRef(null);
+      const [rendering,setRendering]=useState(true);
+      useEffect(()=>{
+        let cancelled=false;
+        (async()=>{
+          try{
+            if(!window.pdfjsLib||!containerRef.current)return;
+            const arrayBuf=await previewPdf.blob.arrayBuffer();
+            const pdf=await window.pdfjsLib.getDocument({data:arrayBuf}).promise;
+            if(cancelled)return;
+            containerRef.current.innerHTML="";
+            const containerW=containerRef.current.clientWidth||window.innerWidth-32;
+            for(let i=1;i<=pdf.numPages;i++){
+              const page=await pdf.getPage(i);
+              const vp=page.getViewport({scale:1});
+              const scale=containerW/vp.width;
+              const scaledVp=page.getViewport({scale});
+              const canvas=document.createElement("canvas");
+              canvas.width=scaledVp.width;canvas.height=scaledVp.height;
+              canvas.style.width="100%";canvas.style.display="block";
+              canvas.style.marginBottom="8px";canvas.style.borderRadius="4px";
+              canvas.style.boxShadow="0 1px 4px rgba(0,0,0,0.3)";
+              containerRef.current.appendChild(canvas);
+              await page.render({canvasContext:canvas.getContext("2d"),viewport:scaledVp}).promise;
+            }
+          }catch(e){console.error("PDF render error:",e);if(containerRef.current)containerRef.current.innerHTML='<p style="color:#888;text-align:center;padding:20px;">Could not render PDF preview</p>';}
+          finally{if(!cancelled)setRendering(false);}
+        })();
+        return()=>{cancelled=true;};
+      },[]);
+      return(<div>
+        {rendering&&<div style={{textAlign:"center",padding:20,color:C.mut}}>Rendering PDF...</div>}
+        <div ref={containerRef} style={{padding:"0 16px"}}/>
+      </div>);
+    };
+    return(
+      <div style={{minHeight:"100vh",background:C.bg,color:C.txt,display:"flex",flexDirection:"column"}}>
+        <div style={{display:"flex",alignItems:"center",gap:12,padding:"16px 20px",borderBottom:`1px solid ${C.brd}`,background:C.card}}>
+          <button onClick={()=>setPreviewPdf(null)} style={{background:"none",border:"none",color:C.mut,fontSize:22,cursor:"pointer",padding:0,lineHeight:1}}>←</button>
+          <MDRLogo size={28}/>
+          <div style={{flex:1}}>
+            <div style={{fontWeight:700,fontSize:17}}>Review Report</div>
+            <div style={{fontSize:12,color:C.mut}}>{previewPdf.filename}</div>
+          </div>
         </div>
-      </div>
-      <div style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:"20px",gap:16}}>
-        <div style={{background:C.card,border:`1px solid ${C.brd}`,borderRadius:12,padding:24,textAlign:"center",width:"100%",maxWidth:400}}>
-          <div style={{fontSize:48,marginBottom:12}}>📄</div>
-          <div style={{fontWeight:700,fontSize:16,color:C.txt,marginBottom:4}}>{previewPdf.filename}</div>
-          <div style={{fontSize:12,color:C.mut,marginBottom:16}}>Your filled report is ready to review</div>
-          <button onClick={()=>{const u=URL.createObjectURL(previewPdf.blob);window.open(u,"_blank");}} style={{width:"100%",padding:"12px 0",background:C.blu,border:"none",borderRadius:10,color:"#fff",fontSize:15,fontWeight:700,cursor:"pointer",marginBottom:10}}>
-            Open PDF to Review
+        <div style={{flex:1,overflow:"auto",WebkitOverflowScrolling:"touch",paddingBottom:80}}>
+          <PdfPages/>
+        </div>
+        <div style={{position:"fixed",bottom:0,left:0,right:0,display:"flex",gap:10,padding:"12px 20px",borderTop:`1px solid ${C.brd}`,background:C.card,zIndex:100}}>
+          <button onClick={()=>setPreviewPdf(null)} style={{flex:1,padding:"14px 0",background:"transparent",border:`1px solid ${C.brd}`,borderRadius:10,color:C.lt,fontSize:15,fontWeight:700,cursor:"pointer"}}>
+            Go Back & Edit
           </button>
-          <div style={{fontSize:11,color:C.mut}}>Opens in a new tab so you can scroll through it</div>
+          <button onClick={confirmSubmit} disabled={submitting} className="btn-o" style={{flex:1,padding:"14px 0",background:C.org,border:"none",borderRadius:10,color:"#fff",fontSize:15,fontWeight:700,cursor:submitting?"default":"pointer",opacity:submitting?0.6:1}}>
+            {submitting?"Sending...":"Submit & Send"}
+          </button>
         </div>
+        {toast&&<div style={{position:"fixed",bottom:80,left:"50%",transform:"translateX(-50%)",background:C.card,border:`1px solid ${C.ok}`,borderRadius:10,padding:"10px 20px",fontSize:14,fontWeight:600,color:C.ok,zIndex:9999}}>{toast}</div>}
       </div>
-      <div style={{display:"flex",gap:10,padding:"12px 20px",borderTop:`1px solid ${C.brd}`,background:C.card}}>
-        <button onClick={()=>setPreviewPdf(null)} style={{flex:1,padding:"14px 0",background:"transparent",border:`1px solid ${C.brd}`,borderRadius:10,color:C.lt,fontSize:15,fontWeight:700,cursor:"pointer"}}>
-          Go Back & Edit
-        </button>
-        <button onClick={confirmSubmit} disabled={submitting} className="btn-o" style={{flex:1,padding:"14px 0",background:C.org,border:"none",borderRadius:10,color:"#fff",fontSize:15,fontWeight:700,cursor:submitting?"default":"pointer",opacity:submitting?0.6:1}}>
-          {submitting?"Sending...":"Submit & Send"}
-        </button>
-      </div>
-      {toast&&<div style={{position:"fixed",bottom:80,left:"50%",transform:"translateX(-50%)",background:C.card,border:`1px solid ${C.ok}`,borderRadius:10,padding:"10px 20px",fontSize:14,fontWeight:600,color:C.ok,zIndex:9999}}>{toast}</div>}
-    </div>
-  );
+    );
+  }
 
   return(
     <div style={{minHeight:"100vh",background:C.bg,color:C.txt}}>
@@ -1034,7 +1066,7 @@ function ReportEditor({job, user, onBack}){
 
       <div style={{maxWidth:600,margin:"0 auto",padding:"20px"}}>
         <div style={{fontSize:14,color:C.mut,marginBottom:6,textAlign:"center"}}>{todayDisplay}</div>
-        <div style={{fontSize:11,color:C.mut,textAlign:"center",marginBottom:20}}>Editable until midnight • {tz.split("/").pop().replace(/_/g," ")}</div>
+        <div style={{fontSize:11,color:C.mut,textAlign:"center",marginBottom:20}}>Editable anytime • {tz.split("/").pop().replace(/_/g," ")}</div>
 
         {/* ── Locked Fields (collapsible) ── */}
         {lockFields.length>0&&(
@@ -1229,8 +1261,9 @@ function JobDetail({job, user, onBack, onDeleted}){
     finally{setEditSaving(false);}
   };
 
-  const openReport=()=>{setReportStarted(true);setShowReport(true);};
-  const closeReport=()=>{setShowReport(false);setLoading(true);loadReports();};
+  const [editDate,setEditDate]=useState(null);
+  const openReport=(date)=>{setEditDate(date||null);setReportStarted(true);setShowReport(true);};
+  const closeReport=()=>{setShowReport(false);setEditDate(null);setLoading(true);loadReports();};
 
   const fs={width:"100%",padding:"12px 14px",background:C.inp,border:`1px solid ${C.brd}`,borderRadius:10,color:C.txt,fontSize:15};
   const ls={display:"block",color:C.lt,fontSize:13,fontWeight:600,marginBottom:6};
@@ -1248,7 +1281,7 @@ function JobDetail({job, user, onBack, onDeleted}){
     </div>
   );
 
-  if(showReport)return<ReportEditor job={job} user={user} onBack={closeReport}/>;
+  if(showReport)return<ReportEditor job={job} user={user} onBack={closeReport} reportDate={editDate}/>;
 
   if(loading)return(<div style={{minHeight:"100vh",background:C.bg,display:"flex",alignItems:"center",justifyContent:"center"}}><p style={{color:C.mut}}>Loading...</p></div>);
 
@@ -1285,20 +1318,17 @@ function JobDetail({job, user, onBack, onDeleted}){
             )}
           </div>
           {todayRpt?(
-            <button onClick={openReport} className="btn-o" style={{width:"100%",padding:"14px 0",background:todayRpt.status==="submitted"?"transparent":C.blu,border:`1px solid ${todayRpt.status==="submitted"?C.brd:C.blu}`,borderRadius:10,color:todayRpt.status==="submitted"?C.lt:"#fff",fontSize:16,fontWeight:700,cursor:"pointer"}}>
-              {todayRpt.status==="submitted"?"View Submitted Report":"Continue Editing"}
+            <button onClick={()=>openReport(today)} className="btn-o" style={{width:"100%",padding:"14px 0",background:todayRpt.status==="submitted"?C.ok+"22":C.blu,border:`1px solid ${todayRpt.status==="submitted"?C.ok:C.blu}`,borderRadius:10,color:todayRpt.status==="submitted"?C.ok:"#fff",fontSize:16,fontWeight:700,cursor:"pointer"}}>
+              {todayRpt.status==="submitted"?"Edit Submitted Report":"Continue Editing"}
             </button>
           ):reportStarted?(
-            <button onClick={openReport} className="btn-o" style={{width:"100%",padding:"14px 0",background:C.blu,border:`1px solid ${C.blu}`,borderRadius:10,color:"#fff",fontSize:16,fontWeight:700,cursor:"pointer"}}>
+            <button onClick={()=>openReport(today)} className="btn-o" style={{width:"100%",padding:"14px 0",background:C.blu,border:`1px solid ${C.blu}`,borderRadius:10,color:"#fff",fontSize:16,fontWeight:700,cursor:"pointer"}}>
               Continue Editing
             </button>
           ):(
-            <div>
-              <button onClick={openReport} className="btn-o" style={{width:"100%",padding:"14px 0",background:C.org,border:`1px solid ${C.blu}`,borderRadius:10,color:"#fff",fontSize:16,fontWeight:700,cursor:"pointer"}}>
-                Start Today's Report
-              </button>
-              <div style={{fontSize:11,color:C.mut,textAlign:"center",marginTop:8}}>Editable until midnight • {tz.split("/").pop().replace(/_/g," ")}</div>
-            </div>
+            <button onClick={()=>openReport(today)} className="btn-o" style={{width:"100%",padding:"14px 0",background:C.org,border:`1px solid ${C.blu}`,borderRadius:10,color:"#fff",fontSize:16,fontWeight:700,cursor:"pointer"}}>
+              Start Today's Report
+            </button>
           )}
         </div>
 
@@ -1318,7 +1348,7 @@ function JobDetail({job, user, onBack, onDeleted}){
             <div style={{textAlign:"center",padding:"16px 0",color:C.mut,fontSize:13}}>No drafts in progress</div>
           ):(
             working.map((r,i)=>{const rptName=job.report_filename_pattern?job.report_filename_pattern.replace("##",String(r.report_number||1).padStart(2,"0")):("DR#"+(r.report_number||"?"));return(
-              <button key={r.id} onClick={openReport} style={{width:"100%",display:"flex",alignItems:"center",gap:12,padding:"12px 4px",background:"none",border:"none",borderBottom:i<working.length-1?`1px solid ${C.brd}`:"none",cursor:"pointer",textAlign:"left"}}>
+              <button key={r.id} onClick={()=>openReport(r.report_date)} style={{width:"100%",display:"flex",alignItems:"center",gap:12,padding:"12px 4px",background:"none",border:"none",borderBottom:i<working.length-1?`1px solid ${C.brd}`:"none",cursor:"pointer",textAlign:"left"}}>
                 <div style={{width:10,height:10,borderRadius:"50%",background:C.org,flexShrink:0}}/>
                 <div style={{flex:1}}>
                   <div style={{fontSize:14,fontWeight:600,color:C.lt}}>{rptName} — {new Date(r.report_date+"T12:00:00").toLocaleDateString("en-US",{weekday:"short",month:"short",day:"numeric",timeZone:tz})}</div>
@@ -1340,11 +1370,10 @@ function JobDetail({job, user, onBack, onDeleted}){
                 <div style={{width:10,height:10,borderRadius:"50%",background:C.ok,flexShrink:0}}/>
                 <div style={{flex:1}}>
                   <div style={{fontSize:14,fontWeight:600,color:C.lt}}>{rptName} — {new Date(r.report_date+"T12:00:00").toLocaleDateString("en-US",{weekday:"short",month:"short",day:"numeric",timeZone:tz})}</div>
-                  <div style={{fontSize:11,color:C.mut}}>Submitted {r.submitted_at?new Date(r.submitted_at).toLocaleString("en-US",{month:"short",day:"numeric",hour:"numeric",minute:"2-digit",timeZone:tz}):r.report_date}</div>
+                  <div style={{fontSize:11,color:C.mut}}>Submitted {r.updated_at?new Date(r.updated_at).toLocaleString("en-US",{month:"short",day:"numeric",hour:"numeric",minute:"2-digit",timeZone:tz}):r.report_date}</div>
                 </div>
                 <div style={{display:"flex",gap:6,flexShrink:0}}>
-                  <button style={{padding:"5px 10px",fontSize:11,fontWeight:700,borderRadius:6,border:`1px solid ${C.brd}`,background:"transparent",color:C.lt,cursor:"pointer"}}>Download</button>
-                  <button style={{padding:"5px 10px",fontSize:11,fontWeight:700,borderRadius:6,border:`1px solid ${C.brd}`,background:"transparent",color:C.blu,cursor:"pointer"}}>Resend</button>
+                  <button onClick={()=>openReport(r.report_date)} style={{padding:"5px 10px",fontSize:11,fontWeight:700,borderRadius:6,border:`1px solid ${C.org}`,background:"transparent",color:C.org,cursor:"pointer"}}>Edit</button>
                 </div>
               </div>
             );})
@@ -1451,11 +1480,11 @@ const GUIDES=[
     {icon:"🔽",title:"Switching Between Jobs",body:"Use the Jobs dropdown in the top-left corner of the dashboard to switch between your active jobs. Tap any job to open its dashboard with today's report, working copies, completed reports, and photos.",tip:null},
   ]},
   {icon:"📝",color:C.ok,title:"Creating Your First Report",sub:"Step-by-step guide to building a daily inspection report",steps:[
-    {icon:"▶️",title:"Start Today's Report",body:"From the job dashboard, tap the big orange \"Start Today's Report\" button. This opens the report editor with all your template fields pre-loaded. Locked fields are already filled in. Auto-date fields show today's date. Auto-number fields increment from your last report.",tip:"Only one report per day per job can be created. You can edit it all day until midnight in your timezone."},
+    {icon:"▶️",title:"Start Today's Report",body:"From the job dashboard, tap the big orange \"Start Today's Report\" button. This opens the report editor with all your template fields pre-loaded. Locked fields are already filled in. Auto-date fields show today's date. Auto-number fields increment from your last report.",tip:"Only one report per day per job can be created. Working copies can be edited anytime."},
     {icon:"✏️",title:"Fill In Your Fields",body:"The report editor shows all your editable fields ready to fill in. These are the fields you marked as \"Edit\" during job setup — things like weather conditions, work performed, notes, and observations that change daily.",tip:"Fields that stay the same every report (project name, address, architect, contractor) are already locked in from your job setup."},
     {icon:"🎤",title:"Dictate Your Notes",body:"Tap into any text field and use your phone's built-in keyboard microphone to dictate your notes hands-free. No extra buttons or setup needed — just tap the mic on your keyboard and start talking. All notes you take throughout the day stay saved in your working copy.",tip:"If you close the app and come back, your report picks up right where you left off."},
     {icon:"📷",title:"Add Photos",body:"Take photos throughout the day directly from the report editor. Photos automatically populate into your report based on the layout you chose during job setup — single page, 2x2 grid, or full photo page.",tip:"You can also pull in photos from your job's photo gallery if you saved reference shots earlier."},
-    {icon:"💾",title:"Save or Submit",body:"Your report auto-saves as a working copy as you go. When you're done for the day, tap \"Submit\" to finalize it. Submitting generates a PDF with a timestamp watermark and moves the report to your Completed Reports folder.",tip:"Working copies stay editable until midnight. After that, they're locked. You don't have to submit every day — some inspectors submit weekly or monthly."},
+    {icon:"💾",title:"Save or Submit",body:"Your report auto-saves as a working copy as you go. When you're done for the day, tap \"Submit\" to finalize it. Submitting generates a PDF with a timestamp watermark and moves the report to your Completed Reports folder.",tip:"Working copies stay editable anytime — you can come back and update them whenever you need to."},
   ]},
   {icon:"🎤",color:"#ef4444",title:"Using Voice Input",sub:"Dictate notes hands-free using your phone's built-in keyboard",steps:[
     {icon:"⌨️",title:"Your Phone's Built-In Mic",body:"My Daily Reports uses the native microphone button on your phone's keyboard — the same one you use for texting. No extra permissions, no third-party speech engine, no setup required. Just tap into a field, tap the mic on your keyboard, and talk.",tip:"This works because your phone's speech-to-text is already excellent and it's free."},
@@ -1492,7 +1521,7 @@ const GUIDES=[
   {icon:"⚙️",color:C.mut,title:"Profile & Settings",sub:"Customize your account and app preferences",steps:[
     {icon:"👤",title:"Access Settings",body:"Tap the gear icon in the top-right corner of the dashboard and select \"Account Settings\". Here you can view your profile, set your timezone, configure your scheduling display name, and manage your account.",tip:null},
     {icon:"🔗",title:"Scheduling Display Name",body:"Your scheduling display name is how your name appears at the end of your scheduling URL. Set this to something recognizable so your project teams know it's your calendar.",tip:null},
-    {icon:"🕐",title:"Timezone",body:"Make sure your timezone is set correctly in Settings. This affects when your daily reports lock at midnight and the timestamps on your submitted PDFs. The app defaults to your device's timezone.",tip:null},
+    {icon:"🕐",title:"Timezone",body:"Make sure your timezone is set correctly in Settings. This affects the timestamps on your submitted PDFs. The app defaults to your device's timezone.",tip:null},
     {icon:"🔔",title:"Email Reminders",body:"Email reminders are configured per-job based on the reminder settings you set during job creation. You'll get an email reminder before your report is due based on the schedule and lead time you chose.",tip:null},
     {icon:"🚪",title:"Sign Out",body:"To sign out, open Account Settings and tap \"Sign Out\" at the bottom. The app keeps you logged in by default so you shouldn't need to do this often. Your data stays saved and will be there when you sign back in.",tip:"The app is designed to keep you logged in. You shouldn't have to sign in again unless you specifically sign out or delete the app."},
   ]},
