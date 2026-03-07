@@ -109,7 +109,15 @@ const db = {
   async todayRpts(ids){if(!ids.length)return[];const t=new Date().toISOString().split("T")[0];const q=ids.map(i=>`"${i}"`).join(",");const r=await fetch(`${SB_URL}/rest/v1/reports?select=id,job_id,status,report_date&report_date=eq.${t}&job_id=in.(${q})`,{headers:this._h()});if(!r.ok)return[];return await r.json();},
   async mkJob(d){const r=await fetch(`${SB_URL}/rest/v1/jobs`,{method:"POST",headers:this._h(),body:JSON.stringify(d)});if(!r.ok){const e=await r.json();throw new Error(e.message||"Failed");}return(await r.json())[0];},
   async ulTpl(uid,jid,f){const ext=f.name.split(".").pop().toLowerCase();const p=`${uid}/${jid}/template.${ext}`;const r=await fetch(`${SB_URL}/storage/v1/object/report-source-docs/${p}`,{method:"POST",headers:{apikey:SB_KEY,Authorization:`Bearer ${AUTH_TOKEN||SB_KEY}`,"Content-Type":f.type||"application/octet-stream"},body:f});if(!r.ok)throw new Error("Upload failed");return p;},
-  async mkTpl(d){const r=await fetch(`${SB_URL}/rest/v1/templates`,{method:"POST",headers:this._h(),body:JSON.stringify(d)});if(!r.ok)throw new Error("Template save failed");return(await r.json())[0];},
+  async mkTpl(d){
+    const r=await fetch(`${SB_URL}/rest/v1/templates`,{method:"POST",headers:this._h(),body:JSON.stringify(d)});
+    if(!r.ok){
+      // If page_images column doesn't exist yet, retry without it
+      if(d.page_images){const d2={...d};delete d2.page_images;const r2=await fetch(`${SB_URL}/rest/v1/templates`,{method:"POST",headers:this._h(),body:JSON.stringify(d2)});if(r2.ok)return(await r2.json())[0];}
+      throw new Error("Template save failed");
+    }
+    return(await r.json())[0];
+  },
   async getProfile(userId){const r=await fetch(`${SB_URL}/rest/v1/profiles?id=eq.${userId}&select=*`,{headers:this._h()});if(!r.ok)return null;const d=await r.json();return d[0]||null;},
   async upsertProfile(d){const r=await fetch(`${SB_URL}/rest/v1/profiles`,{method:"POST",headers:{...this._h(),Prefer:"return=representation,resolution=merge-duplicates"},body:JSON.stringify(d)});if(!r.ok)throw new Error("Profile save failed");return(await r.json())[0];},
   async deleteJob(jobId){
@@ -170,9 +178,13 @@ const db = {
     for(let i=0;i<pageImages.length;i++){
       const blob=await(await fetch(pageImages[i])).blob();
       const p=`${userId}/${jobId}/template_page_${i}.jpg`;
-      await fetch(`${SB_URL}/storage/v1/object/report-source-docs/${p}`,{
+      // Use POST first, fall back to PUT (upsert) if file already exists
+      let r=await fetch(`${SB_URL}/storage/v1/object/report-source-docs/${p}`,{
         method:"POST",headers:{apikey:SB_KEY,Authorization:`Bearer ${AUTH_TOKEN||SB_KEY}`,"Content-Type":"image/jpeg"},body:blob
       });
+      if(!r.ok){r=await fetch(`${SB_URL}/storage/v1/object/report-source-docs/${p}`,{
+        method:"PUT",headers:{apikey:SB_KEY,Authorization:`Bearer ${AUTH_TOKEN||SB_KEY}`,"Content-Type":"image/jpeg"},body:blob
+      });}
       paths.push(p);
     }
     return paths;
@@ -1437,13 +1449,13 @@ function JobDetail({job, user, onBack, onDeleted}){
             <div style={{textAlign:"center",padding:"16px 0",color:C.mut,fontSize:13}}>No drafts in progress</div>
           ):(
             working.map((r,i)=>{const rptName=job.report_filename_pattern?job.report_filename_pattern.replace("##",String(r.report_number||1).padStart(2,"0")):("DR#"+(r.report_number||"?"));return(
-              <button key={r.id} onClick={()=>openReport(r.report_date)} style={{width:"100%",display:"flex",alignItems:"center",gap:12,padding:"12px 4px",background:"none",border:"none",borderBottom:i<working.length-1?`1px solid ${C.brd}`:"none",cursor:"pointer",textAlign:"left"}}>
+              <button key={r.id} onClick={()=>openReport(r.report_date)} style={{width:"100%",display:"flex",alignItems:"center",gap:12,padding:"14px 16px",background:"transparent",border:"none",borderBottom:i<working.length-1?`1px solid ${C.brd}`:"none",cursor:"pointer",textAlign:"left"}}>
                 <div style={{width:10,height:10,borderRadius:"50%",background:C.org,flexShrink:0}}/>
-                <div style={{flex:1}}>
-                  <div style={{fontSize:14,fontWeight:600,color:C.lt}}>{rptName} — {new Date(r.report_date+"T12:00:00").toLocaleDateString("en-US",{weekday:"short",month:"short",day:"numeric",timeZone:tz})}</div>
+                <div style={{flex:1,minWidth:0}}>
+                  <div style={{fontSize:14,fontWeight:600,color:C.lt,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{rptName} — {new Date(r.report_date+"T12:00:00").toLocaleDateString("en-US",{weekday:"short",month:"short",day:"numeric",timeZone:tz})}</div>
                   <div style={{fontSize:11,color:C.mut}}>Last edited {r.updated_at?new Date(r.updated_at).toLocaleTimeString("en-US",{hour:"numeric",minute:"2-digit",timeZone:tz}):""}</div>
                 </div>
-                <span style={{color:C.org,fontSize:13,fontWeight:600}}>Edit ›</span>
+                <div style={{color:C.org,fontSize:20,flexShrink:0}}>›</div>
               </button>);})
 
           )}
