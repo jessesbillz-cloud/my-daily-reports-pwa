@@ -417,9 +417,10 @@ function CreateJob({user, onBack, onCreated}){
       else{const docText=await extractDocxText(f);payload={file_text:docText,file_name:f.name};}
       const resp=await fetch(`${SB_URL}/functions/v1/parse-template`,{
         method:"POST",
-        headers:{"Content-Type":"application/json","Authorization":"Bearer "+(AUTH_TOKEN||SB_KEY),"apikey":SB_KEY},
+        headers:{"Content-Type":"application/json","Authorization":"Bearer "+SB_KEY,"apikey":SB_KEY},
         body:JSON.stringify(payload)
       });
+      if(!resp.ok){const errText=await resp.text();throw new Error("Parse API "+resp.status+": "+errText);}
       const parsed=await resp.json();
       if(parsed.error)throw new Error(parsed.error);
       // Merge editable + locked into one unified list
