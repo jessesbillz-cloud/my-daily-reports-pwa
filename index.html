@@ -22,13 +22,12 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.9/babel.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 <script type="text/babel">
 const { useState, useEffect, useRef } = React;
 const SB_URL = "https://wluvkmpncafugdbunlkw.supabase.co";
 const SB_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndsdXZrbXBuY2FmdWdkYnVubGt3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzIzMDU1MTUsImV4cCI6MjA4Nzg4MTUxNX0.HZpQ2xVGpf4EQ0BVDmIEuPqW5T_eNG5OqBNAqT03rH8";
 const C = {bg:"#0f0f0f",card:"#1a1a1a",brd:"#333",inp:"#222",org:"#e8742a",orgH:"#d4691f",blu:"#5a8fc0",txt:"#fff",mut:"#888",lt:"#ccc",err:"#ef4444",ok:"#22c55e"};
-const DEV_USER = {id:"00000000-0000-0000-0000-000000000001",email:"saltzman.jesse@gmail.com",user_metadata:{full_name:"Jesse Saltzman"}};
+const DEV_USER = {id:"dev-001",email:"saltzman.jesse@gmail.com",user_metadata:{full_name:"Jesse Saltzman"}};
 
 const SL={daily_mf:"Daily M-F",daily_7:"Daily 7 Days",weekly:"Weekly",as_needed:"As Needed",custom:"Custom"};
 
@@ -68,6 +67,14 @@ function CreateJob({user, onBack, onCreated}){
   const preset=(p)=>{setSched(p);setDays([]);if(p==="as_needed")setRemOn(false);};
   const effSch=()=>{if(sched==="weekly"||sched==="as_needed")return sched;if(days.length===5&&["Mon","Tue","Wed","Thu","Fri"].every(d=>days.includes(d))&&!days.includes("Sat")&&!days.includes("Sun"))return"daily_mf";if(days.length===7)return"daily_7";if(days.length>0)return"custom";return sched||"daily_mf";};
 
+  const readFileAsText=async(f)=>{
+    return new Promise((res)=>{
+      const r=new FileReader();
+      r.onload=()=>res(r.result);
+      r.readAsText(f);
+    });
+  };
+
   const readFileAsBase64=async(f)=>{
     return new Promise((res)=>{
       const r=new FileReader();
@@ -76,55 +83,38 @@ function CreateJob({user, onBack, onCreated}){
     });
   };
 
-  const extractDocxText=async(f)=>{
-    const zip=await JSZip.loadAsync(f);
-    const xml=await zip.file("word/document.xml").async("string");
-    const parser=new DOMParser();
-    const doc=parser.parseFromString(xml,"application/xml");
-    const ns="http://schemas.openxmlformats.org/wordprocessingml/2006/main";
-    const rows=doc.getElementsByTagNameNS(ns,"tr");
-    let text="";
-    for(let i=0;i<rows.length;i++){
-      const cells=rows[i].getElementsByTagNameNS(ns,"tc");
-      const cellTexts=[];
-      for(let j=0;j<cells.length;j++){
-        const paras=cells[j].getElementsByTagNameNS(ns,"t");
-        let ct="";
-        for(let k=0;k<paras.length;k++)ct+=paras[k].textContent;
-        cellTexts.push(ct.trim());
-      }
-      text+=cellTexts.join(" | ")+"\n";
-    }
-    const paras=doc.getElementsByTagNameNS(ns,"p");
-    let pText="";
-    for(let i=0;i<paras.length;i++){
-      const ts=paras[i].getElementsByTagNameNS(ns,"t");
-      let line="";
-      for(let j=0;j<ts.length;j++)line+=ts[j].textContent;
-      if(line.trim())pText+=line.trim()+"\n";
-    }
-    return"TABLE CONTENT:\n"+text+"\nPARAGRAPH CONTENT:\n"+pText;
-  };
-
   const parseFields=async(f)=>{
     setParsing(true);setErr("");setEditFields([]);setLockFields([]);
     try{
-      const isPdf=f.name.toLowerCase().endsWith(".pdf");
-      let payload;
-      if(isPdf){
-        const base64=await readFileAsBase64(f);
-        payload={file_base64:base64,file_name:f.name};
-      }else{
-        const docText=await extractDocxText(f);
-        payload={file_text:docText,file_name:f.name};
-      }
-      const resp=await fetch("https://wluvkmpncafugdbunlkw.supabase.co/functions/v1/parse-template",{
+      const base64=await readFileAsBase64(f);
+      const mediaType=f.name.endsWith(".pdf")?"application/pdf":"application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+      const resp=await fetch("https://api.anthropic.com/v1/messages",{
         method:"POST",
-        headers:{"Content-Type":"application/json","Authorization":"Bearer "+SB_KEY,"apikey":SB_KEY},
-        body:JSON.stringify(payload)
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({
+          model:"claude-sonnet-4-20250514",
+          max_tokens:1000,
+          messages:[{role:"user",content:[
+            {type:"document",source:{type:"base64",media_type:mediaType,data:base64}},
+            {type:"text",text:`Analyze this inspection report template. Find all fillable fields by looking for patterns like "Label:" or "Label: value" or form fields.
+
+For each field, determine if it CHANGES per report or STAYS THE SAME across reports.
+
+Fields that typically CHANGE per report: Date, Report Date, Inspection Date, Report Number, Report No, DR#, Notes, IOR Notes, Observations, Comments, Work Observed, Weather, Hours, Time In, Time Out, Temperature.
+
+Fields that typically STAY THE SAME: Project Name, Owner, Client, District, DSA File #, DSA App #, Contractor, Architect, Engineer, Inspector, IOR, Address, Location, Project No.
+
+Return ONLY valid JSON with no other text:
+{"editable":[{"name":"Date","value":"","autoFill":"date"},{"name":"IOR Notes","value":"","voiceEnabled":true}],"locked":[{"name":"Project Name","value":"Woodland Park MS"}]}
+
+autoFill can be "date" or "increment" (for report numbers). voiceEnabled=true for notes/observations fields. Include the current value if one exists in the template.`}
+          ]}]
+        })
       });
-      const parsed=await resp.json();
-      if(parsed.error)throw new Error(parsed.error);
+      const data=await resp.json();
+      const txt=data.content.map(i=>i.text||"").join("");
+      const clean=txt.replace(/```json|```/g,"").trim();
+      const parsed=JSON.parse(clean);
       setEditFields(parsed.editable||[]);
       setLockFields(parsed.locked||[]);
     }catch(e){
