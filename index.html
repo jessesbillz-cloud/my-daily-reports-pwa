@@ -1000,45 +1000,25 @@ function ReportEditor({job, user, onBack, reportDate}){
       baseName=baseName.replace(/\d{8}/, tzDate);
       const pdfFilename=baseName+".pdf";
 
-      // ── 7. Build preview: load cached template page images, overlay field values as HTML ──
-      let templatePageUrls=[];
-      let templatePageDims={w:612,h:792};// default letter size in pts
-      const cachedPages=tplRecord.structure_map&&tplRecord.structure_map.page_images;
-      if(cachedPages&&cachedPages.length>0){
-        // Use cached page images from job creation
-        templatePageUrls=cachedPages.map(p=>db.getTemplatePageUrl(p)+"?t="+Date.now());
-      }else if(isPdfTemplate&&window.pdfjsLib&&tplBytesCopy){
-        // Fallback: render template pages on-the-fly with pdf.js for jobs created before caching
+      // ── 7. Render the actual filled PDF with pdf.js for a true WYSIWYG preview ──
+      let previewPages=[];
+      if(window.pdfjsLib){
         try{
-          const pjDoc=await window.pdfjsLib.getDocument({data:tplBytesCopy}).promise;
-          const rendered=[];
+          const filledCopy=filledPdfBytes.slice(0);
+          const pjDoc=await window.pdfjsLib.getDocument({data:filledCopy}).promise;
           for(let pi=1;pi<=pjDoc.numPages;pi++){
             const pg=await pjDoc.getPage(pi);
-            const vp=pg.getViewport({scale:1.5});
+            const vp=pg.getViewport({scale:2});
             const cvs=document.createElement("canvas");cvs.width=vp.width;cvs.height=vp.height;
             await pg.render({canvasContext:cvs.getContext("2d"),viewport:vp}).promise;
-            rendered.push(cvs.toDataURL("image/jpeg",0.85));
+            previewPages.push(cvs.toDataURL("image/jpeg",0.92));
             cvs.width=0;cvs.height=0;
           }
-          templatePageUrls=rendered;
-          // Background-cache these images for future use
-          if(user?.id&&job?.id){
-            db.saveTemplatePages(user.id,job.id,rendered).then(paths=>{
-              if(paths.length>0){
-                fetch(`${SB_URL}/rest/v1/templates?job_id=eq.${job.id}`,{method:"PATCH",headers:db._h(),body:JSON.stringify({structure_map:{page_images:paths}})}).catch(()=>{});
-              }
-            }).catch(()=>{});
-          }
-        }catch(pjErr){console.error("Fallback page render:",pjErr);}
-      }
-      // Get actual page dimensions from the PDF
-      if(pages.length>0){
-        templatePageDims={w:pages[0].getWidth(),h:pages[0].getHeight()};
+        }catch(pjErr){console.error("Preview render error:",pjErr);}
       }
 
       setPreviewPdf({blob:pdfBlob,base64:pdfBase64,filename:pdfFilename,
-        templatePages:templatePageUrls,pageDims:templatePageDims,
-        fields:allFields,photoCount:photos.length});
+        previewPages:previewPages});
     }catch(e){
       console.error("PDF generation error:",e);
       showToast("Error: "+e.message);
@@ -1108,26 +1088,7 @@ function ReportEditor({job, user, onBack, reportDate}){
       onTouchStart:e=>{swipeState.sx=e.touches[0].clientX;},
       onTouchEnd:e=>{if(e.changedTouches[0].clientX-swipeState.sx>80)setPreviewPdf(null);}
     };
-    const pd=previewPdf.pageDims||{w:612,h:792};
-    const hasPages=previewPdf.templatePages&&previewPdf.templatePages.length>0;
-    const renderOverlayPage=(pageNum,imgUrl)=>{
-      const fieldsOnPage=(previewPdf.fields||[]).filter(f=>(f.page||1)===pageNum&&f.val&&f.x&&f.y);
-      return(
-        <div key={pageNum} style={{position:"relative",width:"100%",marginBottom:12,borderRadius:4,overflow:"hidden",boxShadow:"0 1px 6px rgba(0,0,0,0.4)",background:"#fff",aspectRatio:`${pd.w}/${pd.h}`}}>
-          {imgUrl&&<img src={imgUrl} style={{width:"100%",height:"100%",display:"block",objectFit:"contain"}} alt={"Page "+pageNum} crossOrigin="anonymous"/>}
-          {!imgUrl&&<div style={{width:"100%",height:"100%",background:"#f5f5f5",display:"flex",alignItems:"center",justifyContent:"center",color:"#999",fontSize:14}}>Template page {pageNum}</div>}
-          {fieldsOnPage.map((f,i)=>{
-            const leftPct=(f.x/pd.w)*100;
-            const topPct=(f.y/pd.h)*100;
-            const fsPct=((f.fontSize||10)/pd.h)*100;
-            const maxWPct=f.w?((f.w/pd.w)*100):undefined;
-            return(<div key={i} style={{position:"absolute",left:leftPct+"%",top:topPct+"%",fontSize:`min(${fsPct}vw, ${(f.fontSize||10)*1.5}px)`,color:"#000",fontFamily:"Helvetica,Arial,sans-serif",lineHeight:1.2,whiteSpace:f.multiline?"pre-wrap":"nowrap",maxWidth:maxWPct?maxWPct+"%":undefined,overflow:"hidden",pointerEvents:"none"}}>{f.val}</div>);
-          })}
-        </div>
-      );
-    };
-    // Figure out how many pages the template has
-    const pageCount=hasPages?previewPdf.templatePages.length:((previewPdf.fields||[]).reduce((mx,f)=>Math.max(mx,f.page||1),1));
+    const hasPages=previewPdf.previewPages&&previewPdf.previewPages.length>0;
 
     return(
       <div style={{minHeight:"100vh",background:C.bg,color:C.txt,display:"flex",flexDirection:"column"}} {...swipeHandlers}>
@@ -1141,14 +1102,13 @@ function ReportEditor({job, user, onBack, reportDate}){
         </div>
         <div style={{flex:1,overflow:"auto",WebkitOverflowScrolling:"touch",paddingBottom:90}}>
           <div style={{padding:"12px 16px"}}>
-            {Array.from({length:pageCount},(_, i)=>{
-              const pgNum=i+1;
-              const imgUrl=hasPages&&previewPdf.templatePages[i]?previewPdf.templatePages[i]:null;
-              return renderOverlayPage(pgNum,imgUrl);
-            })}
-            {previewPdf.photoCount>0&&(
-              <div style={{background:"#1a1a1a",borderRadius:8,padding:16,marginTop:8,textAlign:"center"}}>
-                <span style={{color:C.mut,fontSize:13}}>{previewPdf.photoCount} photo{previewPdf.photoCount>1?"s":""} will be attached</span>
+            {hasPages?previewPdf.previewPages.map((dataUrl,i)=>(
+              <div key={i} style={{marginBottom:12,borderRadius:4,overflow:"hidden",boxShadow:"0 1px 6px rgba(0,0,0,0.4)"}}>
+                <img src={dataUrl} style={{width:"100%",display:"block"}} alt={"Page "+(i+1)}/>
+              </div>
+            )):(
+              <div style={{background:"#1a1a1a",borderRadius:8,padding:24,textAlign:"center"}}>
+                <span style={{color:C.mut,fontSize:14}}>PDF preview could not be rendered. The report will still be generated correctly.</span>
               </div>
             )}
           </div>
