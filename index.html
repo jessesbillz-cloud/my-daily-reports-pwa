@@ -933,7 +933,23 @@ function ReportEditor({job, user, onBack, reportDate}){
       const baseName=job.report_filename_pattern?job.report_filename_pattern.replace(/\.\w+$/,"").replace("##","01"):("DR_"+job.name.replace(/\s+/g,"_")+"_"+todayISO);
       const pdfFilename=baseName+".pdf";
 
-      setPreviewPdf({blob:pdfBlob,base64:pdfBase64,filename:pdfFilename});
+      // Render PDF pages to images for preview
+      let pageImages=[];
+      try{
+        if(window.pdfjsLib){
+          const pdfJsDoc=await window.pdfjsLib.getDocument({data:filledPdfBytes.slice(0)}).promise;
+          for(let i=1;i<=pdfJsDoc.numPages;i++){
+            const pg=await pdfJsDoc.getPage(i);
+            const vp=pg.getViewport({scale:2});
+            const cvs=document.createElement("canvas");
+            cvs.width=vp.width;cvs.height=vp.height;
+            await pg.render({canvasContext:cvs.getContext("2d"),viewport:vp}).promise;
+            pageImages.push(cvs.toDataURL("image/png"));
+          }
+        }
+      }catch(imgErr){console.error("Page render error:",imgErr);}
+
+      setPreviewPdf({blob:pdfBlob,base64:pdfBase64,filename:pdfFilename,images:pageImages});
     }catch(e){
       console.error("PDF generation error:",e);
       showToast("Error: "+e.message);
@@ -987,42 +1003,6 @@ function ReportEditor({job, user, onBack, reportDate}){
 
   // ── PDF Preview Screen ──
   if(previewPdf){
-    const PdfPages=()=>{
-      const containerRef=useRef(null);
-      const [rendering,setRendering]=useState(true);
-      useEffect(()=>{
-        let cancelled=false;
-        (async()=>{
-          try{
-            if(!window.pdfjsLib||!containerRef.current)return;
-            const arrayBuf=await previewPdf.blob.arrayBuffer();
-            const pdf=await window.pdfjsLib.getDocument({data:arrayBuf}).promise;
-            if(cancelled)return;
-            containerRef.current.innerHTML="";
-            const containerW=containerRef.current.clientWidth||window.innerWidth-32;
-            for(let i=1;i<=pdf.numPages;i++){
-              const page=await pdf.getPage(i);
-              const vp=page.getViewport({scale:1});
-              const scale=containerW/vp.width;
-              const scaledVp=page.getViewport({scale});
-              const canvas=document.createElement("canvas");
-              canvas.width=scaledVp.width;canvas.height=scaledVp.height;
-              canvas.style.width="100%";canvas.style.display="block";
-              canvas.style.marginBottom="8px";canvas.style.borderRadius="4px";
-              canvas.style.boxShadow="0 1px 4px rgba(0,0,0,0.3)";
-              containerRef.current.appendChild(canvas);
-              await page.render({canvasContext:canvas.getContext("2d"),viewport:scaledVp}).promise;
-            }
-          }catch(e){console.error("PDF render error:",e);if(containerRef.current)containerRef.current.innerHTML='<p style="color:#888;text-align:center;padding:20px;">Could not render PDF preview</p>';}
-          finally{if(!cancelled)setRendering(false);}
-        })();
-        return()=>{cancelled=true;};
-      },[]);
-      return(<div>
-        {rendering&&<div style={{textAlign:"center",padding:20,color:C.mut}}>Rendering PDF...</div>}
-        <div ref={containerRef} style={{padding:"0 16px"}}/>
-      </div>);
-    };
     return(
       <div style={{minHeight:"100vh",background:C.bg,color:C.txt,display:"flex",flexDirection:"column"}}>
         <div style={{display:"flex",alignItems:"center",gap:12,padding:"16px 20px",borderBottom:`1px solid ${C.brd}`,background:C.card}}>
@@ -1034,7 +1014,19 @@ function ReportEditor({job, user, onBack, reportDate}){
           </div>
         </div>
         <div style={{flex:1,overflow:"auto",WebkitOverflowScrolling:"touch",paddingBottom:80}}>
-          <PdfPages/>
+          {previewPdf.images&&previewPdf.images.length>0?(
+            <div style={{padding:"12px 16px"}}>
+              {previewPdf.images.map((src,i)=>(
+                <img key={i} src={src} style={{width:"100%",display:"block",marginBottom:8,borderRadius:4,boxShadow:"0 1px 4px rgba(0,0,0,0.3)"}} alt={"Page "+(i+1)}/>
+              ))}
+            </div>
+          ):(
+            <div style={{textAlign:"center",padding:40,color:C.mut}}>
+              <div style={{fontSize:48,marginBottom:12}}>📄</div>
+              <div style={{fontSize:14,marginBottom:8}}>PDF generated — preview not available on this device</div>
+              <div style={{fontSize:12}}>Tap Submit & Send to finalize</div>
+            </div>
+          )}
         </div>
         <div style={{position:"fixed",bottom:0,left:0,right:0,display:"flex",gap:10,padding:"12px 20px",borderTop:`1px solid ${C.brd}`,background:C.card,zIndex:100}}>
           <button onClick={()=>setPreviewPdf(null)} style={{flex:1,padding:"14px 0",background:"transparent",border:`1px solid ${C.brd}`,borderRadius:10,color:C.lt,fontSize:15,fontWeight:700,cursor:"pointer"}}>
@@ -1312,13 +1304,13 @@ function JobDetail({job, user, onBack, onDeleted}){
             </div>
             {todayRpt&&(
               <div style={{display:"flex",alignItems:"center",gap:6}}>
-                <div style={{width:10,height:10,borderRadius:"50%",background:todayRpt.status==="submitted"?C.ok:C.org}}/>
-                <span style={{fontSize:12,fontWeight:700,color:todayRpt.status==="submitted"?C.ok:C.org}}>{todayRpt.status==="submitted"?"Submitted":"In Progress"}</span>
+                <div style={{width:10,height:10,borderRadius:"50%",background:todayRpt.status==="submitted"?C.blu:C.org}}/>
+                <span style={{fontSize:12,fontWeight:700,color:todayRpt.status==="submitted"?C.blu:C.org}}>{todayRpt.status==="submitted"?"Submitted":"In Progress"}</span>
               </div>
             )}
           </div>
           {todayRpt?(
-            <button onClick={()=>openReport(today)} className="btn-o" style={{width:"100%",padding:"14px 0",background:todayRpt.status==="submitted"?C.ok+"22":C.blu,border:`1px solid ${todayRpt.status==="submitted"?C.ok:C.blu}`,borderRadius:10,color:todayRpt.status==="submitted"?C.ok:"#fff",fontSize:16,fontWeight:700,cursor:"pointer"}}>
+            <button onClick={()=>openReport(today)} className="btn-o" style={{width:"100%",padding:"14px 0",background:C.blu,border:`1px solid ${C.blu}`,borderRadius:10,color:"#fff",fontSize:16,fontWeight:700,cursor:"pointer"}}>
               {todayRpt.status==="submitted"?"Edit Submitted Report":"Continue Editing"}
             </button>
           ):reportStarted?(
