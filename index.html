@@ -2102,9 +2102,8 @@ function SetupWizard({user, onComplete}){
   const [slug,setSlug]=useState(()=>(user?.user_metadata?.full_name||"").toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/(^-|-$)/g,""));
   // Track which sections the user has expanded/read
   const [readSections,setReadSections]=useState({});
-  const [trainGuidesDone,setTrainGuidesDone]=useState({});
-  const markRead=(key)=>setReadSections(p=>({...p,[key]:true}));
-  const markTrain=(key)=>setTrainGuidesDone(p=>({...p,[key]:true}));
+  const [openSections,setOpenSections]=useState({});
+  const toggleSection=(key)=>{setReadSections(p=>({...p,[key]:true}));setOpenSections(p=>({...p,[key]:!p[key]}));};
 
   const TZ_OPTIONS=["America/New_York","America/Chicago","America/Denver","America/Phoenix","America/Los_Angeles","America/Anchorage","Pacific/Honolulu"];
   const TZ_LABELS={"America/New_York":"Eastern (ET)","America/Chicago":"Central (CT)","America/Denver":"Mountain (MT)","America/Phoenix":"Arizona (MST)","America/Los_Angeles":"Pacific (PT)","America/Anchorage":"Alaska (AKT)","Pacific/Honolulu":"Hawaii (HT)"};
@@ -2119,19 +2118,15 @@ function SetupWizard({user, onComplete}){
     {title:"Your Profile",icon:"👤"},
     {title:"How It Works",icon:"📄"},
     {title:"Template Prep",icon:"🔧"},
-    {title:"Training",icon:"🎓"},
     {title:"Subscription",icon:"⭐"},
     {title:"You're Ready",icon:"🚀"},
   ];
 
   const allTemplateRead=readSections.parsing&&readSections.cleanDoc&&readSections.notes&&readSections.photos&&readSections.singlePage;
-  const trainReqKeys=["getting-started","creating-reports","voice","photos","exporting","managing","calendar","settings"];
-  const allTrainDone=trainReqKeys.every(k=>trainGuidesDone[k]);
 
   const canAdvance=()=>{
     if(step===1)return fullName.trim().length>0&&slug.trim().length>0;
     if(step===3)return allTemplateRead;
-    if(step===4)return allTrainDone;
     return true;
   };
 
@@ -2147,7 +2142,6 @@ function SetupWizard({user, onComplete}){
         slug:slugVal,
         setup_complete:true,
         wizard_completed_at:new Date().toISOString(),
-        training_completed_at:new Date().toISOString(),
       });
       onComplete();
     }catch(e){
@@ -2199,7 +2193,7 @@ function SetupWizard({user, onComplete}){
               </div>
             </div>
             <div style={tipS}>
-              <strong style={{color:C.org}}>Important:</strong> You must complete all steps in this wizard and review the training materials before you can access the dashboard. This ensures you get the most out of your reports from day one.
+              <strong style={{color:C.org}}>Important:</strong> You must complete all steps in this wizard before you can access the dashboard. This ensures you get the most out of your reports from day one.
             </div>
           </div>
         )}
@@ -2325,13 +2319,14 @@ function SetupWizard({user, onComplete}){
                 </div>
               )},
             ].map(section=>{
-              const isOpen=readSections[section.key];
+              const wasRead=readSections[section.key];
+              const isOpen=openSections[section.key];
               return(
-                <div key={section.key} style={{background:C.card,border:`1px solid ${isOpen?C.org+"60":C.brd}`,borderRadius:12,marginBottom:10,overflow:"hidden"}}>
-                  <button onClick={()=>markRead(section.key)} style={{width:"100%",display:"flex",alignItems:"center",gap:10,padding:"14px 16px",background:"none",border:"none",cursor:"pointer",textAlign:"left"}}>
+                <div key={section.key} style={{background:C.card,border:`1px solid ${wasRead?C.org+"60":C.brd}`,borderRadius:12,marginBottom:10,overflow:"hidden"}}>
+                  <button onClick={()=>toggleSection(section.key)} style={{width:"100%",display:"flex",alignItems:"center",gap:10,padding:"14px 16px",background:"none",border:"none",cursor:"pointer",textAlign:"left"}}>
                     <span style={{fontSize:18}}>{section.icon}</span>
                     <span style={{flex:1,fontSize:14,fontWeight:700,color:C.txt}}>{section.title}</span>
-                    {isOpen?<span style={{color:C.ok,fontSize:14,fontWeight:700}}>✓</span>:<span style={{color:C.mut,fontSize:12}}>Tap to read</span>}
+                    {wasRead&&!isOpen?<span style={{color:C.ok,fontSize:14,fontWeight:700}}>✓</span>:isOpen?<span style={{color:C.mut,fontSize:14,transform:"rotate(180deg)",display:"inline-block"}}>▼</span>:<span style={{color:C.mut,fontSize:12}}>Tap to read</span>}
                   </button>
                   {isOpen&&(
                     <div style={{padding:"0 16px 16px",borderTop:`1px solid ${C.brd}`}}>
@@ -2350,48 +2345,8 @@ function SetupWizard({user, onComplete}){
           </div>
         )}
 
-        {/* ── Step 4: Training ── */}
+        {/* ── Step 4: Subscription ── */}
         {step===4&&(
-          <div>
-            <h2 style={{fontSize:20,fontWeight:700,marginBottom:4}}>🎓 Training</h2>
-            <p style={{fontSize:14,color:C.mut,marginBottom:6}}>Review each training topic below. You can revisit these anytime from the Training Center on the dashboard.</p>
-            <p style={{fontSize:12,color:C.org,fontWeight:600,marginBottom:20}}>Mark all {trainReqKeys.length} topics as reviewed to continue.</p>
-
-            {[
-              {key:"getting-started",icon:"🚀",title:"Getting Started",desc:"Learn the basics — sign in, dashboard, creating jobs"},
-              {key:"creating-reports",icon:"📝",title:"Creating Reports",desc:"Start a report, fill fields, save, and submit"},
-              {key:"voice",icon:"🎤",title:"Voice Input",desc:"Dictate notes hands-free using your phone's keyboard mic"},
-              {key:"photos",icon:"📸",title:"Photo Documentation",desc:"Take site photos, add them to reports"},
-              {key:"exporting",icon:"📤",title:"Exporting & Sharing",desc:"PDF generation, download, email to team"},
-              {key:"managing",icon:"💼",title:"Managing Jobs",desc:"Edit, archive, and organize your projects"},
-              {key:"calendar",icon:"📅",title:"Sharing Your Calendar",desc:"Let GCs and subs request site visits"},
-              {key:"settings",icon:"⚙️",title:"Profile & Settings",desc:"Timezone, display name, notifications"},
-            ].map(topic=>{
-              const done=trainGuidesDone[topic.key];
-              return(
-                <div key={topic.key} style={{display:"flex",alignItems:"center",gap:12,padding:"12px 14px",background:C.card,border:`1px solid ${done?C.ok+"40":C.brd}`,borderRadius:10,marginBottom:8,cursor:"pointer"}} onClick={()=>markTrain(topic.key)}>
-                  <span style={{fontSize:20}}>{topic.icon}</span>
-                  <div style={{flex:1}}>
-                    <div style={{fontSize:14,fontWeight:700,color:C.txt}}>{topic.title}</div>
-                    <div style={{fontSize:12,color:C.mut}}>{topic.desc}</div>
-                  </div>
-                  {done?(
-                    <span style={{color:C.ok,fontSize:16,fontWeight:700}}>✓</span>
-                  ):(
-                    <span style={{fontSize:11,color:C.org,fontWeight:600}}>Review</span>
-                  )}
-                </div>
-              );
-            })}
-
-            <div style={tipS}>
-              <strong style={{color:C.org}}>Tip:</strong> These same guides are always available from the Training Center on your dashboard. You can come back to them anytime you need a refresher.
-            </div>
-          </div>
-        )}
-
-        {/* ── Step 5: Subscription ── */}
-        {step===5&&(
           <div>
             <h2 style={{fontSize:20,fontWeight:700,marginBottom:4}}>⭐ Subscription</h2>
             <p style={{fontSize:14,color:C.mut,marginBottom:20}}>Your account and billing status.</p>
@@ -2424,13 +2379,13 @@ function SetupWizard({user, onComplete}){
           </div>
         )}
 
-        {/* ── Step 6: You're Ready ── */}
-        {step===6&&(
+        {/* ── Step 5: You're Ready ── */}
+        {step===5&&(
           <div>
             <div style={{textAlign:"center",padding:"30px 0 20px"}}>
               <div style={{fontSize:56,marginBottom:16}}>🚀</div>
               <h2 style={{fontSize:22,fontWeight:800,marginBottom:8}}>You're All Set!</h2>
-              <p style={{fontSize:15,color:C.lt,lineHeight:1.6,maxWidth:400,margin:"0 auto"}}>Your profile is configured and you've completed the training. You're ready to create your first job and start generating reports.</p>
+              <p style={{fontSize:15,color:C.lt,lineHeight:1.6,maxWidth:400,margin:"0 auto"}}>Your profile is configured and you've reviewed the template prep guidelines. You're ready to create your first job and start generating reports.</p>
             </div>
 
             <div style={cardS}>
@@ -2447,10 +2402,6 @@ function SetupWizard({user, onComplete}){
                 <div style={{display:"flex",gap:10,alignItems:"flex-start"}}>
                   <span style={{color:C.ok,fontWeight:700,flexShrink:0}}>✓</span>
                   <div style={{fontSize:13,color:C.lt}}>Template preparation guidelines reviewed</div>
-                </div>
-                <div style={{display:"flex",gap:10,alignItems:"flex-start"}}>
-                  <span style={{color:C.ok,fontWeight:700,flexShrink:0}}>✓</span>
-                  <div style={{fontSize:13,color:C.lt}}>All training topics completed</div>
                 </div>
               </div>
             </div>
