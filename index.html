@@ -122,6 +122,36 @@ const db = {
     await fetch(`${SB_URL}/rest/v1/profiles?id=eq.${userId}`,{method:"DELETE",headers:this._h()});
     return true;
   },
+  // Save or update a working copy / draft report
+  async saveReport(d){
+    // Check if draft exists for this job+date
+    const chk=await fetch(`${SB_URL}/rest/v1/reports?select=id&job_id=eq.${d.job_id}&report_date=eq.${d.report_date}&status=eq.draft`,{headers:this._h()});
+    const existing=chk.ok?await chk.json():[];
+    if(existing.length>0){
+      // Update existing draft
+      const r=await fetch(`${SB_URL}/rest/v1/reports?id=eq.${existing[0].id}`,{method:"PATCH",headers:this._h(),body:JSON.stringify({...d,updated_at:new Date().toISOString()})});
+      if(!r.ok){const e=await r.json();throw new Error(e.message||"Save failed");}
+      return(await r.json())[0];
+    }else{
+      // Create new draft
+      const r=await fetch(`${SB_URL}/rest/v1/reports`,{method:"POST",headers:this._h(),body:JSON.stringify(d)});
+      if(!r.ok){const e=await r.json();throw new Error(e.message||"Save failed");}
+      return(await r.json())[0];
+    }
+  },
+  // Get draft report for a job + date
+  async getDraft(jobId,date){
+    const r=await fetch(`${SB_URL}/rest/v1/reports?select=*&job_id=eq.${jobId}&report_date=eq.${date}&status=eq.draft&limit=1`,{headers:this._h()});
+    if(!r.ok)return null;
+    const d=await r.json();
+    return d[0]||null;
+  },
+  // Update job field_config
+  async updateJobFieldConfig(jobId,fieldConfig){
+    const r=await fetch(`${SB_URL}/rest/v1/jobs?id=eq.${jobId}`,{method:"PATCH",headers:this._h(),body:JSON.stringify({field_config:fieldConfig})});
+    if(!r.ok)throw new Error("Field config update failed");
+    return(await r.json())[0];
+  },
 };
 
 /* ── Account Settings Page ── */
@@ -654,14 +684,17 @@ function ReportEditor({job, user, onBack}){
   const initEdit=[...(fc.editable||[])];
   const initLock=[...(fc.locked||[])];
   const tz=Intl.DateTimeFormat().resolvedOptions().timeZone;
-  const today=new Date().toLocaleDateString("en-US",{weekday:"long",month:"long",day:"numeric",year:"numeric",timeZone:tz});
+  const todayISO=new Date().toLocaleDateString("en-CA",{timeZone:tz});
+  const todayDisplay=new Date().toLocaleDateString("en-US",{weekday:"long",month:"long",day:"numeric",year:"numeric",timeZone:tz});
 
-  // Mutable field lists — locked fields can be unlocked permanently
+  // Mutable field lists — locked fields can be unlocked/relocked
   const [lockFields,setLockFields]=useState(initLock);
   const [editFields,setEditFields]=useState(initEdit);
   const [showLocked,setShowLocked]=useState(false);
   const [lockEditing,setLockEditing]=useState(false);
   const [lockVals,setLockVals]=useState(()=>{const v={};initLock.forEach(f=>{v[f.name]=f.value||"";});return v;});
+  const [loadingDraft,setLoadingDraft]=useState(true);
+  const [draftId,setDraftId]=useState(null);
 
   // Editable field values
   const [vals,setVals]=useState(()=>{
@@ -678,8 +711,29 @@ function ReportEditor({job, user, onBack}){
 
   // Photo state
   const [photos,setPhotos]=useState([]);
-  const [photoLayout,setPhotoLayout]=useState("2x2"); // "1","2","4"
+  const [photoLayout,setPhotoLayout]=useState("2"); // "1","2","4"
   const photoRef=useRef(null);
+
+  // Load existing draft on mount
+  useEffect(()=>{
+    (async()=>{
+      try{
+        const draft=await db.getDraft(job.id,todayISO);
+        if(draft&&draft.content){
+          const c=typeof draft.content==="string"?JSON.parse(draft.content):draft.content;
+          if(c.vals)setVals(p=>({...p,...c.vals}));
+          if(c.lockVals)setLockVals(p=>({...p,...c.lockVals}));
+          if(c.notes)setNotes(c.notes);
+          if(c.photos)setPhotos(c.photos);
+          if(c.photoLayout)setPhotoLayout(c.photoLayout);
+          if(c.lockFields)setLockFields(c.lockFields);
+          if(c.editFields)setEditFields(c.editFields);
+          setDraftId(draft.id);
+        }
+      }catch(e){console.error("Load draft error:",e);}
+      finally{setLoadingDraft(false);}
+    })();
+  },[]);
 
   const setVal=(name,val)=>setVals(p=>({...p,[name]:val}));
   const setLockVal=(name,val)=>setLockVals(p=>({...p,[name]:val}));
@@ -688,16 +742,46 @@ function ReportEditor({job, user, onBack}){
   const unlockField=(name)=>{
     const f=lockFields.find(x=>x.name===name);
     if(!f)return;
-    setLockFields(p=>p.filter(x=>x.name!==name));
-    setEditFields(p=>[...p,{name:f.name,value:lockVals[name]||f.value||"",voiceEnabled:false}]);
+    const newLock=lockFields.filter(x=>x.name!==name);
+    const newEdit=[...editFields,{name:f.name,value:lockVals[name]||f.value||"",voiceEnabled:false,wasUnlocked:true}];
+    setLockFields(newLock);
+    setEditFields(newEdit);
     setVals(p=>({...p,[name]:lockVals[name]||f.value||""}));
+    // Persist field config change to Supabase
+    db.updateJobFieldConfig(job.id,{locked:newLock,editable:newEdit}).then(()=>{
+      job.field_config={locked:newLock,editable:newEdit};
+    }).catch(e=>console.error("Field config update error:",e));
+  };
+
+  // Re-lock an editable field that was previously unlocked
+  const relockField=(name)=>{
+    const f=editFields.find(x=>x.name===name);
+    if(!f)return;
+    const val=vals[name]||f.value||"";
+    const newEdit=editFields.filter(x=>x.name!==name);
+    const restored={name:f.name,value:val};
+    const newLock=[...lockFields,restored];
+    setEditFields(newEdit);
+    setLockFields(newLock);
+    setLockVals(p=>({...p,[name]:val}));
+    // Remove from editable vals
+    setVals(p=>{const n={...p};delete n[name];return n;});
+    // Persist field config change to Supabase
+    db.updateJobFieldConfig(job.id,{locked:newLock,editable:newEdit}).then(()=>{
+      job.field_config={locked:newLock,editable:newEdit};
+    }).catch(e=>console.error("Field config update error:",e));
   };
 
   // Save locked field value changes back to job config
   const saveLockEdits=()=>{
-    setLockFields(p=>p.map(f=>({...f,value:lockVals[f.name]||f.value})));
+    const updated=lockFields.map(f=>({...f,value:lockVals[f.name]||f.value}));
+    setLockFields(updated);
     setLockEditing(false);
-    // TODO: persist to Supabase job field_config
+    // Persist lock value changes to Supabase
+    const newConfig={locked:updated,editable:editFields};
+    db.updateJobFieldConfig(job.id,newConfig).then(()=>{
+      job.field_config=newConfig;
+    }).catch(e=>console.error("Field config update error:",e));
   };
 
   const handlePhoto=(e)=>{
@@ -707,17 +791,33 @@ function ReportEditor({job, user, onBack}){
       reader.onload=(ev)=>{setPhotos(p=>[...p,{id:Date.now()+Math.random(),src:ev.target.result,name:file.name}]);};
       reader.readAsDataURL(file);
     });
+    // Reset input so same file can be re-selected
+    if(photoRef.current)photoRef.current.value="";
   };
 
   const saveWorking=async()=>{
     setSaving(true);
-    // TODO: save to Supabase reports table
-    setTimeout(()=>{setSaving(false);onBack();},400);
+    try{
+      const content={vals,lockVals,notes,photos,photoLayout,lockFields,editFields};
+      await db.saveReport({
+        job_id:job.id,
+        user_id:user.id,
+        report_date:todayISO,
+        status:"draft",
+        content:JSON.stringify(content),
+        updated_at:new Date().toISOString()
+      });
+      onBack();
+    }catch(e){
+      console.error("Save error:",e);
+      alert("Save failed: "+e.message);
+      setSaving(false);
+    }
   };
 
   const submitReport=async()=>{
     // Generate a simple text summary and trigger download
-    let content="MY DAILY REPORTS\n"+job.name+"\n"+today+"\n\n";
+    let content="MY DAILY REPORTS\n"+job.name+"\n"+todayDisplay+"\n\n";
     content+="=== LOCKED FIELDS ===\n";
     lockFields.forEach(f=>{content+=f.name+": "+(lockVals[f.name]||f.value||"")+"\n";});
     content+="\n=== REPORT FIELDS ===\n";
@@ -733,12 +833,13 @@ function ReportEditor({job, user, onBack}){
     a.download=fn;
     a.click();
     URL.revokeObjectURL(a.href);
-    // Go back after download
     setTimeout(()=>onBack(),500);
   };
 
   const fs={width:"100%",padding:"12px 14px",background:C.inp,border:`1px solid ${C.brd}`,borderRadius:10,color:C.txt,fontSize:15};
   const layouts=[{k:"1",l:"1 per page"},{k:"2",l:"2 side-by-side"},{k:"4",l:"4 per page"}];
+
+  if(loadingDraft)return(<div style={{minHeight:"100vh",background:C.bg,display:"flex",alignItems:"center",justifyContent:"center"}}><p style={{color:C.mut}}>Loading report...</p></div>);
 
   return(
     <div style={{minHeight:"100vh",background:C.bg,color:C.txt}}>
@@ -753,7 +854,7 @@ function ReportEditor({job, user, onBack}){
       </div>
 
       <div style={{maxWidth:600,margin:"0 auto",padding:"20px"}}>
-        <div style={{fontSize:14,color:C.mut,marginBottom:6,textAlign:"center"}}>{today}</div>
+        <div style={{fontSize:14,color:C.mut,marginBottom:6,textAlign:"center"}}>{todayDisplay}</div>
         <div style={{fontSize:11,color:C.mut,textAlign:"center",marginBottom:20}}>Editable until midnight • {tz.split("/").pop().replace(/_/g," ")}</div>
 
         {/* ── Locked Fields (collapsible) ── */}
@@ -804,9 +905,14 @@ function ReportEditor({job, user, onBack}){
                 <div key={f.name} style={{marginBottom:14}}>
                   <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:6}}>
                     <label style={{fontSize:13,fontWeight:600,color:C.lt}}>{f.name}</label>
-                    {f.autoFill==="date"&&<span style={{fontSize:10,fontWeight:700,color:C.blu,background:C.blu+"22",padding:"2px 8px",borderRadius:4}}>AUTO-DATE</span>}
-                    {f.autoFill==="increment"&&<span style={{fontSize:10,fontWeight:700,color:C.blu,background:C.blu+"22",padding:"2px 8px",borderRadius:4}}>AUTO-#</span>}
-                    {f.voiceEnabled&&<span style={{fontSize:10,fontWeight:700,color:C.org,background:C.org+"22",padding:"2px 8px",borderRadius:4}}>VOICE</span>}
+                    <div style={{display:"flex",gap:4,alignItems:"center"}}>
+                      {f.autoFill==="date"&&<span style={{fontSize:10,fontWeight:700,color:C.blu,background:C.blu+"22",padding:"2px 8px",borderRadius:4}}>AUTO-DATE</span>}
+                      {f.autoFill==="increment"&&<span style={{fontSize:10,fontWeight:700,color:C.blu,background:C.blu+"22",padding:"2px 8px",borderRadius:4}}>AUTO-#</span>}
+                      {f.voiceEnabled&&<span style={{fontSize:10,fontWeight:700,color:C.org,background:C.org+"22",padding:"2px 8px",borderRadius:4}}>VOICE</span>}
+                      {f.wasUnlocked&&(
+                        <button onClick={()=>relockField(f.name)} title="Re-lock this field" style={{padding:"2px 8px",fontSize:10,fontWeight:700,borderRadius:4,border:`1px solid ${C.brd}`,background:"transparent",color:C.mut,cursor:"pointer"}}>🔒 Lock</button>
+                      )}
+                    </div>
                   </div>
                   {f.voiceEnabled?(
                     <textarea value={vals[f.name]||""} onChange={e=>setVal(f.name,e.target.value)} placeholder="Tap here and use your keyboard mic to dictate..." rows={4} style={{...fs,resize:"vertical",minHeight:80,lineHeight:1.5}}/>
@@ -857,15 +963,10 @@ function ReportEditor({job, user, onBack}){
             </div>
           )}
 
-          {/* Add photo buttons */}
-          <div style={{display:"flex",gap:10}}>
-            <button onClick={()=>{photoRef.current.setAttribute("capture","environment");photoRef.current.click();}} style={{flex:1,padding:"12px 0",background:C.card,border:`1px solid ${C.brd}`,borderRadius:10,color:C.lt,fontSize:14,fontWeight:600,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",gap:8}}>
-              <span>📷</span> Camera
-            </button>
-            <button onClick={()=>{photoRef.current.removeAttribute("capture");photoRef.current.click();}} style={{flex:1,padding:"12px 0",background:C.card,border:`1px solid ${C.brd}`,borderRadius:10,color:C.lt,fontSize:14,fontWeight:600,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",gap:8}}>
-              <span>🖼️</span> Photo Album
-            </button>
-          </div>
+          {/* Single photo button — iOS shows Take Photo / Photo Library / Choose File natively */}
+          <button onClick={()=>photoRef.current.click()} style={{width:"100%",padding:"14px 0",background:C.card,border:`1px solid ${C.brd}`,borderRadius:10,color:C.lt,fontSize:14,fontWeight:600,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",gap:8}}>
+            <span>📷</span> Add Photos
+          </button>
           <input ref={photoRef} type="file" accept="image/*" multiple onChange={handlePhoto} style={{display:"none"}}/>
           <div style={{fontSize:11,color:C.mut,marginTop:8}}>Photos will display as {layouts.find(l=>l.k===photoLayout)?.l} in the final PDF</div>
         </div>
@@ -901,17 +1002,17 @@ function JobDetail({job, user, onBack, onDeleted}){
   const [editAddr,setEditAddr]=useState(job.site_address||"");
   const [editSaving,setEditSaving]=useState(false);
 
-  useEffect(()=>{
-    (async()=>{
-      try{
-        const r=await fetch(`${SB_URL}/rest/v1/reports?select=*&job_id=eq.${job.id}&order=report_date.desc`,{headers:db._h()});
-        if(r.ok)setRpts(await r.json());
-        const ir=await fetch(`${SB_URL}/rest/v1/inspections?select=id,date,type,status&job_id=eq.${job.id}&order=date.asc`,{headers:db._h()});
-        if(ir.ok){const d=await ir.json();setInspections(d);}
-      }catch(e){console.error(e);}
-      finally{setLoading(false);}
-    })();
+  const loadReports=useCallback(async()=>{
+    try{
+      const r=await fetch(`${SB_URL}/rest/v1/reports?select=*&job_id=eq.${job.id}&order=report_date.desc`,{headers:db._h()});
+      if(r.ok)setRpts(await r.json());
+      const ir=await fetch(`${SB_URL}/rest/v1/inspections?select=id,date,type,status&job_id=eq.${job.id}&order=date.asc`,{headers:db._h()});
+      if(ir.ok){const d=await ir.json();setInspections(d);}
+    }catch(e){console.error(e);}
+    finally{setLoading(false);}
   },[job.id]);
+
+  useEffect(()=>{loadReports();},[loadReports]);
 
   const tz=Intl.DateTimeFormat().resolvedOptions().timeZone;
   const today=new Date().toLocaleDateString("en-CA",{timeZone:tz});
@@ -945,6 +1046,7 @@ function JobDetail({job, user, onBack, onDeleted}){
   };
 
   const openReport=()=>{setReportStarted(true);setShowReport(true);};
+  const closeReport=()=>{setShowReport(false);setLoading(true);loadReports();};
 
   const fs={width:"100%",padding:"12px 14px",background:C.inp,border:`1px solid ${C.brd}`,borderRadius:10,color:C.txt,fontSize:15};
   const ls={display:"block",color:C.lt,fontSize:13,fontWeight:600,marginBottom:6};
@@ -962,7 +1064,7 @@ function JobDetail({job, user, onBack, onDeleted}){
     </div>
   );
 
-  if(showReport)return<ReportEditor job={job} user={user} onBack={()=>setShowReport(false)}/>;
+  if(showReport)return<ReportEditor job={job} user={user} onBack={closeReport}/>;
 
   if(loading)return(<div style={{minHeight:"100vh",background:C.bg,display:"flex",alignItems:"center",justifyContent:"center"}}><p style={{color:C.mut}}>Loading...</p></div>);
 
