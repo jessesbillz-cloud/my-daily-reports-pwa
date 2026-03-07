@@ -648,6 +648,146 @@ function ArchivedJobs({jobs, onBack, onSelect}){
   );
 }
 
+/* ── Report Editor ── */
+function ReportEditor({job, user, onBack}){
+  const fc=job.field_config||{editable:[],locked:[]};
+  const editFields=[...fc.editable||[]];
+  const lockFields=[...fc.locked||[]];
+  const tz=Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const today=new Date().toLocaleDateString("en-US",{weekday:"long",month:"long",day:"numeric",year:"numeric",timeZone:tz});
+
+  // Field values state — init from job config defaults
+  const [vals,setVals]=useState(()=>{
+    const v={};
+    editFields.forEach(f=>{
+      if(f.autoFill==="date")v[f.name]=new Date().toLocaleDateString("en-US",{timeZone:tz});
+      else if(f.autoFill==="increment")v[f.name]="";
+      else v[f.name]=f.value||"";
+    });
+    return v;
+  });
+  const [notes,setNotes]=useState("");
+  const [saving,setSaving]=useState(false);
+  const [saved,setSaved]=useState(false);
+
+  const setVal=(name,val)=>setVals(p=>({...p,[name]:val}));
+
+  const saveWorking=async()=>{
+    setSaving(true);
+    // TODO: save to Supabase reports table
+    setTimeout(()=>{setSaving(false);setSaved(true);setTimeout(()=>setSaved(false),2000);},500);
+  };
+
+  const fs={width:"100%",padding:"12px 14px",background:C.inp,border:`1px solid ${C.brd}`,borderRadius:10,color:C.txt,fontSize:15};
+
+  return(
+    <div style={{minHeight:"100vh",background:C.bg,color:C.txt}}>
+      {/* Header */}
+      <div style={{display:"flex",alignItems:"center",gap:12,padding:"16px 20px",borderBottom:`1px solid ${C.brd}`,background:C.card}}>
+        <button onClick={onBack} style={{background:"none",border:"none",color:C.mut,fontSize:22,cursor:"pointer",padding:0,lineHeight:1}}>←</button>
+        <MDRLogo size={28}/>
+        <div style={{flex:1}}>
+          <div style={{fontWeight:700,fontSize:17}}>Today's Report</div>
+          <div style={{fontSize:12,color:C.mut}}>{job.name}</div>
+        </div>
+        <button onClick={saveWorking} disabled={saving} style={{padding:"8px 16px",background:saved?C.ok:C.blu,border:"none",borderRadius:8,color:"#fff",fontSize:13,fontWeight:700,cursor:saving?"default":"pointer",opacity:saving?0.6:1}}>
+          {saving?"Saving...":saved?"Saved":"Save"}
+        </button>
+      </div>
+
+      <div style={{maxWidth:600,margin:"0 auto",padding:"20px"}}>
+        {/* Date */}
+        <div style={{fontSize:14,color:C.mut,marginBottom:16,textAlign:"center"}}>{today}</div>
+        <div style={{fontSize:11,color:C.mut,textAlign:"center",marginBottom:20}}>Editable until midnight • {tz.split("/").pop().replace(/_/g," ")}</div>
+
+        {/* Locked fields display */}
+        {lockFields.length>0&&(
+          <div style={{marginBottom:20}}>
+            <div style={{fontSize:12,fontWeight:700,color:C.mut,textTransform:"uppercase",letterSpacing:1,marginBottom:10}}>Locked Fields</div>
+            <div style={{background:C.card,border:`1px solid ${C.brd}`,borderRadius:12,padding:"12px 16px"}}>
+              {lockFields.map((f,i)=>(
+                <div key={f.name} style={{display:"flex",justifyContent:"space-between",padding:"8px 0",borderBottom:i<lockFields.length-1?`1px solid ${C.brd}`:"none"}}>
+                  <span style={{fontSize:13,color:C.mut}}>{f.name}</span>
+                  <span style={{fontSize:13,fontWeight:600,color:C.lt}}>{f.value||"—"}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Editable fields */}
+        {editFields.length>0&&(
+          <div style={{marginBottom:20}}>
+            <div style={{fontSize:12,fontWeight:700,color:C.org,textTransform:"uppercase",letterSpacing:1,marginBottom:10}}>Fill In Today</div>
+            {editFields.map(f=>{
+              const isAuto=f.autoFill==="date"||f.autoFill==="increment";
+              return(
+                <div key={f.name} style={{marginBottom:14}}>
+                  <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:6}}>
+                    <label style={{fontSize:13,fontWeight:600,color:C.lt}}>{f.name}</label>
+                    {f.autoFill==="date"&&<span style={{fontSize:10,fontWeight:700,color:C.blu,background:C.blu+"22",padding:"2px 8px",borderRadius:4}}>AUTO-DATE</span>}
+                    {f.autoFill==="increment"&&<span style={{fontSize:10,fontWeight:700,color:C.blu,background:C.blu+"22",padding:"2px 8px",borderRadius:4}}>AUTO-#</span>}
+                    {f.voiceEnabled&&<span style={{fontSize:10,fontWeight:700,color:C.org,background:C.org+"22",padding:"2px 8px",borderRadius:4}}>VOICE</span>}
+                  </div>
+                  {f.voiceEnabled?(
+                    <textarea
+                      value={vals[f.name]||""}
+                      onChange={e=>setVal(f.name,e.target.value)}
+                      placeholder="Tap into this field and use your keyboard mic to dictate..."
+                      rows={4}
+                      style={{...fs,resize:"vertical",minHeight:80,lineHeight:1.5}}
+                    />
+                  ):(
+                    <input
+                      type="text"
+                      value={vals[f.name]||""}
+                      onChange={e=>setVal(f.name,e.target.value)}
+                      readOnly={isAuto}
+                      placeholder={isAuto?"Auto-filled":"Enter value..."}
+                      style={{...fs,opacity:isAuto?0.6:1,cursor:isAuto?"default":"text"}}
+                    />
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {editFields.length===0&&lockFields.length===0&&(
+          <div style={{textAlign:"center",padding:"40px 20px",color:C.mut}}>
+            <div style={{fontSize:36,marginBottom:12}}>📋</div>
+            <p style={{fontSize:15,fontWeight:600,color:C.lt,marginBottom:6}}>No template fields configured</p>
+            <p style={{fontSize:13}}>Go back and upload a template in your job settings to get started with field-based reporting.</p>
+          </div>
+        )}
+
+        {/* Notes section — always available */}
+        <div style={{marginBottom:20}}>
+          <div style={{fontSize:12,fontWeight:700,color:C.org,textTransform:"uppercase",letterSpacing:1,marginBottom:10}}>Notes</div>
+          <textarea
+            value={notes}
+            onChange={e=>setNotes(e.target.value)}
+            placeholder="Tap here and use your keyboard mic to dictate notes throughout the day..."
+            rows={6}
+            style={{...fs,resize:"vertical",minHeight:120,lineHeight:1.6}}
+          />
+          <div style={{fontSize:11,color:C.mut,marginTop:6}}>Use your phone's keyboard microphone to dictate hands-free</div>
+        </div>
+
+        {/* Action buttons */}
+        <div style={{display:"flex",gap:10,marginBottom:20}}>
+          <button onClick={saveWorking} disabled={saving} className="btn-o" style={{flex:1,padding:"14px 0",background:C.blu,border:"none",borderRadius:10,color:"#fff",fontSize:15,fontWeight:700,cursor:"pointer"}}>
+            {saving?"Saving...":"Save Working Copy"}
+          </button>
+          <button onClick={()=>alert("Submit flow coming next — generates PDF, download or email")} className="btn-o" style={{flex:1,padding:"14px 0",background:C.org,border:`1px solid ${C.blu}`,borderRadius:10,color:"#fff",fontSize:15,fontWeight:700,cursor:"pointer"}}>
+            Submit Report
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* ── Job Detail (Job Dashboard) ── */
 function JobDetail({job, user, onBack, onDeleted}){
   const [showDel,setShowDel]=useState(false);
@@ -659,6 +799,7 @@ function JobDetail({job, user, onBack, onDeleted}){
   const [showWorking,setShowWorking]=useState(false);
   const [showPhotos,setShowPhotos]=useState(false);
   const [showEditJob,setShowEditJob]=useState(false);
+  const [showReport,setShowReport]=useState(false);
   const [inspections,setInspections]=useState([]);
   const [editName,setEditName]=useState(job.name||"");
   const [editAddr,setEditAddr]=useState(job.site_address||"");
@@ -687,6 +828,9 @@ function JobDetail({job, user, onBack, onDeleted}){
   const weekOut=new Date(Date.now()+7*86400000).toISOString().split("T")[0];
   const upcoming=inspections.filter(i=>i.date>=today&&i.date<=weekOut);
 
+  // Track if user has started today's report this session
+  const [reportStarted,setReportStarted]=useState(false);
+
   const doDelete=async()=>{
     setDeleting(true);
     try{await db.deleteJob(job.id);onDeleted();}
@@ -704,7 +848,7 @@ function JobDetail({job, user, onBack, onDeleted}){
     finally{setEditSaving(false);}
   };
 
-  const startReport=()=>{alert("Report fill/edit screen coming next — DR#"+nextNum);};
+  const openReport=()=>{setReportStarted(true);setShowReport(true);};
 
   const fs={width:"100%",padding:"12px 14px",background:C.inp,border:`1px solid ${C.brd}`,borderRadius:10,color:C.txt,fontSize:15};
   const ls={display:"block",color:C.lt,fontSize:13,fontWeight:600,marginBottom:6};
@@ -721,6 +865,8 @@ function JobDetail({job, user, onBack, onDeleted}){
       {open&&<div style={{background:C.card,border:`1px solid ${C.brd}`,borderTop:"none",borderRadius:"0 0 12px 12px",padding:"4px 16px 12px"}}>{children}</div>}
     </div>
   );
+
+  if(showReport)return<ReportEditor job={job} user={user} onBack={()=>setShowReport(false)}/>;
 
   if(loading)return(<div style={{minHeight:"100vh",background:C.bg,display:"flex",alignItems:"center",justifyContent:"center"}}><p style={{color:C.mut}}>Loading...</p></div>);
 
@@ -757,13 +903,17 @@ function JobDetail({job, user, onBack, onDeleted}){
             )}
           </div>
           {todayRpt?(
-            <button onClick={startReport} className="btn-o" style={{width:"100%",padding:"14px 0",background:todayRpt.status==="submitted"?"transparent":C.org,border:`1px solid ${todayRpt.status==="submitted"?C.brd:C.blu}`,borderRadius:10,color:todayRpt.status==="submitted"?C.lt:"#fff",fontSize:16,fontWeight:700,cursor:"pointer"}}>
-              {todayRpt.status==="submitted"?"View Submitted Report":"Continue Report"}
+            <button onClick={openReport} className="btn-o" style={{width:"100%",padding:"14px 0",background:todayRpt.status==="submitted"?"transparent":C.blu,border:`1px solid ${todayRpt.status==="submitted"?C.brd:C.blu}`,borderRadius:10,color:todayRpt.status==="submitted"?C.lt:"#fff",fontSize:16,fontWeight:700,cursor:"pointer"}}>
+              {todayRpt.status==="submitted"?"View Submitted Report":"Continue Editing"}
+            </button>
+          ):reportStarted?(
+            <button onClick={openReport} className="btn-o" style={{width:"100%",padding:"14px 0",background:C.blu,border:`1px solid ${C.blu}`,borderRadius:10,color:"#fff",fontSize:16,fontWeight:700,cursor:"pointer"}}>
+              Continue Editing
             </button>
           ):(
             <div>
-              <button onClick={startReport} className="btn-o" style={{width:"100%",padding:"14px 0",background:C.org,border:`1px solid ${C.blu}`,borderRadius:10,color:"#fff",fontSize:16,fontWeight:700,cursor:"pointer"}}>
-                Start Today's Report — DR#{nextNum}
+              <button onClick={openReport} className="btn-o" style={{width:"100%",padding:"14px 0",background:C.org,border:`1px solid ${C.blu}`,borderRadius:10,color:"#fff",fontSize:16,fontWeight:700,cursor:"pointer"}}>
+                Start Today's Report
               </button>
               <div style={{fontSize:11,color:C.mut,textAlign:"center",marginTop:8}}>Editable until midnight • {tz.split("/").pop().replace(/_/g," ")}</div>
             </div>
@@ -813,7 +963,7 @@ function JobDetail({job, user, onBack, onDeleted}){
             <div style={{textAlign:"center",padding:"16px 0",color:C.mut,fontSize:13}}>No drafts in progress</div>
           ):(
             working.map((r,i)=>(
-              <button key={r.id} onClick={startReport} style={{width:"100%",display:"flex",alignItems:"center",gap:12,padding:"12px 4px",background:"none",border:"none",borderBottom:i<working.length-1?`1px solid ${C.brd}`:"none",cursor:"pointer",textAlign:"left"}}>
+              <button key={r.id} onClick={openReport} style={{width:"100%",display:"flex",alignItems:"center",gap:12,padding:"12px 4px",background:"none",border:"none",borderBottom:i<working.length-1?`1px solid ${C.brd}`:"none",cursor:"pointer",textAlign:"left"}}>
                 <div style={{width:10,height:10,borderRadius:"50%",background:C.org,flexShrink:0}}/>
                 <div style={{flex:1}}>
                   <div style={{fontSize:14,fontWeight:600,color:C.lt}}>DR#{r.report_number||"?"} — {new Date(r.report_date+"T12:00:00").toLocaleDateString("en-US",{weekday:"short",month:"short",day:"numeric",timeZone:tz})}</div>
