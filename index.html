@@ -95,18 +95,25 @@ const db = {
   },
   async getProfile(userId){const r=await fetch(`${SB_URL}/rest/v1/profiles?id=eq.${userId}&select=*`,{headers:this._h()});if(!r.ok)return null;const d=await r.json();return d[0]||null;},
   async upsertProfile(d){
-    let r=await fetch(`${SB_URL}/rest/v1/profiles`,{method:"POST",headers:{...this._h(),Prefer:"return=representation,resolution=merge-duplicates"},body:JSON.stringify(d)});
-    if(!r.ok){
-      const err=await r.json().catch(()=>({}));
-      const msg=err.message||"";
-      // If a column doesn't exist, retry with only id + full_name + slug
-      if(msg.includes("schema cache")||msg.includes("column")){
-        const safe={id:d.id};if(d.full_name)safe.full_name=d.full_name;if(d.slug)safe.slug=d.slug;
-        r=await fetch(`${SB_URL}/rest/v1/profiles`,{method:"POST",headers:{...this._h(),Prefer:"return=representation,resolution=merge-duplicates"},body:JSON.stringify(safe)});
-        if(!r.ok){const e2=await r.json().catch(()=>({}));throw new Error(e2.message||"Profile save failed");}
-      }else{throw new Error(msg||"Profile save failed");}
+    // Try PATCH first (update existing), fall back to POST (insert new)
+    const id=d.id;const payload={...d};delete payload.id;
+    let r=await fetch(`${SB_URL}/rest/v1/profiles?id=eq.${id}`,{method:"PATCH",headers:this._h(),body:JSON.stringify(payload)});
+    if(r.ok){const txt=await r.text();try{const arr=JSON.parse(txt);if(arr&&arr.length>0)return arr[0];}catch(_){}}
+    // If PATCH returned empty (no row existed), do POST insert
+    if(r.ok){
+      r=await fetch(`${SB_URL}/rest/v1/profiles`,{method:"POST",headers:this._h(),body:JSON.stringify(d)});
+      if(r.ok){const txt=await r.text();try{return JSON.parse(txt)[0];}catch(_){return null;}}
     }
-    const txt=await r.text();try{return JSON.parse(txt)[0];}catch(_){return null;}
+    // Handle errors — if column doesn't exist, retry with safe columns only
+    const err=await r.json().catch(()=>({}));const msg=err.message||"";
+    if(msg.includes("schema cache")||msg.includes("column")){
+      const safe={id};if(d.full_name)safe.full_name=d.full_name;if(d.slug)safe.slug=d.slug;
+      r=await fetch(`${SB_URL}/rest/v1/profiles?id=eq.${id}`,{method:"PATCH",headers:this._h(),body:JSON.stringify({full_name:safe.full_name,slug:safe.slug})});
+      if(!r.ok){r=await fetch(`${SB_URL}/rest/v1/profiles`,{method:"POST",headers:this._h(),body:JSON.stringify(safe)});}
+      if(r.ok){const txt=await r.text();try{return JSON.parse(txt)[0];}catch(_){return null;}}
+      const e2=await r.json().catch(()=>({}));throw new Error(e2.message||"Profile save failed");
+    }
+    throw new Error(msg||"Profile save failed");
   },
   async deleteJob(jobId){
     // Delete related templates, reports, then the job itself
