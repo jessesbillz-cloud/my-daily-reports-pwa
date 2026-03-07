@@ -1000,14 +1000,48 @@ function ReportEditor({job, user, onBack, reportDate}){
       baseName=baseName.replace(/\d{8}/, tzDate);
       const pdfFilename=baseName+".pdf";
 
-      // ── 7. Render the actual filled PDF with pdf.js for a true WYSIWYG preview ──
+      // ── 7. Build true WYSIWYG preview ──
+      // Hybrid approach: render original template with pdf.js (preserves all visuals),
+      // then draw field values directly on canvas. Photo pages come from the filled PDF.
+      const originalPageCount=pages.length; // template pages before photos were added
       let previewPages=[];
       if(window.pdfjsLib){
         try{
-          const filledCopy=filledPdfBytes.slice(0);
-          const pjDoc=await window.pdfjsLib.getDocument({data:filledCopy}).promise;
-          for(let pi=1;pi<=pjDoc.numPages;pi++){
-            const pg=await pjDoc.getPage(pi);
+          // Step A: render original template pages and draw field values on canvas
+          const tplDoc=await window.pdfjsLib.getDocument({data:tplBytesCopy}).promise;
+          for(let pi=1;pi<=tplDoc.numPages;pi++){
+            const pg=await tplDoc.getPage(pi);
+            const scale=2;
+            const vp=pg.getViewport({scale});
+            const cvs=document.createElement("canvas");cvs.width=vp.width;cvs.height=vp.height;
+            const ctx=cvs.getContext("2d");
+            await pg.render({canvasContext:ctx,viewport:vp}).promise;
+            // Draw field values at their coordinates on this page
+            const pageH=pg.getViewport({scale:1}).height;
+            allFields.filter(f=>(f.page||1)===pi&&f.val&&f.x&&f.y).forEach(f=>{
+              const sz=(f.fontSize||10)*scale;
+              ctx.font=sz+"px Helvetica, Arial, sans-serif";
+              ctx.fillStyle="#000000";
+              const drawX=f.x*scale;
+              // pdf-lib uses bottom-up Y, pdf.js canvas uses top-down
+              const drawY=f.y*scale+sz;
+              if(f.multiline&&f.w){
+                const maxW=f.w*scale;
+                const words=f.val.split(" ");let lines=[];let line="";
+                words.forEach(w=>{const test=line?line+" "+w:w;if(ctx.measureText(test).width>maxW&&line){lines.push(line);line=w;}else line=test;});
+                if(line)lines.push(line);
+                lines.forEach((ln,li)=>{ctx.fillText(ln,drawX,drawY+(li*sz*1.2));});
+              }else{
+                ctx.fillText(String(f.val),drawX,drawY);
+              }
+            });
+            previewPages.push(cvs.toDataURL("image/jpeg",0.92));
+            cvs.width=0;cvs.height=0;
+          }
+          // Step B: render photo pages from the filled PDF (pages after original template)
+          const filledDoc=await window.pdfjsLib.getDocument({data:filledPdfBytes.slice(0)}).promise;
+          for(let pi=originalPageCount+1;pi<=filledDoc.numPages;pi++){
+            const pg=await filledDoc.getPage(pi);
             const vp=pg.getViewport({scale:2});
             const cvs=document.createElement("canvas");cvs.width=vp.width;cvs.height=vp.height;
             await pg.render({canvasContext:cvs.getContext("2d"),viewport:vp}).promise;
