@@ -2282,10 +2282,26 @@ function SetupWizard({user, onComplete}){
   const saveProfileAndFinish=async()=>{
     setSaving(true);
     try{
-      const slugVal=slug.trim()||fullName.trim().toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/(^-|-$)/g,"");
-      // Save core profile fields first (columns we know exist)
-      await db.upsertProfile({id:user.id,full_name:fullName.trim(),timezone,slug:slugVal});
-      // Try adding setup_complete flag — column may not exist yet
+      let baseSlug=slug.trim()||fullName.trim().toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/(^-|-$)/g,"");
+      let slugVal=baseSlug;
+      let attempt=0;
+      // Try saving — if slug conflict, append -2, -3, etc.
+      while(true){
+        try{
+          await db.upsertProfile({id:user.id,full_name:fullName.trim(),timezone,slug:slugVal});
+          break;
+        }catch(e){
+          const msg=(e.message||"").toLowerCase();
+          if(msg.includes("slug")&&(msg.includes("unique")||msg.includes("duplicate"))){
+            attempt++;
+            slugVal=baseSlug+"-"+(attempt+1);
+            if(attempt>20)throw new Error("Could not generate a unique URL. Try a different display name.");
+          }else{
+            throw e;
+          }
+        }
+      }
+      setSlug(slugVal);
       try{await db.upsertProfile({id:user.id,setup_complete:true,wizard_completed_at:new Date().toISOString()});}catch(_){}
       onComplete();
     }catch(e){alert("Error saving profile: "+e.message);}
