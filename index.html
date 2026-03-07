@@ -120,7 +120,7 @@ function CreateJob({user, onBack, onCreated}){
       }
       const resp=await fetch("https://wluvkmpncafugdbunlkw.supabase.co/functions/v1/parse-template",{
         method:"POST",
-        headers:{"Content-Type":"application/json"},
+        headers:{"Content-Type":"application/json","Authorization":"Bearer "+SB_KEY,"apikey":SB_KEY},
         body:JSON.stringify(payload)
       });
       const parsed=await resp.json();
