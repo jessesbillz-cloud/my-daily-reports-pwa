@@ -1,457 +1,292 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Inspection Request</title>
-<style>
-*{box-sizing:border-box;margin:0;padding:0;}
-body{font-family:-apple-system,sans-serif;max-width:500px;margin:0 auto;padding:12px;background:#111;}
-.header{display:flex;align-items:center;gap:12px;margin-bottom:12px;}
-.header img{width:45px;height:45px;border-radius:6px;}
-.header h2{font-size:18px;margin-bottom:2px;color:#fff;}
-.header p{color:#888;font-size:13px;}
-.tabs{display:flex;border-bottom:2px solid #333;margin-bottom:0;}
-.tab{flex:1;text-align:center;padding:10px;font-size:14px;font-weight:600;cursor:pointer;color:#666;border-bottom:2px solid transparent;margin-bottom:-2px;}
-.tab.active{color:#e8742a;border-bottom-color:#e8742a;}
-.card{background:#1a1a1a;border:1px solid #333;border-radius:8px;overflow:hidden;margin-bottom:12px;}
-.card-top{border-radius:8px 8px 0 0;border-top:none;}
-.cal-nav{display:flex;justify-content:space-between;align-items:center;padding:10px 14px;border-bottom:1px solid #333;}
-.cal-nav button{background:none;border:none;font-size:18px;cursor:pointer;padding:4px 10px;color:#5a8fc0;}
-.cal-nav strong{font-size:15px;color:#5a8fc0;}
-.week-row{display:grid;grid-template-columns:repeat(7,1fr);text-align:center;}
-.week-header{font-size:11px;color:#666;padding:6px 0;font-weight:600;}
-.day-cell{padding:8px 4px;font-size:13px;cursor:pointer;min-height:40px;color:#ccc;}
-.day-cell.selected{background:#1e2a3a;border-radius:6px;}
-.day-detail{padding:12px 14px;border-top:1px solid #333;display:none;}
-.day-detail-header{font-size:16px;font-weight:bold;color:#5a8fc0;margin-bottom:12px;}
-.evt-row{padding:12px;margin-bottom:8px;background:rgba(255,255,255,0.05);border-radius:6px;border-left:3px solid #5a8fc0;font-size:13px;color:#fff;}
-.evt-actions{display:flex;gap:8px;margin-top:8px;}
-.btn-edit,.btn-cancel{padding:5px 12px;border-radius:4px;font-size:11px;font-weight:700;cursor:pointer;background:transparent;text-transform:uppercase;}
-.btn-edit{color:#e8742a;border:1px solid #e8742a;}
-.btn-cancel{color:#c44;border:1px solid #c44;}
-.photo-box{border:2px dashed #444;border-radius:8px;padding:20px 16px;text-align:center;background:#1a1a1a;cursor:pointer;margin-bottom:14px;color:#888;}
-.file-list-container{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:14px;}
-.file-item{position:relative;aspect-ratio:1/1;background:#222;border:1px solid #333;border-radius:6px;overflow:hidden;display:flex;align-items:center;justify-content:center;}
-.file-item img{width:100%;height:100%;object-fit:cover;}
-.file-item .pdf-indicator{text-align:center;color:#5a8fc0;font-size:10px;font-weight:bold;padding:4px;}
-.file-item .remove-btn{position:absolute;top:0;right:0;background:#e8742a;color:#fff;border:none;width:22px;height:22px;font-size:16px;font-weight:bold;cursor:pointer;border-bottom-left-radius:6px;line-height:1;}
-.form-wrap{background:#1a1a1a;border:1px solid #333;border-top:none;border-radius:0 0 8px 8px;padding:16px;display:none;}
-.field-label{display:block;font-weight:bold;font-size:13px;margin-bottom:5px;color:#ccc;}
-.field-input{width:100%;padding:10px;font-size:15px;border:1px solid #444;border-radius:6px;margin-bottom:14px;background:#222;color:#fff;}
-select.field-input{background:#222;color:#fff;}
-.type-btns{display:flex;gap:8px;margin-bottom:14px;}
-.type-btn{flex:1;padding:12px;font-size:14px;font-weight:bold;border:2px solid #444;border-radius:8px;background:#222;cursor:pointer;text-align:center;color:#ccc;}
-.type-btn.active{background:#e8742a;color:#fff;border-color:#5a8fc0;}
-.dur-btns{display:flex;gap:6px;margin-bottom:14px;flex-wrap:wrap;}
-.dur-btn{padding:10px 0;font-size:13px;font-weight:600;border:2px solid #444;border-radius:8px;background:#222;cursor:pointer;text-align:center;color:#ccc;flex:1;min-width:55px;}
-.dur-btn.active{background:#e8742a;color:#fff;border-color:#5a8fc0;}
-.special-sub{display:none;margin-bottom:14px;}
-.special-sub.show{display:block;}
-.email-list{background:#222;border:1px solid #333;border-radius:6px;padding:8px 12px;margin-bottom:16px;}
-.email-row{display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid #333;font-size:13px;color:#ccc;}
-.collapsible-section{border-top:1px solid #333;margin-top:10px;padding:5px 0;}
-.collapsible-summary{padding:10px 0;font-size:13px;color:#5a8fc0;font-weight:600;cursor:pointer;list-style:none;display:flex;justify-content:space-between;align-items:center;}
-.collapsible-summary::-webkit-details-marker{display:none;}
-.collapsible-summary::after{content:'+';font-size:16px;font-weight:bold;}
-details[open] .collapsible-summary::after{content:'−';}
-.submit-btn{width:100%;padding:14px;font-size:15px;font-weight:bold;color:#fff;background:#e8742a;border:none;border-radius:8px;cursor:pointer;margin-top:20px;}
-</style>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
+  <meta name="theme-color" content="#0f0f0f"/>
+  <title>Request an Inspection — My Daily Reports</title>
+  <style>
+    *{margin:0;padding:0;box-sizing:border-box;}
+    body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#0f0f0f;color:#fff;min-height:100vh;-webkit-font-smoothing:antialiased;}
+    button{transition:all 0.2s ease;cursor:pointer;}
+    input,select,textarea{transition:all 0.2s ease;}
+    input:focus,select:focus,textarea:focus{border-color:#e8742a!important;outline:none;}
+  </style>
 </head>
 <body>
-<div style="text-align:center;padding:8px 0;margin-bottom:8px;">
-<a id="backLink" href="#" style="color:#5a8fc0;text-decoration:none;font-size:13px;font-weight:600;border:1px solid #333;padding:6px 14px;border-radius:20px;">&larr; Back to Project List</a>
-</div>
-
-<div class="header">
-    <div style="width:45px;height:45px;border-radius:6px;background:#e8742a;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:18px;color:#fff;">M</div>
-    <div>
-        <h2>Inspection Request</h2>
-        <p id="projectSubtitle">Loading...</p>
-    </div>
-</div>
-
-<div class="tabs" id="tabBar">
-<div class="tab active" onclick="switchTab('calendar')">Calendar</div>
-<div class="tab" onclick="switchTab('request')">New Request</div>
-</div>
-
-<div id="calendarView">
-<div class="card card-top" style="border-radius:0;">
-<div class="cal-nav">
-<button onclick="changeMonth(-1)">&larr;</button>
-<strong id="monthLabel"></strong>
-<button onclick="changeMonth(1)">&rarr;</button>
-</div>
-<div class="week-row" style="padding:0 8px;">
-<div class="week-header">S</div><div class="week-header">M</div><div class="week-header">T</div><div class="week-header">W</div><div class="week-header">T</div><div class="week-header">F</div><div class="week-header">S</div>
-</div>
-<div id="calGrid" class="week-row" style="padding:0 8px;"></div>
-<div class="day-detail" id="dayDetail">
-<div class="day-detail-header" id="dayDetailHeader"></div>
-<div id="dayDetailList"></div>
-</div>
-</div>
-<div class="card">
-<div style="padding:20px;text-align:center;">
-<div style="width:45px;height:45px;border-radius:6px;background:#e8742a;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:18px;color:#fff;margin:0 auto 8px;">M</div>
-<div style="font-size:22px;font-weight:bold;color:#5a8fc0;">My Daily Reports</div>
-<button style="padding:8px 16px;font-size:13px;font-weight:600;color:#fff;background:#e8742a;border:none;border-radius:6px;cursor:pointer;margin-top:10px;" onclick="window.open('https://mydailyreports.org','_blank')">Learn More</button>
-</div>
-</div>
-</div>
-
-<div id="requestView" class="form-wrap">
-<label class="field-label">Photos or PDFs *</label>
-<div class="photo-box" onclick="document.getElementById('photoIn').click()">
-    <div id="photoPrompt">&#128247; Tap to select multiple photos or PDFs</div>
-</div>
-<input type="file" id="photoIn" onchange="handleFileSelection(this)" multiple style="display:none;">
-<div id="filePreviewGrid" class="file-list-container"></div>
-
-<label class="field-label">Inspection Date *</label>
-<input type="date" id="iDate" class="field-input">
-
-<label class="field-label">Inspection Time *</label>
-<select id="iTime" class="field-input">
-<option value="">Select time</option>
-<option value="flexible">Flexible — anytime today</option>
-<option value="05:00">5:00 AM</option><option value="05:30">5:30 AM</option>
-<option value="06:00">6:00 AM</option><option value="06:30">6:30 AM</option>
-<option value="07:00">7:00 AM</option><option value="07:30">7:30 AM</option>
-<option value="08:00">8:00 AM</option><option value="08:30">8:30 AM</option>
-<option value="09:00">9:00 AM</option><option value="09:30">9:30 AM</option>
-<option value="10:00">10:00 AM</option><option value="10:30">10:30 AM</option>
-<option value="11:00">11:00 AM</option><option value="11:30">11:30 AM</option>
-<option value="12:00">12:00 PM</option><option value="12:30">12:30 PM</option>
-<option value="13:00">1:00 PM</option><option value="13:30">1:30 PM</option>
-<option value="14:00">2:00 PM</option><option value="14:30">2:30 PM</option>
-<option value="15:00">3:00 PM</option><option value="15:30">3:30 PM</option>
-<option value="16:00">4:00 PM</option><option value="16:30">4:30 PM</option>
-<option value="17:00">5:00 PM</option>
-</select>
-
-<label class="field-label">Inspection Request # or Summary (Optional)</label>
-<input type="text" id="iIdentifier" class="field-input" placeholder="e.g., FDN-003, SLAB-B2" maxlength="50">
-
-<label class="field-label">Duration *</label>
-<div class="dur-btns" id="durBtns">
-<div class="dur-btn" onclick="setDur('30')">30 min</div>
-<div class="dur-btn" onclick="setDur('60')">1 hr</div>
-<div class="dur-btn" onclick="setDur('120')">2 hr</div>
-<div class="dur-btn" onclick="setDur('240')">4 hr</div>
-<div class="dur-btn" onclick="setDur('480')">All Day</div>
-</div>
-
-<label class="field-label">Inspection Type *</label>
-<div class="type-btns">
-<div class="type-btn" id="btnSpecial" onclick="setType('Special')">Special</div>
-<div class="type-btn" id="btnRegular" onclick="setType('IOR')">IOR</div>
-</div>
-
-<div class="special-sub" id="specialSub">
-<label class="field-label">Special Inspection Type *</label>
-<select class="field-input" id="specialType">
-<option value="">Select type</option>
-<option value="Soils">Soils</option><option value="Material ID">Material ID</option>
-<option value="Material ID CWI">Material ID CWI</option><option value="Concrete">Concrete</option>
-<option value="Bolting">Bolting</option><option value="Pull Test">Pull Test</option>
-<option value="Shotcrete">Shotcrete</option><option value="Fireproofing">Fireproofing</option>
-</select>
-</div>
-
-<label class="field-label">Submitted By *</label>
-<select id="iName" class="field-input">
-<option value="">Select your name</option>
-<option value="other">-- Add name below --</option>
-</select>
-
-<label class="field-label">Notes</label>
-<textarea id="iNotes" class="field-input" rows="3" placeholder="Optional details"></textarea>
-
-<label class="field-label">Send a copy to:</label>
-<div class="email-list" id="emailListContainer"></div>
-
-<details class="collapsible-section">
-    <summary class="collapsible-summary">Additional Email Recipients</summary>
-    <div style="padding-bottom:10px;">
-        <input type="text" id="additionalEmailsList" class="field-input" placeholder="Emails separated by commas">
-    </div>
-</details>
-
-<details class="collapsible-section">
-    <summary class="collapsible-summary">Add a New Person to Dropdown</summary>
-    <div style="padding:16px;background:#2a2a2a;border-radius:8px;border-left:4px solid #5a8fc0;">
-        <div style="color:#5a8fc0;font-weight:600;margin-bottom:8px;">Don't see your name? Add it below:</div>
-        <label class="field-label">Your Name</label>
-        <input type="text" id="iNewName" class="field-input">
-        <label class="field-label">Your Email</label>
-        <input type="email" id="iNewEmail" class="field-input">
-        <label class="field-label">Company/Role</label>
-        <input type="text" id="iNewCompany" class="field-input" placeholder="e.g., (Lusardi), (Testing Lab)">
-        <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:#ccc;cursor:pointer;">
-            <input type="checkbox" id="saveNewPersonCheck"> Save for future use
-        </label>
-    </div>
-</details>
-
-<button onclick="submitIR()" id="submitBtn" class="submit-btn">Submit Inspection Request</button>
-</div>
-
-<div id="successView" style="display:none;text-align:center;padding:60px 20px;color:#fff;">
-<div style="font-size:48px;">&#9989;</div>
-<h2>Request Submitted</h2>
-<button onclick="resetForm()" style="background:none;border:2px solid #5a8fc0;color:#5a8fc0;padding:10px 20px;border-radius:8px;margin-top:20px;cursor:pointer;">Submit Another</button>
-</div>
-
+<div id="app"></div>
 <script>
-var SB='https://wluvkmpncafugdbunlkw.supabase.co';
-var AK='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndsdXZrbXBuY2FmdWdkYnVubGt3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzIzMDU1MTUsImV4cCI6MjA4Nzg4MTUxNX0.HZpQ2xVGpf4EQ0BVDmIEuPqW5T_eNG5OqBNAqT03rH8';
-var params=new URLSearchParams(window.location.search);
-var inspSlug=params.get('i')||'';
-var projParam=params.get('project')||'';
-var jobId=params.get('job_id')||'';
-var PROJ=projParam.replace(/-/g,' ');
+const SB_URL="https://wluvkmpncafugdbunlkw.supabase.co";
+const SB_KEY="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndsdXZrbXBuY2FmdWdkYnVubGt3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzIzMDU1MTUsImV4cCI6MjA4Nzg4MTUxNX0.HZpQ2xVGpf4EQ0BVDmIEuPqW5T_eNG5OqBNAqT03rH8";
+const C={bg:"#0f0f0f",card:"#1a1a1a",brd:"#333",inp:"#222",org:"#e8742a",blu:"#5a8fc0",txt:"#fff",mut:"#888",lt:"#ccc",ok:"#22c55e",err:"#ef4444"};
+const h=(extra={})=>({"Content-Type":"application/json",apikey:SB_KEY,Authorization:"Bearer "+SB_KEY,...extra});
 
-document.getElementById('projectSubtitle').textContent=PROJ;
-document.title=PROJ+' - Inspection Request';
-document.getElementById('backLink').href='hub.html?i='+encodeURIComponent(inspSlug);
-
-var allFiles=[], inspType='', inspDur='', cM=new Date().getMonth(), cY=new Date().getFullYear(), mD={};
-var savedContacts=[];
-
-function handleFileSelection(input){
-    var files=Array.from(input.files);
-    files.forEach(function(file){
-        if(file.size>(file.type==='application/pdf'?25*1024*1024:10*1024*1024)){alert(file.name+" is too large.");return;}
-        allFiles.push(file);
-    });
-    renderFileGrid();input.value='';
-}
-function removeFile(index){allFiles.splice(index,1);renderFileGrid();}
-function renderFileGrid(){
-    var grid=document.getElementById('filePreviewGrid');grid.innerHTML='';
-    allFiles.forEach(function(file,index){
-        var item=document.createElement('div');item.className='file-item';
-        if(file.type==='application/pdf'){item.innerHTML='<div class="pdf-indicator">PDF<br>'+file.name.substring(0,8)+'...</div>';}
-        else{var img=document.createElement('img');img.src=URL.createObjectURL(file);item.appendChild(img);}
-        var removeBtn=document.createElement('button');removeBtn.className='remove-btn';removeBtn.innerHTML='&times;';
-        removeBtn.onclick=function(){removeFile(index);};item.appendChild(removeBtn);grid.appendChild(item);
-    });
+// Get slug from hash, query param, or path
+function getSlug(){
+  if(location.hash&&location.hash.length>1)return decodeURIComponent(location.hash.slice(1));
+  const p=new URLSearchParams(location.search);
+  if(p.get("u"))return p.get("u");
+  const parts=location.pathname.split("/").filter(Boolean);
+  const idx=parts.findIndex(p=>p.startsWith("schedule"));
+  if(idx>=0&&parts[idx+1])return parts[idx+1];
+  return null;
 }
 
-function showDay(d){
-    var list=document.getElementById('dayDetailList');
-    var header=document.getElementById('dayDetailHeader');
-    header.textContent="Schedule for "+d;
-    var evts=(mD[d]||[]).filter(function(e){return e.status!=='cancelled';});
-    if(evts.length===0){
-        list.innerHTML='<div style="color:#888;padding:10px;">No inspections scheduled</div>';
-    } else {
-        var html='';
-        evts.forEach(function(e){
-            html+='<div class="evt-row">';
-            html+='<span class="evt-time">'+(e.flexible_display==='flexible'?'Flexible':e.inspection_time.substring(0,5))+'</span>';
-            html+=' — <span class="evt-type">'+(e.inspection_types||[]).join(', ')+'</span>';
-            if(e.inspection_identifier) html+='<div style="color:#e8742a;font-weight:700;font-size:13px;margin:4px 0;">'+e.inspection_identifier+'</div>';
-            html+='<div style="font-size:11px;color:#888;margin-top:4px;">By: '+e.submitted_by+'</div>';
-            html+='<div class="evt-actions">';
-            html+='<button class="btn-edit" onclick="editInsp(\''+e.id+'\',\''+e.inspection_date+'\',\''+e.inspection_time.substring(0,5)+'\')">Edit</button>';
-            html+='<button class="btn-cancel" onclick="cancelInsp(\''+e.id+'\')">Cancel</button>';
-            html+='</div>';
-            html+='</div>';
-        });
-        list.innerHTML=html;
-    }
-    document.getElementById('dayDetail').style.display='block';
+const app=document.getElementById("app");
+const slug=getSlug();
+
+// ── Render helpers ──
+function el(tag,attrs,children){
+  const e=document.createElement(tag);
+  if(attrs){Object.entries(attrs).forEach(([k,v])=>{
+    if(k==="style"&&typeof v==="object")Object.assign(e.style,v);
+    else if(k==="onclick")e.onclick=v;
+    else if(k==="innerHTML")e.innerHTML=v;
+    else e.setAttribute(k,v);
+  });}
+  if(children){(Array.isArray(children)?children:[children]).forEach(c=>{
+    if(typeof c==="string")e.appendChild(document.createTextNode(c));
+    else if(c)e.appendChild(c);
+  });}
+  return e;
 }
 
-function showActionModal(title,names,callback){
-    var overlay=document.createElement('div');
-    overlay.style.cssText='position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.7);z-index:999;display:flex;align-items:center;justify-content:center;';
-    var box=document.createElement('div');
-    box.style.cssText='background:#1a1a1a;border:1px solid #333;border-radius:10px;padding:20px;width:280px;';
-    var h=document.createElement('div');h.style.cssText='font-size:14px;font-weight:bold;color:#fff;margin-bottom:12px;';h.textContent=title;box.appendChild(h);
-    names.forEach(function(n){
-        var btn=document.createElement('button');btn.style.cssText='display:block;width:100%;padding:12px;margin-bottom:8px;font-size:14px;font-weight:600;color:#fff;background:#222;border:1px solid #444;border-radius:6px;cursor:pointer;text-align:left;';btn.textContent=n;
-        btn.onclick=function(){document.body.removeChild(overlay);callback(n);};box.appendChild(btn);
-    });
-    var cancel=document.createElement('button');cancel.style.cssText='display:block;width:100%;padding:10px;font-size:13px;color:#888;background:transparent;border:1px solid #333;border-radius:6px;cursor:pointer;margin-top:4px;';cancel.textContent='Never mind';
-    cancel.onclick=function(){document.body.removeChild(overlay);};box.appendChild(cancel);
-    overlay.appendChild(box);document.body.appendChild(overlay);
+function renderHeader(name){
+  const hdr=el("div",{style:{display:"flex",alignItems:"center",gap:"12px",padding:"16px 20px",borderBottom:"1px solid "+C.brd,background:C.card}});
+  const logo=document.createElement("div");
+  logo.innerHTML='<svg width="28" height="28" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="50" cy="50" r="48" fill="#5a8fc0" opacity="0.15"/><circle cx="50" cy="50" r="40" fill="#1a1a1a" stroke="#5a8fc0" stroke-width="2"/><circle cx="50" cy="50" r="6" fill="#5a8fc0"/><line x1="50" y1="50" x2="50" y2="28" stroke="#fff" stroke-width="2.5" stroke-linecap="round"/><line x1="50" y1="50" x2="62" y2="42" stroke="#fff" stroke-width="2" stroke-linecap="round"/></svg>';
+  hdr.appendChild(logo);
+  const info=el("div",{style:{flex:"1"}});
+  info.appendChild(el("div",{style:{fontWeight:"700",fontSize:"17px",color:C.txt}},name||"Inspector"));
+  info.appendChild(el("div",{style:{fontSize:"12px",color:C.mut}},"Inspection Scheduling"));
+  hdr.appendChild(info);
+  return hdr;
 }
 
-function cancelInsp(id){
-    var team=savedContacts.map(function(c){return c.name;});
-    if(team.length===0)team=['(no saved contacts)'];
-    showActionModal('Who is cancelling this?',team,function(who){
-        var reason=prompt('Reason (optional):');
-        fetch(SB+'/rest/v1/inspection_requests?id=eq.'+id,{method:'PATCH',headers:{'apikey':AK,'Authorization':'Bearer '+AK,'Content-Type':'application/json','Prefer':'return=representation'},body:JSON.stringify({status:'cancelled'})})
-        .then(function(r){return r.json();}).then(function(){
-            // Log it
-            fetch(SB+'/rest/v1/inspection_log',{method:'POST',headers:{'apikey':AK,'Authorization':'Bearer '+AK,'Content-Type':'application/json'},body:JSON.stringify({request_id:id,action:'cancel',action_by:who,details:reason||''})}).catch(function(){});
-            alert('Cancelled.');loadMD();
-        });
-    });
-}
+// ── No slug provided ──
+if(!slug){
+  app.appendChild(renderHeader("My Daily Reports"));
+  const body=el("div",{style:{maxWidth:"500px",margin:"0 auto",padding:"60px 20px",textAlign:"center"}});
+  body.appendChild(el("div",{style:{fontSize:"48px",marginBottom:"16px"}},"📅"));
+  body.appendChild(el("p",{style:{fontSize:"18px",fontWeight:"700",color:C.txt,marginBottom:"8px"}},"No Inspector Selected"));
+  body.appendChild(el("p",{style:{fontSize:"14px",color:C.mut,lineHeight:"1.6"}},"This link should include the inspector's scheduling name. Please use the link provided by your inspector."));
+  app.appendChild(body);
+}else{
+  // ── Load inspector profile + their scheduling-enabled jobs ──
+  app.appendChild(renderHeader("Loading..."));
+  const body=el("div",{style:{maxWidth:"500px",margin:"0 auto",padding:"20px"}});
+  body.innerHTML='<p style="text-align:center;color:'+C.mut+';padding:40px 0">Loading scheduling calendar...</p>';
+  app.appendChild(body);
 
-function editInsp(id,oldDate,oldTime){
-    var team=savedContacts.map(function(c){return c.name;});
-    if(team.length===0)team=['(no saved contacts)'];
-    showActionModal('Who is editing this?',team,function(who){showEditModal(id,oldDate,oldTime,who);});
-}
+  (async()=>{
+    try{
+      // Fetch profile by slug
+      const pr=await fetch(SB_URL+"/rest/v1/profiles?slug=eq."+encodeURIComponent(slug)+"&select=id,full_name,slug",{headers:h()});
+      if(!pr.ok)throw new Error("Could not load inspector profile");
+      const profiles=await pr.json();
+      if(!profiles.length)throw new Error("Inspector not found. Check the link and try again");
+      const profile=profiles[0];
 
-function showEditModal(id,oldDate,oldTime,who){
-    var overlay=document.createElement('div');overlay.style.cssText='position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.8);z-index:1000;display:flex;align-items:center;justify-content:center;padding:20px;';
-    var modal=document.createElement('div');modal.style.cssText='background:#1a1a1a;border-radius:12px;padding:30px;max-width:400px;width:100%;border:1px solid #333;';
-    modal.innerHTML='<h3 style="color:#e8742a;margin-bottom:20px;">Edit Inspection</h3><label style="color:#ccc;font-size:13px;">New Date</label><input type="date" id="eDate" value="'+oldDate+'" class="field-input"><label style="color:#ccc;font-size:13px;">New Time</label><input type="time" id="eTime" value="'+oldTime+'" class="field-input"><div style="display:flex;gap:10px;margin-top:20px;"><button id="cEdit" style="flex:1;background:#333;color:#fff;padding:12px;border:none;border-radius:8px;cursor:pointer;">Cancel</button><button id="sEdit" style="flex:1;background:#e8742a;color:#fff;padding:12px;border:none;border-radius:8px;cursor:pointer;">Save</button></div>';
-    overlay.appendChild(modal);document.body.appendChild(overlay);
-    document.getElementById('cEdit').onclick=function(){overlay.remove();};
-    document.getElementById('sEdit').onclick=function(){
-        var nD=document.getElementById('eDate').value,nT=document.getElementById('eTime').value;
-        fetch(SB+'/rest/v1/inspection_requests?id=eq.'+id,{method:'PATCH',headers:{'apikey':AK,'Authorization':'Bearer '+AK,'Content-Type':'application/json','Prefer':'return=representation'},body:JSON.stringify({inspection_date:nD,inspection_time:nT})})
-        .then(function(r){return r.json();}).then(function(){
-            fetch(SB+'/rest/v1/inspection_log',{method:'POST',headers:{'apikey':AK,'Authorization':'Bearer '+AK,'Content-Type':'application/json'},body:JSON.stringify({request_id:id,action:'edit',action_by:who,details:'Date: '+nD+' Time: '+nT})}).catch(function(){});
-            alert('Updated.');overlay.remove();loadMD();
-        });
-    };
-}
+      // Fetch scheduling-enabled jobs
+      const jr=await fetch(SB_URL+"/rest/v1/jobs?user_id=eq."+profile.id+"&scheduling_enabled=eq.true&select=id,name,site_address",{headers:h()});
+      if(!jr.ok)throw new Error("Could not load jobs");
+      const jobs=await jr.json();
 
-function switchTab(t){
-    document.querySelectorAll('.tab')[0].classList.toggle('active',t==='calendar');
-    document.querySelectorAll('.tab')[1].classList.toggle('active',t==='request');
-    document.getElementById('calendarView').style.display=t==='calendar'?'block':'none';
-    document.getElementById('requestView').style.display=t==='request'?'block':'none';
-}
-function changeMonth(dir){cM+=dir;if(cM>11){cM=0;cY++;}if(cM<0){cM=11;cY--;}loadMD();}
-function ds(y,m,d){return y+'-'+String(m+1).padStart(2,'0')+'-'+String(d).padStart(2,'0');}
+      // Re-render page
+      app.innerHTML="";
+      app.appendChild(renderHeader(profile.full_name));
+      const main=el("div",{style:{maxWidth:"500px",margin:"0 auto",padding:"20px"}});
+      app.appendChild(main);
 
-function loadMD(){
-    var base=SB+'/rest/v1/inspection_requests?or=(status.neq.cancelled,status.is.null)';
-    var hdrs={headers:{'apikey':AK,'Authorization':'Bearer '+AK}};
-    // Load IOR inspections (visible across projects) and this project's Special inspections
-    Promise.all([
-        fetch(base+'&inspection_types=cs.%7BIOR%7D',hdrs).then(function(r){return r.json();}),
-        fetch(base+'&project=eq.'+encodeURIComponent(PROJ)+'&inspection_types=cs.%7BSpecial%7D',hdrs).then(function(r){return r.json();})
-    ]).then(function(res){
-        mD={};var seen={};
-        res[0].concat(res[1]).forEach(function(v){
-            if(seen[v.id])return;seen[v.id]=true;
-            if(!mD[v.inspection_date])mD[v.inspection_date]=[];
-            mD[v.inspection_date].push(v);
-        });
-        renderCal();
-    });
-}
+      if(jobs.length===0){
+        main.innerHTML='<div style="text-align:center;padding:60px 20px"><div style="font-size:48px;margin-bottom:16px">📅</div><p style="font-size:18px;font-weight:700;color:'+C.txt+';margin-bottom:8px">No Jobs Available</p><p style="font-size:14px;color:'+C.mut+';line-height:1.6">'+profile.full_name+' hasn\'t enabled scheduling for any jobs yet.</p></div>';
+        return;
+      }
 
-function renderCal(){
-    var g=document.getElementById('calGrid');g.innerHTML='';
-    document.getElementById('monthLabel').textContent=['January','February','March','April','May','June','July','August','September','October','November','December'][cM]+' '+cY;
-    var sd=new Date(cY,cM,1).getDay(),ld=new Date(cY,cM+1,0).getDate();
-    for(var i=0;i<sd;i++)g.appendChild(document.createElement('div')).className='day-cell other-month';
-    for(var d=1;d<=ld;d++){
-        var s=ds(cY,cM,d),c=document.createElement('div');
-        c.className='day-cell';c.innerHTML='<span class="day-num">'+d+'</span>';
-        if(mD[s]){
-            var active=mD[s].filter(function(e){return e.status!=='cancelled';});
-            if(active.length>0)c.innerHTML+='<div style="font-size:12px;color:#5a8fc0;font-weight:700;">'+active.length+'</div>';
+      // ── App state ──
+      let selJob=null,selDate=null;
+      let vMonth=new Date().getMonth(),vYear=new Date().getFullYear();
+
+      function render(){
+        main.innerHTML="";
+        const todayStr=new Date().toLocaleDateString("en-CA");
+
+        if(!selJob){
+          // ── Job picker ──
+          const intro=el("div",{style:{textAlign:"center",marginBottom:"20px"}});
+          intro.appendChild(el("div",{style:{fontSize:"36px",marginBottom:"8px"}},"📅"));
+          intro.appendChild(el("p",{style:{fontSize:"16px",fontWeight:"700",color:C.txt,marginBottom:"4px"}},"Request an Inspection"));
+          intro.appendChild(el("p",{style:{fontSize:"13px",color:C.mut,lineHeight:"1.5"}},"Select a job to schedule an inspection with "+profile.full_name));
+          main.appendChild(intro);
+
+          jobs.forEach(function(j){
+            const btn=el("button",{style:{width:"100%",textAlign:"left",background:C.card,border:"1px solid "+C.brd,borderRadius:"12px",padding:"16px 18px",marginBottom:"10px",display:"flex",alignItems:"center",gap:"14px"},onclick:function(){selJob=j;selDate=null;render();}});
+            btn.appendChild(el("div",{style:{width:"40px",height:"40px",borderRadius:"8px",background:C.inp,border:"1px solid "+C.brd,display:"flex",alignItems:"center",justifyContent:"center",fontSize:"20px",flexShrink:"0"}},"📋"));
+            const info=el("div",{style:{flex:"1"}});
+            info.appendChild(el("div",{style:{fontWeight:"700",fontSize:"15px",color:C.txt}},j.name));
+            if(j.site_address)info.appendChild(el("div",{style:{fontSize:"12px",color:C.mut,marginTop:"2px"}},j.site_address));
+            btn.appendChild(info);
+            btn.appendChild(el("span",{style:{color:C.mut,fontSize:"18px"}},"›"));
+            main.appendChild(btn);
+          });
+
+        }else if(!selDate){
+          // ── Month calendar ──
+          main.appendChild(el("button",{style:{background:"none",border:"none",color:C.mut,fontSize:"14px",padding:"4px 0",marginBottom:"12px"},onclick:function(){selJob=null;render();}},"← Back to jobs"));
+
+          // Job info bar
+          const jbar=el("div",{style:{background:C.card,border:"1px solid "+C.brd,borderRadius:"12px",padding:"14px 16px",marginBottom:"16px",display:"flex",alignItems:"center",gap:"12px"}});
+          jbar.appendChild(el("div",{style:{fontSize:"20px"}},"📋"));
+          const jd=el("div",{style:{flex:"1"}});
+          jd.appendChild(el("div",{style:{fontWeight:"700",fontSize:"15px",color:C.txt}},selJob.name));
+          if(selJob.site_address)jd.appendChild(el("div",{style:{fontSize:"12px",color:C.mut}},selJob.site_address));
+          jbar.appendChild(jd);
+          main.appendChild(jbar);
+
+          main.appendChild(el("p",{style:{fontSize:"13px",color:C.mut,textAlign:"center",marginBottom:"16px"}},"Tap a date to request an inspection"));
+
+          // Fetch confirmed requests for this job to show green checkmarks
+          var start=vYear+"-"+String(vMonth+1).padStart(2,"0")+"-01";
+          var lastD=new Date(vYear,vMonth+1,0).getDate();
+          var end=vYear+"-"+String(vMonth+1).padStart(2,"0")+"-"+String(lastD).padStart(2,"0");
+          var confirmedDates={};
+          (async function(){
+            try{
+              var cr=await fetch(SB_URL+"/rest/v1/inspection_requests?job_id=eq."+selJob.id+"&status=eq.confirmed&requested_date=gte."+start+"&requested_date=lte."+end+"&select=requested_date",{headers:h()});
+              if(cr.ok){var cd=await cr.json();cd.forEach(function(r){confirmedDates[r.requested_date]=true;});
+                // Update dots after fetch
+                document.querySelectorAll("[data-confirmed-dot]").forEach(function(dot){
+                  if(confirmedDates[dot.dataset.confirmedDot])dot.style.display="block";
+                });
+              }
+            }catch(e){}
+          })();
+
+          // Calendar card
+          const cal=el("div",{style:{background:C.card,border:"1px solid "+C.brd,borderRadius:"12px",overflow:"hidden"}});
+
+          // Nav row
+          const nav=el("div",{style:{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"12px 16px",borderBottom:"1px solid "+C.brd}});
+          nav.appendChild(el("button",{style:{background:"none",border:"none",color:C.mut,fontSize:"20px",padding:"4px 10px"},onclick:function(){vMonth--;if(vMonth<0){vMonth=11;vYear--;}render();}},"‹"));
+          nav.appendChild(el("span",{style:{fontWeight:"700",fontSize:"15px",color:C.txt}},new Date(vYear,vMonth).toLocaleDateString("en-US",{month:"long",year:"numeric"})));
+          nav.appendChild(el("button",{style:{background:"none",border:"none",color:C.mut,fontSize:"20px",padding:"4px 10px"},onclick:function(){vMonth++;if(vMonth>11){vMonth=0;vYear++;}render();}},"›"));
+          cal.appendChild(nav);
+
+          // Day headers
+          const dh=el("div",{style:{display:"grid",gridTemplateColumns:"repeat(7,1fr)"}});
+          ["S","M","T","W","T","F","S"].forEach(function(d,i){
+            dh.appendChild(el("div",{style:{padding:"8px 0",textAlign:"center",fontSize:"11px",fontWeight:"700",color:(i===0||i===6)?C.mut+"88":C.mut,borderBottom:"1px solid "+C.brd}},d));
+          });
+          cal.appendChild(dh);
+
+          // Days grid
+          var firstDay=new Date(vYear,vMonth,1);
+          var startPad=firstDay.getDay();
+          var totalDays=new Date(vYear,vMonth+1,0).getDate();
+          var grid=el("div",{style:{display:"grid",gridTemplateColumns:"repeat(7,1fr)",padding:"4px 0"}});
+          for(var p=0;p<startPad;p++)grid.appendChild(el("div",{style:{padding:"6px 4px"}}));
+          for(var d=1;d<=totalDays;d++){
+            (function(day){
+              var ds=vYear+"-"+String(vMonth+1).padStart(2,"0")+"-"+String(day).padStart(2,"0");
+              var isToday=ds===todayStr;
+              var isPast=ds<todayStr;
+              var dow=new Date(vYear,vMonth,day).getDay();
+              var isWE=dow===0||dow===6;
+              var cell=el("div",{style:{padding:"4px 2px",textAlign:"center"}});
+              var btn=el("button",{style:{width:"34px",height:"34px",borderRadius:"50%",border:isToday?"2px solid "+C.org:"1px solid transparent",background:"transparent",color:isPast?C.mut+"44":isWE?C.mut:C.lt,fontWeight:isToday?"700":"500",fontSize:"13px",cursor:isPast?"default":"pointer",opacity:isPast?"0.4":"1",margin:"0 auto",display:"flex",alignItems:"center",justifyContent:"center"},onclick:isPast?null:function(){selDate=ds;render();}},String(day));
+              cell.appendChild(btn);
+              // Green dot for confirmed dates (hidden initially, shown after async fetch)
+              var dot=el("div",{style:{width:"5px",height:"5px",borderRadius:"50%",background:"#22c55e",margin:"2px auto 0",display:"none"}});
+              dot.dataset.confirmedDot=ds;
+              cell.appendChild(dot);
+              grid.appendChild(cell);
+            })(d);
+          }
+          cal.appendChild(grid);
+
+          // Legend
+          var legend=el("div",{style:{padding:"10px 16px",borderTop:"1px solid "+C.brd,fontSize:"11px",color:C.mut,display:"flex",alignItems:"center",gap:"12px"}});
+          var gd=el("span",{style:{display:"inline-flex",alignItems:"center",gap:"4px"}});
+          gd.appendChild(el("span",{style:{width:"6px",height:"6px",borderRadius:"50%",background:"#22c55e",display:"inline-block"}}));
+          gd.appendChild(document.createTextNode(" Scheduled"));
+          legend.appendChild(gd);
+          cal.appendChild(legend);
+
+          main.appendChild(cal);
+
+        }else{
+          // ── Request form ──
+          main.appendChild(el("button",{style:{background:"none",border:"none",color:C.mut,fontSize:"14px",padding:"4px 0",marginBottom:"12px"},onclick:function(){selDate=null;render();}},"← Back to calendar"));
+
+          var dateDisplay=new Date(selDate+"T12:00:00").toLocaleDateString("en-US",{weekday:"long",month:"long",day:"numeric",year:"numeric"});
+
+          // Summary card
+          var card=el("div",{style:{background:C.card,border:"1px solid "+C.brd,borderRadius:"12px",padding:"20px",marginBottom:"16px"}});
+          card.appendChild(el("div",{style:{fontSize:"14px",color:C.mut,marginBottom:"4px"}},"Requesting inspection for"));
+          card.appendChild(el("div",{style:{fontWeight:"700",fontSize:"17px",color:C.txt,marginBottom:"4px"}},selJob.name));
+          card.appendChild(el("div",{style:{fontSize:"14px",color:C.org,fontWeight:"600"}},dateDisplay));
+          main.appendChild(card);
+
+          // Form
+          var form=el("div",{style:{background:C.card,border:"1px solid "+C.brd,borderRadius:"12px",padding:"20px"}});
+          var fs="width:100%;padding:12px 14px;background:"+C.inp+";border:1px solid "+C.brd+";border-radius:10px;color:"+C.txt+";font-size:15px;font-family:inherit;";
+
+          form.innerHTML='<label style="display:block;color:'+C.lt+';font-size:13px;font-weight:600;margin-bottom:6px">Your Name *</label>'
+            +'<input id="f_name" type="text" placeholder="Full name" style="'+fs+'margin-bottom:14px">'
+            +'<label style="display:block;color:'+C.lt+';font-size:13px;font-weight:600;margin-bottom:6px">Your Email *</label>'
+            +'<input id="f_email" type="email" placeholder="name@company.com" style="'+fs+'margin-bottom:14px">'
+            +'<label style="display:block;color:'+C.lt+';font-size:13px;font-weight:600;margin-bottom:6px">Company / Role</label>'
+            +'<input id="f_comp" type="text" placeholder="GC, Subcontractor, etc." style="'+fs+'margin-bottom:14px">'
+            +'<label style="display:block;color:'+C.lt+';font-size:13px;font-weight:600;margin-bottom:6px">Inspection Type</label>'
+            +'<select id="f_type" style="'+fs+'margin-bottom:14px"><option>General Inspection</option><option>Foundation</option><option>Framing</option><option>Rough-In</option><option>Drywall</option><option>Final</option><option>Other</option></select>'
+            +'<label style="display:block;color:'+C.lt+';font-size:13px;font-weight:600;margin-bottom:6px">Notes (optional)</label>'
+            +'<textarea id="f_notes" placeholder="Any details about the inspection..." rows="3" style="'+fs+'margin-bottom:20px;resize:vertical;line-height:1.5"></textarea>'
+            +'<div id="f_err" style="display:none;background:#2d1214;border:1px solid #5c2023;border-radius:8px;padding:10px 14px;margin-bottom:14px;color:'+C.err+';font-size:13px"></div>';
+
+          var submitBtn=el("button",{style:{width:"100%",padding:"14px 0",background:C.org,border:"1px solid "+C.blu,borderRadius:"10px",color:"#fff",fontSize:"16px",fontWeight:"700",cursor:"pointer"},onclick:async function(){
+            var name=document.getElementById("f_name").value.trim();
+            var email=document.getElementById("f_email").value.trim();
+            var errEl=document.getElementById("f_err");
+            if(!name||!email||!email.includes("@")){errEl.style.display="block";errEl.textContent="Please enter your name and a valid email.";return;}
+            errEl.style.display="none";
+            submitBtn.textContent="Submitting...";
+            submitBtn.disabled=true;
+            submitBtn.style.opacity="0.6";
+            try{
+              var r=await fetch(SB_URL+"/rest/v1/inspection_requests",{method:"POST",headers:h({Prefer:"return=representation"}),body:JSON.stringify({
+                job_id:selJob.id,
+                user_id:profile.id,
+                requested_date:selDate,
+                requester_name:name,
+                requester_email:email,
+                requester_company:document.getElementById("f_comp").value.trim()||null,
+                inspection_type:document.getElementById("f_type").value,
+                notes:document.getElementById("f_notes").value.trim()||null,
+                status:"pending"
+              })});
+              if(!r.ok){var e=await r.json();throw new Error(e.message||"Request failed");}
+              form.innerHTML='<div style="text-align:center;padding:10px 0"><div style="font-size:36px;margin-bottom:8px">✅</div><div style="font-weight:700;font-size:16px;color:'+C.ok+';margin-bottom:6px">Request Submitted!</div><div style="font-size:13px;color:'+C.mut+';line-height:1.5">Your inspection request for <strong style="color:'+C.lt+'">'+dateDisplay+'</strong> has been sent to '+profile.full_name+'. You\'ll receive a confirmation once it\'s reviewed.</div></div>';
+              form.appendChild(el("button",{style:{width:"100%",padding:"12px 0",background:C.card,border:"1px solid "+C.brd,borderRadius:"10px",color:C.lt,fontSize:"14px",fontWeight:"600",cursor:"pointer",marginTop:"14px"},onclick:function(){selJob=null;selDate=null;render();}},"Schedule Another Inspection"));
+            }catch(ex){
+              errEl.style.display="block";
+              errEl.textContent="Failed: "+ex.message;
+              submitBtn.textContent="Submit Request";
+              submitBtn.disabled=false;
+              submitBtn.style.opacity="1";
+            }
+          }},"Submit Request");
+          form.appendChild(submitBtn);
+          main.appendChild(form);
         }
-        c.onclick=(function(x){return function(){showDay(x);};})(s);
-        g.appendChild(c);
+      }
+
+      render();
+
+    }catch(e){
+      body.innerHTML='<div style="text-align:center;padding:60px 20px"><div style="font-size:48px;margin-bottom:16px">⚠️</div><p style="font-size:18px;font-weight:700;color:'+C.txt+';margin-bottom:8px">Could Not Load Calendar</p><p style="font-size:14px;color:'+C.mut+';line-height:1.6">'+e.message+'</p></div>';
     }
+  })();
 }
-
-function setType(t){inspType=t;document.getElementById('btnSpecial').classList.toggle('active',t==='Special');document.getElementById('btnRegular').classList.toggle('active',t==='IOR');document.getElementById('specialSub').classList.toggle('show',t==='Special');if(t!=='Special')document.getElementById('specialType').selectedIndex=0;}
-function setDur(d){inspDur=d;document.querySelectorAll('.dur-btn').forEach(function(b){b.classList.remove('active');});event.target.classList.add('active');}
-
-function submitIR(){
-    var d=document.getElementById('iDate').value,t=document.getElementById('iTime').value,nm=document.getElementById('iName').value;
-    var newName=document.getElementById('iNewName').value.trim();
-    if((!nm||nm==='other')&&newName){nm=newName;}
-    if(!nm||allFiles.length===0||!d||!t||!inspType||!inspDur){alert('Missing required fields.');return;}
-
-    // Save new person if checked
-    if(newName&&document.getElementById('saveNewPersonCheck').checked){
-        var newEmail=document.getElementById('iNewEmail').value.trim();
-        var newCompany=document.getElementById('iNewCompany').value.trim();
-        fetch(SB+'/rest/v1/contacts',{method:'POST',headers:{'apikey':AK,'Authorization':'Bearer '+AK,'Content-Type':'application/json','Prefer':'resolution=merge-duplicates'},body:JSON.stringify({name:newName,email:newEmail,company:newCompany,project:PROJ})}).catch(function(){});
-    }
-
-    var emails=[];
-    document.querySelectorAll('.emailCheck:checked').forEach(function(cb){emails.push(cb.value);});
-    var addl=document.getElementById('additionalEmailsList').value.trim();
-    if(addl)emails=emails.concat(addl.split(',').map(function(e){return e.trim();}));
-
-    var btn=document.getElementById('submitBtn');btn.textContent='Submitting...';btn.disabled=true;
-
-    // Build inspection request data
-    var isFlexible=t==='flexible';
-    var inspTime=isFlexible?'09:00':t;
-    var flexDisplay=isFlexible?'flexible':'';
-
-    var reqData={
-        project:PROJ,
-        inspection_date:d,
-        inspection_time:inspTime,
-        inspection_types:JSON.stringify([inspType]),
-        duration:inspDur,
-        submitted_by:nm,
-        notes:document.getElementById('iNotes').value,
-        flexible:isFlexible,
-        flexible_display:flexDisplay,
-        inspection_identifier:document.getElementById('iIdentifier').value.trim()||null,
-        status:'active'
-    };
-
-    // Insert directly via REST API (edge functions come later for email/notifications)
-    fetch(SB+'/rest/v1/inspection_requests',{
-        method:'POST',
-        headers:{'apikey':AK,'Authorization':'Bearer '+AK,'Content-Type':'application/json','Prefer':'return=representation'},
-        body:JSON.stringify(reqData)
-    })
-    .then(function(r){return r.json();})
-    .then(function(data){
-        if(data&&data.length>0){
-            document.getElementById('requestView').style.display='none';
-            document.getElementById('successView').style.display='block';
-        } else {
-            alert('Error submitting request');btn.disabled=false;btn.textContent='Submit Inspection Request';
-        }
-    })
-    .catch(function(e){
-        alert('Error: '+e.message);btn.disabled=false;btn.textContent='Submit Inspection Request';
-    });
-}
-
-function loadContacts(){
-    fetch(SB+'/rest/v1/contacts?project=eq.'+encodeURIComponent(PROJ)+'&order=name.asc',{headers:{'apikey':AK,'Authorization':'Bearer '+AK}})
-    .then(function(r){return r.json();}).then(function(rows){
-        savedContacts=rows||[];
-        var sel=document.getElementById('iName');
-        var first=sel.options[0].outerHTML;
-        var second=sel.options[1].outerHTML;
-        sel.innerHTML=first+second;
-        savedContacts.forEach(function(c){
-            var o=document.createElement('option');
-            o.value=c.name;
-            o.textContent=c.name+(c.company?' ('+c.company+')':'');
-            sel.appendChild(o);
-        });
-        var container=document.getElementById('emailListContainer');
-        container.innerHTML='';
-        savedContacts.forEach(function(c){
-            if(!c.email)return;
-            var lbl=document.createElement('label');
-            lbl.className='email-row';
-            lbl.innerHTML='<input type="checkbox" value="'+c.email+'" class="emailCheck">'+c.name+(c.company?' ('+c.company+')':'');
-            container.appendChild(lbl);
-        });
-    }).catch(function(){});
-}
-
-function resetForm(){location.reload();}
-loadContacts();
-loadMD();
 </script>
 </body>
 </html>
