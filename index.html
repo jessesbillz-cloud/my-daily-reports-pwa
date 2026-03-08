@@ -39,7 +39,9 @@ let AUTH_TOKEN = null;
 // Returns array of {str, x, y, w, h, page, fontSize} in top-left origin coordinates
 async function extractPdfTextStructure(pdfData){
   if(!window.pdfjsLib)throw new Error("pdf.js not loaded");
-  const doc=await window.pdfjsLib.getDocument({data:pdfData}).promise;
+  // Always work on a copy so the caller's buffer isn't detached
+  const safeCopy=new Uint8Array(pdfData instanceof ArrayBuffer?new Uint8Array(pdfData):pdfData);
+  const doc=await window.pdfjsLib.getDocument({data:safeCopy}).promise;
   const allItems=[];
   for(let p=1;p<=doc.numPages;p++){
     const page=await doc.getPage(p);
@@ -51,10 +53,10 @@ async function extractPdfTextStructure(pdfData){
       const tx=item.transform;
       const x=tx[4];
       const yBottom=tx[5];
+      const fontSize=Math.abs(tx[0])||10;
       const y=pageH-yBottom-Math.abs(tx[3]||10); // top-left origin, top of text
       const w=item.width||(item.str.length*fontSize*0.6); // estimate if missing
       const h=item.height||Math.abs(tx[3])||10;
-      const fontSize=Math.abs(tx[0])||10;
       allItems.push({str:item.str.trim(),x:Math.round(x*100)/100,y:Math.round(y*100)/100,w:Math.round(w*100)/100,h:Math.round(h*100)/100,page:p,fontSize:Math.round(fontSize*10)/10});
     });
   }
@@ -718,14 +720,18 @@ function CreateJob({user, onBack, onCreated}){
       if(tf&&job?.id){
         const ext=tf.name.split(".").pop().toLowerCase();
         // Use cached buffer (read once when file was selected) — prevents Safari file-release issues
-        const fileBuf=tfBuf||await tf.arrayBuffer();
+        // Always use a fresh slice to avoid detached buffer issues
+        let fileBuf;
+        try{fileBuf=tfBuf?tfBuf.slice(0):await tf.arrayBuffer();}catch(e){console.error("Buffer read fallback:",e);}
+        if(!fileBuf){console.error("No file buffer available");throw new Error("Could not read template file. Please try uploading again.");}
         const fileBlob=new Blob([fileBuf.slice(0)],{type:tf.type||"application/octet-stream"});
         const sp=await db.ulTpl(user.id,job.id,fileBlob,ext);
         let pagePaths=[];
         // Render PDF pages to images for preview cache (non-blocking)
         if(ext==="pdf"&&window.pdfjsLib){
           try{
-            const pjDoc=await window.pdfjsLib.getDocument({data:fileBuf.slice(0)}).promise;
+            const renderBuf=fileBuf.slice(0);
+            const pjDoc=await window.pdfjsLib.getDocument({data:renderBuf}).promise;
             const imgs=[];
             for(let i=1;i<=pjDoc.numPages;i++){
               const pg=await pjDoc.getPage(i);
