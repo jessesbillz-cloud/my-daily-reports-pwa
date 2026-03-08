@@ -959,11 +959,30 @@ function ReportEditor({job, user, onBack, reportDate}){
   const [loadingDraft,setLoadingDraft]=useState(true);
   const [draftId,setDraftId]=useState(null);
 
+  // Smart date formatter — matches the format from the original template value
+  const formatAutoDate=(originalVal)=>{
+    const now=new Date();
+    const orig=(originalVal||"").trim();
+    // "04 February 2026" or "4 February 2026" → day month year (long)
+    if(/^\d{1,2}\s+[A-Za-z]+\s+\d{4}$/.test(orig)){
+      const padDay=orig.startsWith("0");
+      return now.toLocaleDateString("en-US",{day:padDay?"2-digit":"numeric",month:"long",year:"numeric",timeZone:tz}).replace(/^(\w+)\s(\d+),\s(\d+)$/,(_,m,d,y)=>`${padDay?d.padStart(2,"0"):d} ${m} ${y}`);
+    }
+    // "February 04, 2026" → month day, year
+    if(/^[A-Za-z]+\s+\d{1,2},?\s+\d{4}$/.test(orig))return now.toLocaleDateString("en-US",{month:"long",day:"2-digit",year:"numeric",timeZone:tz});
+    // "Feb 04, 2026" → short month
+    if(/^[A-Za-z]{3}\s+\d{1,2},?\s+\d{4}$/.test(orig))return now.toLocaleDateString("en-US",{month:"short",day:"2-digit",year:"numeric",timeZone:tz});
+    // "2026-02-04" → ISO
+    if(/^\d{4}-\d{2}-\d{2}$/.test(orig))return now.toLocaleDateString("en-CA",{timeZone:tz});
+    // Default: "3/7/2026" US short
+    return now.toLocaleDateString("en-US",{timeZone:tz});
+  };
+
   // Editable field values
   const [vals,setVals]=useState(()=>{
     const v={};
     initEdit.forEach(f=>{
-      if(f.autoFill==="date")v[f.name]=new Date().toLocaleDateString("en-US",{timeZone:tz});
+      if(f.autoFill==="date")v[f.name]=formatAutoDate(f.originalValue||f.value);
       else if(f.autoFill==="increment")v[f.name]="";
       else v[f.name]=f.value||"";
     });
@@ -988,10 +1007,9 @@ function ReportEditor({job, user, onBack, reportDate}){
           if(rpt.content){
             const c=typeof rpt.content==="string"?JSON.parse(rpt.content):rpt.content;
             if(c.vals){
-              // Merge saved values but re-apply today's date for auto-date fields
-              const todayDate=new Date().toLocaleDateString("en-US",{timeZone:tz});
+              // Merge saved values but re-apply today's date for auto-date fields (matching original format)
               const merged={...c.vals};
-              initEdit.forEach(f=>{if(f.autoFill==="date")merged[f.name]=todayDate;});
+              initEdit.forEach(f=>{if(f.autoFill==="date")merged[f.name]=formatAutoDate(f.originalValue||f.value);});
               setVals(p=>({...p,...merged}));
             }
             if(c.lockVals)setLockVals(p=>({...p,...c.lockVals}));
