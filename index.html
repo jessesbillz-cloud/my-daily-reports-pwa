@@ -767,13 +767,16 @@ function CreateJob({user, onBack, onCreated}){
               {showSaved&&(
                 <div style={{marginTop:8,background:C.inp,border:`1px solid ${C.brd}`,borderRadius:10,overflow:"hidden",maxHeight:250,overflowY:"auto"}}>
                   {savedTpls.map(t=>(
-                    <div key={t.id} onClick={()=>useSavedTemplate(t)} style={{padding:"12px 16px",borderBottom:`1px solid ${C.brd}`,cursor:"pointer",display:"flex",alignItems:"center",gap:10}}>
-                      <span style={{fontSize:18}}>📋</span>
-                      <div style={{flex:1}}>
-                        <div style={{fontSize:13,fontWeight:600,color:C.txt}}>{t.name}</div>
-                        <div style={{fontSize:11,color:C.mut}}>{(t.field_config||[]).length} fields — {t.file_type?.toUpperCase()}</div>
+                    <div key={t.id} style={{padding:"12px 16px",borderBottom:`1px solid ${C.brd}`,display:"flex",alignItems:"center",gap:10}}>
+                      <div onClick={()=>useSavedTemplate(t)} style={{display:"flex",alignItems:"center",gap:10,flex:1,cursor:"pointer"}}>
+                        <span style={{fontSize:18}}>📋</span>
+                        <div style={{flex:1}}>
+                          <div style={{fontSize:13,fontWeight:600,color:C.txt}}>{t.name}</div>
+                          <div style={{fontSize:11,color:C.mut}}>{(t.field_config||[]).length} fields — {t.file_type?.toUpperCase()}</div>
+                        </div>
+                        <span style={{color:C.blu,fontSize:12,fontWeight:600}}>Use</span>
                       </div>
-                      <span style={{color:C.blu,fontSize:12,fontWeight:600}}>Use</span>
+                      <button onClick={async(e)=>{e.stopPropagation();if(!confirm("Delete this saved template?"))return;try{await db.deleteSavedTemplate(t.id);setSavedTpls(p=>p.filter(x=>x.id!==t.id));}catch(err){alert("Delete failed: "+err.message);}}} style={{background:"none",border:"none",color:C.err,fontSize:14,cursor:"pointer",padding:"4px 6px",flexShrink:0}}>🗑️</button>
                     </div>
                   ))}
                 </div>
@@ -1651,6 +1654,9 @@ function JobDetail({job, user, onBack, onDeleted}){
   const [showSchedSet,setShowSchedSet]=useState(false);
   const [schedEnabled,setSchedEnabled]=useState(!!job.scheduling_enabled);
   const [schedSaving,setSchedSaving]=useState(false);
+  const [showFieldEdit,setShowFieldEdit]=useState(false);
+  const [fieldEditFields,setFieldEditFields]=useState(null); // null=not loaded
+  const [fieldEditSaving,setFieldEditSaving]=useState(false);
 
   const [tplFilename,setTplFilename]=useState(null);
   const loadReports=useCallback(async()=>{
@@ -1900,6 +1906,59 @@ function JobDetail({job, user, onBack, onDeleted}){
           </div>
         )}
 
+        {/* ── Edit Template Fields Panel ── */}
+        {showFieldEdit&&fieldEditFields&&(
+          <div style={{background:C.card,border:`1px solid ${C.org}`,borderRadius:12,padding:16,marginBottom:16}}>
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:12}}>
+              <div style={{fontWeight:700,fontSize:15,color:C.org}}>📋 Edit Template Fields</div>
+              <button onClick={()=>setShowFieldEdit(false)} style={{background:"none",border:"none",color:C.mut,cursor:"pointer",fontSize:20,padding:"0 4px"}}>✕</button>
+            </div>
+            <div style={{fontSize:11,color:C.mut,marginBottom:12,lineHeight:1.5}}>Change field modes and values. This affects all future reports for this job.</div>
+            <div style={{maxHeight:400,overflowY:"auto",marginBottom:12}}>
+              {fieldEditFields.map((f,i)=>{
+                const setMode=(m)=>setFieldEditFields(p=>p.map((x,j)=>j===i?{...x,mode:m}:x));
+                const setVal=(v)=>setFieldEditFields(p=>p.map((x,j)=>j===i?{...x,value:v}:x));
+                const mb=(mode,label,color)=>{const active=f.mode===mode;return(<button key={mode} onClick={()=>setMode(mode)} style={{padding:"3px 8px",fontSize:10,fontWeight:700,borderRadius:4,cursor:"pointer",background:active?color:"transparent",border:`1px solid ${active?color:C.brd}`,color:active?"#fff":color}}>{label}</button>);};
+                return(
+                  <div key={f.name} style={{padding:"10px 12px",background:C.bg,border:`1px solid ${C.brd}`,borderRadius:8,marginBottom:6}}>
+                    <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:6}}>
+                      <span style={{fontSize:13,fontWeight:700,color:C.txt,flex:1,marginRight:8}}>{f.name}</span>
+                      <div style={{display:"flex",gap:4,flexShrink:0}}>
+                        {mb("edit","Edit",C.org)}
+                        {mb("lock","Lock",C.mut)}
+                        {mb("auto-date","Auto-Date",C.blu)}
+                        {mb("auto-num","Auto-#",C.blu)}
+                      </div>
+                    </div>
+                    {f.mode!=="auto-date"&&f.mode!=="auto-num"&&(
+                      <input type="text" value={f.value||""} onChange={e=>setVal(e.target.value)} placeholder={f.mode==="lock"?"Set locked value...":"Default value (optional)"} style={{width:"100%",padding:"8px 10px",background:C.inp,border:`1px solid ${C.brd}`,borderRadius:6,color:C.txt,fontSize:13,boxSizing:"border-box"}}/>
+                    )}
+                    {f.mode==="auto-date"&&<div style={{fontSize:11,color:C.blu,fontStyle:"italic",padding:"4px 0"}}>Auto-fills today's date</div>}
+                    {f.mode==="auto-num"&&<div style={{fontSize:11,color:C.blu,fontStyle:"italic",padding:"4px 0"}}>Auto-increments each report</div>}
+                  </div>
+                );
+              })}
+            </div>
+            <button onClick={async()=>{
+              setFieldEditSaving(true);
+              try{
+                const coords=(f)=>({page:f.page,x:f.x,y:f.y,w:f.w,h:f.h,fontSize:f.fontSize,multiline:f.multiline});
+                const editF=fieldEditFields.filter(f=>f.mode==="edit").map(f=>({name:f.name,value:f.value||"",originalValue:f.value||"",voiceEnabled:true,...coords(f)}));
+                const lockF=fieldEditFields.filter(f=>f.mode==="lock").map(f=>({name:f.name,value:f.value||"",...coords(f)}));
+                const autoF=fieldEditFields.filter(f=>f.mode==="auto-date"||f.mode==="auto-num").map(f=>({name:f.name,value:f.value||"",originalValue:f.value||"",autoFill:f.mode==="auto-date"?"date":"increment",...coords(f)}));
+                const newConfig={editable:[...editF,...autoF],locked:lockF};
+                await db.updateJobFieldConfig(job.id,newConfig);
+                job.field_config=newConfig;
+                setShowFieldEdit(false);
+                setFieldEditFields(null);
+              }catch(e){alert("Save failed: "+e.message);}
+              finally{setFieldEditSaving(false);}
+            }} disabled={fieldEditSaving} style={{width:"100%",padding:"12px 0",background:C.org,border:"none",borderRadius:8,color:"#fff",fontSize:14,fontWeight:700,cursor:fieldEditSaving?"default":"pointer",opacity:fieldEditSaving?0.6:1}}>
+              {fieldEditSaving?"Saving...":"Save Field Changes"}
+            </button>
+          </div>
+        )}
+
         {/* ── Job Settings Panel ── */}
         {showJobSet&&(
           <div style={{background:C.card,border:`1px solid ${C.brd}`,borderRadius:12,overflow:"hidden",marginBottom:16}}>
@@ -1915,7 +1974,7 @@ function JobDetail({job, user, onBack, onDeleted}){
               </div>
               <span style={{fontSize:11,color:C.mut,background:C.inp,borderRadius:10,padding:"2px 8px"}}>{teamMembers.length}</span>
             </button>
-            <button onClick={()=>alert("Edit field config coming soon")} style={{width:"100%",display:"flex",alignItems:"center",gap:10,padding:"14px 18px",background:"none",border:"none",borderBottom:`1px solid ${C.brd}`,cursor:"pointer",textAlign:"left"}}>
+            <button onClick={()=>{if(!fieldEditFields){const fc=job.field_config||{};const all=[...(fc.editable||[]).map(f=>({...f,mode:f.autoFill==="date"?"auto-date":f.autoFill==="increment"?"auto-num":"edit"})),...(fc.locked||[]).map(f=>({...f,mode:"lock"}))];setFieldEditFields(all);}setShowFieldEdit(!showFieldEdit);}} style={{width:"100%",display:"flex",alignItems:"center",gap:10,padding:"14px 18px",background:"none",border:"none",borderBottom:`1px solid ${C.brd}`,cursor:"pointer",textAlign:"left"}}>
               <span style={{fontSize:16}}>📋</span><span style={{fontSize:14,fontWeight:600,color:C.lt}}>Edit Template Fields</span>
             </button>
             <button onClick={()=>{setShowSchedSet(!showSchedSet);setShowTeam(false);}} style={{width:"100%",display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,padding:"14px 18px",background:"none",border:"none",borderBottom:`1px solid ${C.brd}`,cursor:"pointer",textAlign:"left"}}>
@@ -2100,6 +2159,12 @@ function Dashboard({user, onLogout}){
   const [calYear,setCalYear]=useState(new Date().getFullYear());
   const [calMonth,setCalMonth]=useState(new Date().getMonth());
   const [editReq,setEditReq]=useState(null);
+  const [navRestored,setNavRestored]=useState(false);
+
+  // Persist navigation state — saves selected job ID so user returns to where they were
+  const saveNav=(jobId)=>{try{localStorage.setItem("mdr_nav",JSON.stringify({jobId:jobId||null,ts:Date.now()}));}catch(e){}};
+  // When selJob changes, persist it
+  useEffect(()=>{if(navRestored)saveNav(selJob?.id||null);},[selJob,navRestored]);
 
   useEffect(()=>{load();},[]);
   useEffect(()=>{loadRequests();},[calYear,calMonth]);
@@ -2112,7 +2177,10 @@ function Dashboard({user, onLogout}){
       setCalRequests(reqs);
     }catch(e){console.error(e);}
   };
-  const load=async()=>{setLoading(true);try{const a=await db.jobs(user.id);setJobs(a);const ids=a.filter(j=>!j.is_archived).map(j=>j.id);if(ids.length)setRpts(await db.todayRpts(ids));const p=await db.getProfile(user.id);if(p?.slug)setProfileSlug(p.slug);await loadRequests();}catch(e){console.error(e);}finally{setLoading(false);}};
+  const load=async()=>{setLoading(true);try{const a=await db.jobs(user.id);setJobs(a);const ids=a.filter(j=>!j.is_archived).map(j=>j.id);if(ids.length)setRpts(await db.todayRpts(ids));const p=await db.getProfile(user.id);if(p?.slug)setProfileSlug(p.slug);await loadRequests();
+    // Restore navigation state — reopen the job user was on before closing the app
+    if(!navRestored){setNavRestored(true);try{const raw=localStorage.getItem("mdr_nav");if(raw){const nav=JSON.parse(raw);if(nav.jobId&&(Date.now()-nav.ts)<24*60*60*1000){const match=a.find(j=>j.id===nav.jobId);if(match)setSelJob(match);}}}catch(e){}}
+  }catch(e){console.error(e);}finally{setLoading(false);}};
   const act=jobs.filter(j=>!j.is_archived);
   const arch=jobs.filter(j=>j.is_archived);
   const top3=act.slice(0,3);
@@ -2155,7 +2223,7 @@ function Dashboard({user, onLogout}){
   );
 
   if(selJob)return(
-    <JobDetail job={selJob} user={user} onBack={()=>{setSelJob(null);load();}} onDeleted={()=>{setSelJob(null);load();}}/>
+    <JobDetail job={selJob} user={user} onBack={()=>{setSelJob(null);saveNav(null);load();}} onDeleted={()=>{setSelJob(null);saveNav(null);load();}}/>
   );
 
   return(
