@@ -639,7 +639,70 @@ function CreateJob({user, onBack, onCreated}){
     }finally{setParsing(false);}
   };
 
-  const doFile=async(f)=>{const e=f.name.split(".").pop().toLowerCase();if(e!=="pdf"){setErr("Only PDF files are accepted. Please convert Word docs to PDF first.");return;}setTf(f);setErr("");setUsedSavedId(null);setReportTitle(f.name.replace(/\.[^.]+$/,""));setFnConvention(null);setTplSaved(false);try{const buf=await f.arrayBuffer();const copy=buf.slice(0);setTfBuf(copy);parseFields(copy.slice(0),f.name);}catch(bufErr){console.error("File buffer read:",bufErr);}};
+  // Parse DOCX template — sends raw file to edge function for XML extraction + AI analysis
+  const parseDocxFields=async(buf,fileName)=>{
+    setParsing(true);setErr("");setFields([]);
+    try{
+      // Convert ArrayBuffer to base64
+      const bytes=new Uint8Array(buf);
+      let binary="";for(let i=0;i<bytes.length;i++)binary+=String.fromCharCode(bytes[i]);
+      const b64=btoa(binary);
+      const resp=await fetch(`${SB_URL}/functions/v1/parse-template`,{
+        method:"POST",
+        headers:{"Content-Type":"application/json","Authorization":"Bearer "+SB_KEY,"apikey":SB_KEY},
+        body:JSON.stringify({docx_base64:b64,file_name:fileName})
+      });
+      if(!resp.ok){const errText=await resp.text();throw new Error("Parse API "+resp.status+": "+errText);}
+      const parsed=await resp.json();
+      if(parsed.error)throw new Error(parsed.error);
+      // Same merge logic as PDF path
+      const all=[];const seenNames=new Set();
+      const NOTES_KW=["notes","observations","comments"];
+      const isNotesField=(n)=>NOTES_KW.some(k=>(n||"").toLowerCase().includes(k));
+      let notesAdded=false;
+      const addUnique=(f,mode)=>{
+        const key=(f.name||"").toLowerCase().trim();
+        if(seenNames.has(key))return;
+        if(isNotesField(f.name)){if(notesAdded)return;notesAdded=true;}
+        seenNames.add(key);
+        all.push({name:f.name,value:f.value||"",mode,page:f.page,x:f.x,y:f.y,w:f.w,h:f.h,fontSize:f.fontSize,multiline:f.multiline,voiceEnabled:f.voiceEnabled});
+      };
+      (parsed.editable||[]).forEach(f=>{
+        let mode="edit";
+        if(f.autoFill==="date")mode="auto-date";
+        else if(f.autoFill==="increment")mode="auto-num";
+        addUnique(f,mode);
+      });
+      (parsed.locked||[]).forEach(f=>{addUnique(f,"lock");});
+      setFields(all);
+      if(parsed.filenameConvention){
+        setFnConvention(parsed.filenameConvention);
+        if(parsed.filenameConvention.pattern)setReportTitle(parsed.filenameConvention.pattern);
+      }
+    }catch(e){
+      console.error("DOCX parse error:",e);
+      setErr("Could not parse DOCX fields: "+e.message);
+    }finally{setParsing(false);}
+  };
+
+  const ALLOWED_EXTS=["pdf","docx","doc","jpg","jpeg","png"];
+  const doFile=async(f)=>{
+    const e=f.name.split(".").pop().toLowerCase();
+    if(!ALLOWED_EXTS.includes(e)){setErr("Accepted formats: PDF, DOCX, JPG, PNG");return;}
+    setTf(f);setErr("");setUsedSavedId(null);setReportTitle(f.name.replace(/\.[^.]+$/,""));setFnConvention(null);setTplSaved(false);
+    try{
+      const buf=await f.arrayBuffer();const copy=buf.slice(0);setTfBuf(copy);
+      if(e==="pdf"){
+        parseFields(copy.slice(0),f.name);
+      }else if(e==="docx"||e==="doc"){
+        // Send docx as base64 to edge function for XML parsing
+        parseDocxFields(copy.slice(0),f.name);
+      }else{
+        // Image template — no field parsing, just store as-is
+        setFields([]);setParsing(false);
+      }
+    }catch(bufErr){console.error("File buffer read:",bufErr);}
+  };
 
   // Use a saved template — loads fields without re-parsing, but still needs the actual file uploaded
   // Job-specific locked fields become editable so user can enter new values for the new job
@@ -667,7 +730,7 @@ function CreateJob({user, onBack, onCreated}){
   // When file is uploaded after selecting a saved template, skip parsing
   const doFileWithSaved=async(f)=>{
     const e=f.name.split(".").pop().toLowerCase();
-    if(e!=="pdf"){setErr("Only PDF files are accepted. Please convert Word docs to PDF first.");return;}
+    if(!ALLOWED_EXTS.includes(e)){setErr("Accepted formats: PDF, DOCX, JPG, PNG");return;}
     setTf(f);setErr("");
     try{const buf=await f.arrayBuffer();setTfBuf(buf);}catch(bufErr){console.error("File buffer read:",bufErr);}
     // Fields already loaded from saved template — no parsing needed
@@ -836,9 +899,9 @@ function CreateJob({user, onBack, onCreated}){
             <div onDragOver={e=>{e.preventDefault();setDrag(true);}} onDragLeave={()=>setDrag(false)} onDrop={e=>{e.preventDefault();setDrag(false);if(e.dataTransfer.files.length)(usedSavedId?doFileWithSaved:doFile)(e.dataTransfer.files[0]);}} onClick={()=>document.getElementById("fi").click()}
               style={{border:`2px dashed ${drag?C.org:C.brd}`,borderRadius:12,padding:"32px 20px",textAlign:"center",cursor:"pointer",background:drag?"#1f1a14":C.inp}}>
               <div style={{fontSize:32,marginBottom:8}}>{usedSavedId?"📋":"📄"}</div>
-              <p style={{color:C.lt,fontSize:14,fontWeight:600,marginBottom:4}}>{usedSavedId?"Now upload the actual PDF file (parsing will be skipped)":"Drop your PDF template here"}</p>
-              <p style={{color:C.mut,fontSize:12}}>{usedSavedId?"Fields already loaded from saved template":"or tap to browse • .pdf only"}</p>
-              <input id="fi" type="file" accept=".pdf" style={{display:"none"}} onChange={e=>e.target.files[0]&&(usedSavedId?doFileWithSaved:doFile)(e.target.files[0])}/>
+              <p style={{color:C.lt,fontSize:14,fontWeight:600,marginBottom:4}}>{usedSavedId?"Now upload the actual file (parsing will be skipped)":"Drop your template here"}</p>
+              <p style={{color:C.mut,fontSize:12}}>{usedSavedId?"Fields already loaded from saved template":"or tap to browse • PDF, DOCX, JPG, PNG"}</p>
+              <input id="fi" type="file" accept=".pdf,.docx,.doc,.jpg,.jpeg,.png" style={{display:"none"}} onChange={e=>e.target.files[0]&&(usedSavedId?doFileWithSaved:doFile)(e.target.files[0])}/>
             </div>
           ):(
             <div style={{background:C.inp,border:`1px solid ${C.brd}`,borderRadius:12,padding:"14px 16px"}}>
@@ -1218,9 +1281,25 @@ function ReportEditor({job, user, onBack, reportDate}){
     try{
       const tplRecord=await db.getTemplate(job.id);
       if(!tplRecord||!tplRecord.storage_path)throw new Error("No template found.");
-      // Verify template is PDF
+      // For non-PDF templates, show a simple text preview
       if(tplRecord.file_type&&tplRecord.file_type!=="pdf"){
-        throw new Error("Template is not a PDF. Please re-upload as PDF.");
+        const allFields=buildEditableFields();
+        const cvs=document.createElement("canvas");cvs.width=612*2;cvs.height=792*2;
+        const ctx=cvs.getContext("2d");ctx.fillStyle="#ffffff";ctx.fillRect(0,0,cvs.width,cvs.height);
+        ctx.fillStyle="#333";ctx.font="bold 28px Helvetica, Arial, sans-serif";
+        ctx.fillText(job.name,72,80);
+        ctx.font="20px Helvetica, Arial, sans-serif";
+        let ty=130;
+        allFields.forEach(f=>{
+          if(ty>1500)return;
+          ctx.fillStyle="#888";ctx.fillText(f.name+":",72,ty);
+          ctx.fillStyle="#333";ctx.fillText(f.val||"—",300,ty);
+          ty+=36;
+        });
+        setViewingReport([cvs.toDataURL("image/jpeg",0.92)]);
+        cvs.width=0;cvs.height=0;
+        setViewLoading(false);
+        return;
       }
       const tplResp=await fetch(`${SB_URL}/storage/v1/object/report-source-docs/${tplRecord.storage_path}`,{
         headers:{apikey:SB_KEY,Authorization:`Bearer ${AUTH_TOKEN||SB_KEY}`}
@@ -1321,6 +1400,71 @@ function ReportEditor({job, user, onBack, reportDate}){
       if(!tplResp.ok)throw new Error("Could not download template file.");
       const tplBytes=await tplResp.arrayBuffer();
       const isPdfTemplate=tplRecord.file_type==="pdf";
+      const isDocxTemplate=tplRecord.file_type==="docx"||tplRecord.file_type==="doc";
+
+      // ── DOCX path: send to edge function for XML editing ──
+      if(isDocxTemplate){
+        const allFields=buildEditableFields();
+        const fieldValues={};
+        allFields.forEach(f=>{if(f.val)fieldValues[f.name]=f.val;});
+        // Convert template to base64
+        const tplUint8=new Uint8Array(tplBytes);
+        let tplBin="";for(let i=0;i<tplUint8.length;i++)tplBin+=String.fromCharCode(tplUint8[i]);
+        const tplB64=btoa(tplBin);
+        // Call generate-docx edge function
+        const genResp=await fetch(`${SB_URL}/functions/v1/generate-docx`,{
+          method:"POST",
+          headers:{"Content-Type":"application/json","Authorization":"Bearer "+SB_KEY,"apikey":SB_KEY},
+          body:JSON.stringify({docx_base64:tplB64,field_values:fieldValues})
+        });
+        if(!genResp.ok)throw new Error("Generate DOCX failed: "+(await genResp.text()));
+        const genData=await genResp.json();
+        if(genData.error)throw new Error(genData.error);
+        // Decode the returned filled DOCX
+        const filledBytes=Uint8Array.from(atob(genData.docx_base64),c=>c.charCodeAt(0));
+        const pdfBlob=new Blob([filledBytes],{type:"application/vnd.openxmlformats-officedocument.wordprocessingml.document"});
+        let binary="";for(let i=0;i<filledBytes.length;i++)binary+=String.fromCharCode(filledBytes[i]);
+        const pdfBase64=btoa(binary);
+        // Build filename (same logic as PDF path)
+        let rptNumber=1;
+        try{const cntR=await fetch(`${SB_URL}/rest/v1/reports?select=report_number&job_id=eq.${job.id}&order=report_number.desc&limit=1`,{headers:db._h()});const topR=cntR.ok?await cntR.json():[];rptNumber=(topR[0]?.report_number||0)+1;}catch(e){}
+        if(draftId){try{const exR=await fetch(`${SB_URL}/rest/v1/reports?select=report_number&id=eq.${draftId}`,{headers:db._h()});const exD=exR.ok?await exR.json():[];if(exD[0]?.report_number)rptNumber=exD[0].report_number;}catch(e){}}
+        const conv=job.field_config?.filenameConvention||{};
+        const padding=conv.numberPadding||0;
+        const rptNum=padding>0?String(rptNumber).padStart(padding,"0"):String(rptNumber);
+        const now=new Date();
+        const fmtMM=now.toLocaleDateString("en-US",{month:"2-digit",timeZone:tz});
+        const fmtDD=now.toLocaleDateString("en-US",{day:"2-digit",timeZone:tz});
+        const fmtYYYY=now.toLocaleDateString("en-US",{year:"numeric",timeZone:tz});
+        const monthNames=["January","February","March","April","May","June","July","August","September","October","November","December"];
+        const monNames=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+        const monthIdx=now.toLocaleDateString("en-US",{month:"numeric",timeZone:tz})-1;
+        const formatDate=(fmt)=>{if(!fmt)return"";return fmt.replace(/YYYY/g,fmtYYYY).replace(/MM/g,fmtMM).replace(/DD/g,fmtDD).replace(/Month/g,monthNames[monthIdx]||"").replace(/Mon/g,monNames[monthIdx]||"");};
+        const fnPattern=conv.pattern||job.report_filename_pattern||job.name||"Report";
+        let baseName=fnPattern.replace(/\.[^.]+$/,"");
+        baseName=baseName.replace(/\{report_number\}/g,rptNum);
+        baseName=baseName.replace(/\{date\}/g,formatDate(conv.dateFormat));
+        baseName=baseName.replace(/\{year\}/g,fmtYYYY);
+        const pdfFilename=baseName+".docx";
+        // Save report
+        const vals={};const lockVals={};
+        allFields.forEach(f=>{if(f.autoFill||f.mode==="edit")vals[f.name]=f.val;else lockVals[f.name]=f.val;});
+        const reportContent={vals,lockVals,photos:[],photoLayout:"1",lockFields:[],editFields:allFields};
+        await db.saveReport({job_id:job.id,user_id:user.id,report_date:todayISO,status:"submitted",content:JSON.stringify(reportContent),updated_at:new Date().toISOString()});
+        const storagePath=`${user.id}/${job.id}/reports/${pdfFilename}`;
+        let upR=await fetch(`${SB_URL}/storage/v1/object/report-source-docs/${storagePath}`,{
+          method:"POST",headers:{apikey:SB_KEY,Authorization:`Bearer ${AUTH_TOKEN||SB_KEY}`,"Content-Type":"application/octet-stream"},body:pdfBlob
+        });
+        if(!upR.ok){await fetch(`${SB_URL}/storage/v1/object/report-source-docs/${storagePath}`,{
+          method:"PUT",headers:{apikey:SB_KEY,Authorization:`Bearer ${AUTH_TOKEN||SB_KEY}`,"Content-Type":"application/octet-stream"},body:pdfBlob
+        });}
+        const userName=user.user_metadata?.full_name||user.email?.split("@")[0]||"Inspector";
+        const emailHtml=`<div style="font-family:-apple-system,sans-serif;max-width:600px;"><div style="background:#e8742a;padding:20px 24px;border-radius:8px 8px 0 0;"><h1 style="color:#fff;margin:0;font-size:20px;">My Daily Reports</h1></div><div style="background:#f9f9f9;padding:24px;border:1px solid #e0e0e0;border-top:none;border-radius:0 0 8px 8px;"><p style="color:#333;font-size:16px;">${userName} has submitted the daily report for <strong>${job.name}</strong> on ${todayDisplay}.</p><p style="color:#555;font-size:14px;">The filled DOCX report is attached.</p></div></div>`;
+        const teamEmails=job.team_emails||[];
+        setSubmitSuccess({pdfBlob,pdfFilename,pdfBase64,emailHtml,teamEmails,jobName:job.name,todayDisplay,userName});
+        setSubmitting(false);
+        return;
+      }
 
       // ── 2. Load template — use copyPages to preserve original visual content ──
       let pdfDoc;let srcDoc=null;

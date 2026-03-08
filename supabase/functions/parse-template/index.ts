@@ -1,13 +1,137 @@
 import "https://deno.land/x/xhr@0.3.0/mod.ts";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { BlobReader, ZipReader, TextWriter } from "https://deno.land/x/zipjs@v2.7.32/index.js";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-// Claude only does SEMANTIC classification — no coordinates
-const PROMPT = `You are analyzing text items extracted from an inspection report template PDF.
+// ── DOCX XML parser — extracts text structure from .docx ZIP ──
+async function parseDocxToTextItems(docxBytes: Uint8Array): Promise<any[]> {
+  const blob = new Blob([docxBytes]);
+  const reader = new ZipReader(new BlobReader(blob));
+  const entries = await reader.getEntries();
+
+  // Read document.xml (main body)
+  let documentXml = "";
+  for (const entry of entries) {
+    if (entry.filename === "word/document.xml") {
+      const writer = new TextWriter();
+      documentXml = await entry.getData!(writer);
+      break;
+    }
+  }
+  await reader.close();
+
+  if (!documentXml) throw new Error("No document.xml found in .docx");
+
+  // Parse the XML to extract text from table cells and paragraphs
+  // We create "text items" similar to pdf.js output but with table structure info
+  const items: any[] = [];
+  let y = 0; // simulated y position (increments per row/paragraph)
+  const PAGE_W = 612;
+
+  // Extract table rows: <w:tr> contains <w:tc> cells
+  // Extract paragraphs: <w:p> contains <w:r> runs with <w:t> text
+  const tableRowRegex = /<w:tr\b[^>]*>([\s\S]*?)<\/w:tr>/g;
+  const cellRegex = /<w:tc\b[^>]*>([\s\S]*?)<\/w:tc>/g;
+  const paraRegex = /<w:p\b[^>]*>([\s\S]*?)<\/w:p>/g;
+  const runRegex = /<w:r\b[^>]*>([\s\S]*?)<\/w:r>/g;
+  const textRegex = /<w:t[^>]*>([^<]*)<\/w:t>/g;
+  const boldRegex = /<w:b\s*\/?>|<w:b\s[^>]*\/>/;
+
+  // Helper: extract all text from a run/paragraph XML chunk
+  const extractText = (xml: string): string => {
+    let text = "";
+    let m;
+    const re = /<w:t[^>]*>([^<]*)<\/w:t>/g;
+    while ((m = re.exec(xml)) !== null) text += m[1];
+    return text.trim();
+  };
+
+  // Helper: check if a run is bold
+  const isBold = (xml: string): boolean => boldRegex.test(xml);
+
+  // Track whether we're inside tables or free paragraphs
+  // First pass: extract table content
+  let tableMatch;
+  const tableRe = /<w:tbl\b[^>]*>([\s\S]*?)<\/w:tbl>/g;
+  while ((tableMatch = tableRe.exec(documentXml)) !== null) {
+    const tableXml = tableMatch[1];
+    let rowMatch;
+    const rowRe = /<w:tr\b[^>]*>([\s\S]*?)<\/w:tr>/g;
+    while ((rowMatch = rowRe.exec(tableXml)) !== null) {
+      const rowXml = rowMatch[1];
+      let cellMatch;
+      const cellRe = /<w:tc\b[^>]*>([\s\S]*?)<\/w:tc>/g;
+      let cellX = 36; // left margin
+      const cellWidth = (PAGE_W - 72) / 4; // approximate equal column widths
+      let cellIdx = 0;
+      while ((cellMatch = cellRe.exec(rowXml)) !== null) {
+        const cellXml = cellMatch[1];
+        // Extract all text from this cell
+        const cellTexts: string[] = [];
+        let pMatch;
+        const pRe = /<w:p\b[^>]*>([\s\S]*?)<\/w:p>/g;
+        while ((pMatch = pRe.exec(cellXml)) !== null) {
+          const pText = extractText(pMatch[1]);
+          if (pText) cellTexts.push(pText);
+        }
+        const fullText = cellTexts.join(" ").trim();
+        if (fullText) {
+          // Check if any run in this cell is bold (likely a label)
+          const bold = isBold(cellXml);
+          items.push({
+            str: fullText,
+            x: Math.round(cellX),
+            y: Math.round(y),
+            w: Math.round(cellWidth),
+            h: 14,
+            page: 1,
+            fontSize: 10,
+            bold,
+            inTable: true,
+            cellIndex: cellIdx,
+          });
+        }
+        cellX += cellWidth;
+        cellIdx++;
+      }
+      y += 18; // row height
+    }
+    y += 10; // gap after table
+  }
+
+  // Second pass: extract standalone paragraphs (outside tables)
+  // Remove tables first, then parse remaining paragraphs
+  const noTables = documentXml.replace(/<w:tbl\b[^>]*>[\s\S]*?<\/w:tbl>/g, "");
+  let pMatch;
+  const pRe = /<w:p\b[^>]*>([\s\S]*?)<\/w:p>/g;
+  while ((pMatch = pRe.exec(noTables)) !== null) {
+    const pText = extractText(pMatch[1]);
+    if (pText && pText.length > 1) {
+      const bold = isBold(pMatch[1]);
+      items.push({
+        str: pText,
+        x: 36,
+        y: Math.round(y),
+        w: PAGE_W - 72,
+        h: 14,
+        page: 1,
+        fontSize: bold ? 14 : 10,
+        bold,
+        inTable: false,
+      });
+      y += 16;
+    }
+  }
+
+  return items;
+}
+
+// Claude does SEMANTIC classification — coordinates come from text extraction (PDF) or table structure (DOCX)
+const PROMPT = `You are analyzing text items extracted from an inspection report template.
 Each item has: str (the text), x, y, w, h (position/size in points), page, fontSize.
 
 YOUR JOB: Identify which text items are FIELD LABELS (like "Date:", "Project Name:", "IOR Notes:").
@@ -79,21 +203,32 @@ serve(async (req) => {
 
   try {
     const body = await req.json();
-    const { text_items, file_name } = body;
+    const { text_items, file_name, docx_base64 } = body;
 
-    if (!text_items || !text_items.length) {
-      return new Response(JSON.stringify({ error: "No text items provided" }), {
+    // Two paths: PDF sends text_items, DOCX sends docx_base64
+    let resolvedItems = text_items;
+    let fileType = "pdf";
+
+    if (docx_base64) {
+      // Parse .docx XML to extract text items
+      fileType = "docx";
+      const raw = Uint8Array.from(atob(docx_base64), c => c.charCodeAt(0));
+      resolvedItems = await parseDocxToTextItems(raw);
+    }
+
+    if (!resolvedItems || !resolvedItems.length) {
+      return new Response(JSON.stringify({ error: "No text items found in document" }), {
         status: 400,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
     // Format text items for Claude — include position data for context
-    const itemsSummary = text_items.map((t: any, i: number) =>
-      `[${i}] page:${t.page} str:"${t.str}" x:${t.x} y:${t.y} w:${t.w} h:${t.h} fs:${t.fontSize}`
+    const itemsSummary = resolvedItems.map((t: any, i: number) =>
+      `[${i}] page:${t.page} str:"${t.str}" x:${t.x} y:${t.y} w:${t.w} h:${t.h} fs:${t.fontSize}${t.bold ? " BOLD" : ""}${t.inTable ? " TABLE" : ""}`
     ).join("\n");
 
-    const userMsg = `Here are ${text_items.length} text items extracted from "${file_name}":\n\n${itemsSummary}\n\n${PROMPT}`;
+    const userMsg = `Here are ${resolvedItems.length} text items extracted from "${file_name}" (${fileType}):\n\n${itemsSummary}\n\n${PROMPT}`;
 
     const apiKey = Deno.env.get("ANTHROPIC_API_KEY");
     const apiHeaders = {
@@ -155,7 +290,7 @@ serve(async (req) => {
     // ── Reconstruct coordinates from real text positions ──
     // Build a lookup of text items by str for fast matching
     const itemsByStr = new Map<string, any[]>();
-    for (const item of text_items) {
+    for (const item of resolvedItems) {
       const key = (item.str || "").trim();
       if (!itemsByStr.has(key)) itemsByStr.set(key, []);
       itemsByStr.get(key)!.push(item);
@@ -163,7 +298,7 @@ serve(async (req) => {
 
     // Also build sorted-by-position list per page for neighbor lookups
     const itemsByPage = new Map<number, any[]>();
-    for (const item of text_items) {
+    for (const item of resolvedItems) {
       const pg = item.page || 1;
       if (!itemsByPage.has(pg)) itemsByPage.set(pg, []);
       itemsByPage.get(pg)!.push(item);
@@ -205,7 +340,7 @@ serve(async (req) => {
       }
 
       // Substring match — find text items containing the label
-      for (const item of text_items) {
+      for (const item of resolvedItems) {
         if ((item.str || "").toLowerCase().includes(label.toLowerCase())) {
           if (!page || item.page === page) return item;
         }
@@ -345,9 +480,13 @@ serve(async (req) => {
       dedupedLocked = dedupedLocked.filter((f: any) => !NOTES_KEYWORDS.some((k) => (f.name || "").toLowerCase().includes(k)));
     }
 
-    const result: any = { editable: dedupedEditable, locked: dedupedLocked };
+    const result: any = { editable: dedupedEditable, locked: dedupedLocked, fileType };
     if (filenameConvention) {
       result.filenameConvention = filenameConvention;
+    }
+    // For docx, also return the extracted text items so client can store them
+    if (fileType === "docx") {
+      result.docxTextItems = resolvedItems;
     }
 
     return new Response(JSON.stringify(result), {
