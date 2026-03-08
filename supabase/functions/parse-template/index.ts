@@ -23,11 +23,14 @@ POSITION COORDINATES — estimate PRECISE position for each field:
 - "w": width of the value area in points
 - "h": height of the value area in points
 - "fontSize": estimated font size (typically 8-12pt)
+- "labelEndX": x position in PDF points where the label text ENDS (right after the colon or last character of the label). This is critical — the value will be placed starting at labelEndX + a small gap, so it appears directly after the label text.
 
 COORDINATE PRECISION IS CRITICAL:
 - x = where the VALUE text starts, not the label. "Date: 04 February 2026" → x points to where "04" starts.
+- labelEndX = where the label colon/text ends. For "Date: 04 Feb..." → labelEndX points to right after the colon+space. x and labelEndX should be very close (within a few points).
 - Each field on a different line MUST have a different y value. Measure each independently.
 - For fields side-by-side on the same row (like "Date:" on the left and "Project Name:" on the right), they share a similar y but have different x values.
+- The app will place typed values at labelEndX + 3pt, so be precise about where each label ends.
 
 NOTES/OBSERVATIONS SECTION:
 - Many forms have a large notes area below the header table (labeled "IOR Notes:", "Observations:", "Notes:", etc.)
@@ -43,7 +46,7 @@ NOTES/OBSERVATIONS SECTION:
 SIGNATURE LINES: Ignore signature lines (like "x___Name___") — do not include them as fields.
 
 Return ONLY valid JSON, no markdown or explanation:
-{"editable":[{"name":"Date","value":"04 February 2026","autoFill":"date","page":1,"x":110,"y":148,"w":160,"h":14,"fontSize":10}],"locked":[{"name":"Project Name","value":"Woodland Park MS Mod","page":1,"x":395,"y":148,"w":180,"h":14,"fontSize":10}]}
+{"editable":[{"name":"Date","value":"04 February 2026","autoFill":"date","page":1,"x":110,"y":148,"w":160,"h":14,"fontSize":10,"labelEndX":107}],"locked":[{"name":"Project Name","value":"Woodland Park MS Mod","page":1,"x":395,"y":148,"w":180,"h":14,"fontSize":10,"labelEndX":392}]}
 
 autoFill values: "date" (for date fields) or "increment" (for report numbers). voiceEnabled=true for notes/observations fields.`;
 

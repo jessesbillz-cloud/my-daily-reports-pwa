@@ -585,7 +585,7 @@ function CreateJob({user, onBack, onCreated}){
         // Only allow ONE notes-like field (first one wins)
         if(isNotesField(f.name)){if(notesAdded)return;notesAdded=true;}
         seenNames.add(key);
-        all.push({name:f.name,value:f.value||"",mode,page:f.page,x:f.x,y:f.y,w:f.w,h:f.h,fontSize:f.fontSize,multiline:f.multiline,voiceEnabled:f.voiceEnabled});
+        all.push({name:f.name,value:f.value||"",mode,page:f.page,x:f.x,y:f.y,w:f.w,h:f.h,fontSize:f.fontSize,multiline:f.multiline,voiceEnabled:f.voiceEnabled,labelEndX:f.labelEndX});
       };
       (parsed.editable||[]).forEach(f=>{
         let mode="edit";
@@ -681,7 +681,7 @@ function CreateJob({user, onBack, onCreated}){
       const es=effSch();
       // Store the original uploaded filename (minus extension) exactly as the pattern
       const fnPattern=tf?tf.name.replace(/\.[^.]+$/,""):("DR_01_"+jn.trim().replace(/\s+/g,"_")+"_"+new Date().toLocaleDateString("en-US",{month:"2-digit",day:"2-digit",year:"numeric",timeZone:tz}).replace(/\//g,""));
-      const coords=(f)=>({page:f.page,x:f.x,y:f.y,w:f.w,h:f.h,fontSize:f.fontSize,multiline:f.multiline});
+      const coords=(f)=>({page:f.page,x:f.x,y:f.y,w:f.w,h:f.h,fontSize:f.fontSize,multiline:f.multiline,labelEndX:f.labelEndX});
       // Fields marked lockAfterCreate (from saved template reuse) go back to locked with the user's new values
       const editFields=fields.filter(f=>f.mode==="edit"&&!f.lockAfterCreate).map(f=>({name:f.name,value:f.value,originalValue:f.value||"",voiceEnabled:true,...coords(f)}));
       const lockFields=[...fields.filter(f=>f.mode==="lock"),...fields.filter(f=>f.mode==="edit"&&f.lockAfterCreate)].map(f=>({name:f.name,value:f.value,...coords(f)}));
@@ -1131,7 +1131,9 @@ function ReportEditor({job, user, onBack, reportDate}){
       if(!isAutoField&&f.originalValue&&f.val===f.originalValue)return;
       const sz=(f.fontSize||10)*scale;
       ctx.font=sz+"px Helvetica, Arial, sans-serif";
-      const drawX=f.x*scale;
+      // Use labelEndX to position value right after the label colon
+      const baseX=(f.labelEndX!=null)?(f.labelEndX+3):f.x;
+      const drawX=baseX*scale;
       const drawY=f.y*scale+sz;
       // Cover old template text with white rectangle before drawing new value
       const hasOriginal=f.originalValue&&f.originalValue.trim();
@@ -1269,21 +1271,23 @@ function ReportEditor({job, user, onBack, reportDate}){
         if(pageIdx<0||pageIdx>=pages.length)return;
         const page=pages[pageIdx];const pageH=page.getHeight();
         const sz=f.fontSize||10;const pdfY=pageH-f.y-sz;
+        // Use labelEndX to position value right after the label colon, with a small gap
+        const valueX=(f.labelEndX!=null)?(f.labelEndX+3):f.x;
         // Cover old template text with white rectangle before drawing new value
         // This handles auto-date, auto-num, AND any field whose value changed from original
         const hasOriginal=f.originalValue&&f.originalValue.trim();
         if(hasOriginal){
           const coverW=f.w||Math.max(font.widthOfTextAtSize(f.originalValue,sz)+10,120);
           const coverH=f.h||sz+6;
-          page.drawRectangle({x:f.x-2,y:pdfY-4,width:coverW+4,height:coverH+4,color:rgb(1,1,1)});
+          page.drawRectangle({x:valueX-2,y:pdfY-4,width:coverW+4,height:coverH+4,color:rgb(1,1,1)});
         }
         if(f.multiline&&f.w){
           const maxW=f.w;const words=f.val.split(" ");let lines=[];let line="";
           words.forEach(w=>{const test=line?line+" "+w:w;const tw=font.widthOfTextAtSize(test,sz);if(tw>maxW&&line){lines.push(line);line=w;}else line=test;});
           if(line)lines.push(line);
-          lines.forEach((ln,i)=>{const ly=pdfY-(i*sz*1.2);if(ly>0)page.drawText(ln,{x:f.x,y:ly,size:sz,font,color:rgb(0,0,0)});});
+          lines.forEach((ln,i)=>{const ly=pdfY-(i*sz*1.2);if(ly>0)page.drawText(ln,{x:valueX,y:ly,size:sz,font,color:rgb(0,0,0)});});
         }else{
-          page.drawText(String(f.val),{x:f.x,y:pdfY,size:sz,font,color:rgb(0,0,0)});
+          page.drawText(String(f.val),{x:valueX,y:pdfY,size:sz,font,color:rgb(0,0,0)});
         }
       });
 
@@ -1949,7 +1953,7 @@ function JobDetail({job, user, onBack, onDeleted}){
             <button onClick={async()=>{
               setFieldEditSaving(true);
               try{
-                const coords=(f)=>({page:f.page,x:f.x,y:f.y,w:f.w,h:f.h,fontSize:f.fontSize,multiline:f.multiline});
+                const coords=(f)=>({page:f.page,x:f.x,y:f.y,w:f.w,h:f.h,fontSize:f.fontSize,multiline:f.multiline,labelEndX:f.labelEndX});
                 const editF=fieldEditFields.filter(f=>f.mode==="edit").map(f=>({name:f.name,value:f.value||"",originalValue:f.value||"",voiceEnabled:true,...coords(f)}));
                 const lockF=fieldEditFields.filter(f=>f.mode==="lock").map(f=>({name:f.name,value:f.value||"",...coords(f)}));
                 const autoF=fieldEditFields.filter(f=>f.mode==="auto-date"||f.mode==="auto-num").map(f=>({name:f.name,value:f.value||"",originalValue:f.value||"",autoFill:f.mode==="auto-date"?"date":"increment",...coords(f)}));
