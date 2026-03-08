@@ -138,28 +138,35 @@ YOUR JOB: Identify which text items are FIELD LABELS (like "Date:", "Project Nam
 For each label you find, classify it.
 
 FIELD CLASSIFICATION — determine if each field CHANGES per report or STAYS THE SAME:
-- CHANGES per report (→ editable): Date, Report Date, Report Number, DR#, Daily Report, Notes, IOR Notes, Observations, Comments, Work Observed, Weather, Hours, Time In, Time Out, Temperature, Correction Notices Issued, Observation Letters Issued
+- CHANGES per report (→ editable): Date, Report Date, Report Number, DR#, Daily Report, Notes, IOR Notes, Observations, Comments, Work Observed, Weather, Hours, Time In, Time Out, Temperature, Correction Notices Issued, Observation Letters Issued, Inspection Activities, On-Site Activities
 - STAYS THE SAME (→ locked): Project Name, Owner, Client, District, DSA File #, DSA App #, Contractor, Architect, Engineer, Inspector, IOR, Project Inspector, Address, Location, Project No, Project Manager, Jurisdiction
 
+IMPORTANT — DETECTING ALL DATE FIELDS:
+- There may be MULTIPLE date fields on the document (e.g. a "Date:" at the top AND a date near a signature at the bottom).
+- Dates can appear ANYWHERE: top of page, bottom-right corner, next to signatures, in footers.
+- If a date value (e.g. "Jan 31, 2026", "01/31/2026") appears near a signature line or at the bottom of the page, it IS a date field — include it as a separate field like "Signature Date".
+- Look for standalone date values even WITHOUT an explicit "Date:" label. If a text item looks like a date and is near a signature, it is a date field.
+
 For each field label found, return:
-- "label": The exact text string from the PDF (must match one of the str values)
-- "name": Clean field name (e.g. "Date", "Project Name", "IOR Notes")
+- "label": The exact text string from the document (must match one of the str values)
+- "name": Clean field name (e.g. "Date", "Signature Date", "Project Name", "IOR Notes")
 - "category": "editable" or "locked"
-- "layout": "inline" (value goes right after label on same line) or "below" (value area is below the label)
-- "autoFill": "date" for date fields, "increment" for report number fields, null otherwise
-- "voiceEnabled": true for notes/observations/comments fields, false otherwise
-- "multiline": true for notes/observations/comments fields, false otherwise
+- "layout": "inline" (value is in the adjacent cell or after the label on same line) or "below" (value area is below the label)
+- "autoFill": "date" for ALL date fields (including signature dates), "increment" for report number fields, null otherwise
+- "voiceEnabled": true for notes/observations/comments/activities fields, false otherwise
+- "multiline": true for notes/observations/comments/activities fields, false otherwise
 - "valueText": If you can identify the current value text near this label, include the exact str. Otherwise empty string.
 
 CRITICAL RULES:
-1. NEVER output duplicate field names. Each field appears EXACTLY ONCE.
+1. NEVER output duplicate field names. Each field appears EXACTLY ONCE. If there are multiple dates, give them UNIQUE names (e.g. "Date", "Signature Date", "Report Date").
 2. If a label appears multiple times (e.g. "IOR Notes" in header AND as section heading), pick the one with the larger writable area (layout: "below").
 3. NOTES/OBSERVATIONS: Output exactly ONE notes field with layout "below", multiline true, voiceEnabled true.
-4. Ignore signature lines and page numbers.
+4. Ignore signature LINES themselves (the line where someone signs) and page numbers.
 5. The "label" field MUST exactly match a "str" value from the input text items.
+6. Date values next to signatures ARE fields and MUST be included.
 
 Return ONLY valid JSON object with "fields" array, no markdown:
-{"fields":[{"label":"Date:","name":"Date","category":"editable","layout":"inline","autoFill":"date","voiceEnabled":false,"multiline":false,"valueText":"04 February 2026"},{"label":"IOR Notes","name":"IOR Notes","category":"editable","layout":"below","autoFill":null,"voiceEnabled":true,"multiline":true,"valueText":""}]}`;
+{"fields":[{"label":"Date:","name":"Date","category":"editable","layout":"inline","autoFill":"date","voiceEnabled":false,"multiline":false,"valueText":"04 February 2026"},{"label":"Jan 31, 2026","name":"Signature Date","category":"editable","layout":"inline","autoFill":"date","voiceEnabled":false,"multiline":false,"valueText":"Jan 31, 2026"},{"label":"IOR Notes","name":"IOR Notes","category":"editable","layout":"below","autoFill":null,"voiceEnabled":true,"multiline":true,"valueText":""}]}`;
 
 // Separate prompt for filename convention analysis
 const FILENAME_PROMPT = `You are analyzing a PDF filename to determine its naming convention.

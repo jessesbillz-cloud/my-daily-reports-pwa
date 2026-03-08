@@ -9,8 +9,9 @@ const corsHeaders = {
 /**
  * Generate a filled DOCX report by editing the template's XML.
  *
- * Input: { docx_base64, field_values: { "Date": "Mar 8, 2026", "Weather": "Clear", ... } }
- * Output: { docx_base64: "..." } (the modified DOCX as base64)
+ * Strategy: Parse the XML structurally (tables → rows → cells → paragraphs → runs → text).
+ * For each field label found, locate the value cell and replace ALL its text with the new value.
+ * This prevents overlay issues where old text remains visible under new text.
  */
 serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -42,7 +43,6 @@ serve(async (req) => {
         const writer = new TextWriter();
         documentXml = await entry.getData!(writer);
       } else {
-        // Store all other files as-is
         const blobWriter = new BlobWriter();
         const entryBlob = await entry.getData!(blobWriter);
         const arrBuf = await entryBlob.arrayBuffer();
@@ -58,58 +58,233 @@ serve(async (req) => {
       throw new Error("No document.xml found in DOCX");
     }
 
-    // ── Replace field values in the document XML ──
-    // Strategy: Find table cells that contain field labels (bold text followed by value),
-    // and replace the value text in the adjacent cell or same cell.
-    //
-    // DOCX table structure: <w:tbl> → <w:tr> (row) → <w:tc> (cell) → <w:p> (paragraph) → <w:r> (run) → <w:t> (text)
-    //
-    // For each field_value, find the label text in the XML and replace the value
-    // that follows it (in the next cell of the same row, or after the label in the same cell)
+    // ── Helper: extract all visible text from an XML chunk ──
+    const extractText = (xml: string): string => {
+      let text = "";
+      let m;
+      const re = /<w:t[^>]*>([^<]*)<\/w:t>/g;
+      while ((m = re.exec(xml)) !== null) text += m[1];
+      return text.trim();
+    };
 
+    // ── Helper: clear all <w:t> content in an XML chunk ──
+    // Sets every <w:t> to empty string, preserving all formatting/structure
+    const clearAllText = (xml: string): string => {
+      return xml.replace(/<w:t([^>]*)>[^<]*<\/w:t>/g, '<w:t$1></w:t>');
+    };
+
+    // ── Helper: set value in a cell — clears all text, puts new value in first <w:t> ──
+    const setCellValue = (cellXml: string, newValue: string): string => {
+      // First clear ALL text nodes
+      let result = clearAllText(cellXml);
+      // Then set the first <w:t> to the new value (with xml:space="preserve" for whitespace)
+      let replaced = false;
+      result = result.replace(/<w:t([^>]*)><\/w:t>/, (match, attrs) => {
+        if (replaced) return match;
+        replaced = true;
+        return `<w:t xml:space="preserve">${escapeXml(newValue)}</w:t>`;
+      });
+      // If no <w:t> existed at all, inject a run with text into the first paragraph
+      if (!replaced) {
+        result = result.replace(
+          /(<w:p\b[^>]*>(?:<w:pPr>[\s\S]*?<\/w:pPr>)?)/,
+          `$1<w:r><w:t xml:space="preserve">${escapeXml(newValue)}</w:t></w:r>`
+        );
+      }
+      return result;
+    };
+
+    // ── Build structured table data for reliable field matching ──
+    // Extract all tables with their rows and cells
+    const tableRegex = /<w:tbl\b[^>]*>[\s\S]*?<\/w:tbl>/g;
+    const rowRegex = /<w:tr\b[^>]*>[\s\S]*?<\/w:tr>/g;
+    const cellRegex = /<w:tc\b[^>]*>[\s\S]*?<\/w:tc>/g;
+
+    // Normalize a label for matching: lowercase, trim, remove trailing colon/spaces
+    const normalizeLabel = (s: string): string =>
+      s.toLowerCase().replace(/[\s:]+$/g, "").replace(/\s+/g, " ").trim();
+
+    // ── Process each field value ──
     for (const [fieldName, newValue] of Object.entries(field_values)) {
       if (newValue === undefined || newValue === null) continue;
       const val = String(newValue);
+      const normalizedField = normalizeLabel(fieldName);
 
-      // Build possible label patterns to search for
-      const labelVariants = [
-        fieldName + ":",
-        fieldName,
-        fieldName.replace(/\s+/g, " "),
-      ];
+      let matched = false;
 
-      // Find and replace in table cells
-      // Pattern: a row has cells where one contains the label (bold) and the next contains the value
-      // We need to find the label cell and replace content in the value cell
+      // ── Strategy 1: Table cell replacement ──
+      // Walk through every table → row → cell looking for the label
+      // When found, replace content in the ADJACENT cell (next cell in same row)
+      // or in the SAME cell after the label text
 
-      // First try: look for the label text split across w:t elements in the XML
-      // The label might be in one cell and the value in the adjacent cell
-      for (const label of labelVariants) {
-        // Escape for regex
-        const escaped = label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      // We need to work on the full document XML and do replacements in-place
+      // Use a function that finds and replaces within specific table structures
 
-        // Pattern 1: Label and value in adjacent table cells within the same row
-        // Look for <w:tc> containing the label, followed by <w:tc> containing the old value
-        const rowRegex = new RegExp(
-          `(<w:tc\\b[^>]*>(?:(?!<\\/w:tc>)[\\s\\S])*?${escaped}(?:(?!<\\/w:tc>)[\\s\\S])*?<\\/w:tc>\\s*<w:tc\\b[^>]*>(?:(?!<\\/w:tc>)[\\s\\S])*?)(<w:t[^>]*>)([^<]*?)(<\\/w:t>)`,
-          "i"
-        );
+      // Extract all table blocks
+      let tableMatch;
+      const tblRe = /<w:tbl\b[^>]*>[\s\S]*?<\/w:tbl>/g;
 
-        if (rowRegex.test(documentXml)) {
-          documentXml = documentXml.replace(rowRegex, `$1$2${escapeXml(val)}$4`);
-          break;
+      // Reset regex
+      tblRe.lastIndex = 0;
+      while (!matched && (tableMatch = tblRe.exec(documentXml)) !== null) {
+        const tableXml = tableMatch[0];
+        const tableStart = tableMatch.index;
+
+        // Extract rows from this table
+        let rowMatch;
+        const rRe = /<w:tr\b[^>]*>[\s\S]*?<\/w:tr>/g;
+        rRe.lastIndex = 0;
+
+        while (!matched && (rowMatch = rRe.exec(tableXml)) !== null) {
+          const rowXml = rowMatch[0];
+
+          // Extract cells from this row
+          const cells: { xml: string; text: string; start: number }[] = [];
+          let cellMatch;
+          const cRe = /<w:tc\b[^>]*>[\s\S]*?<\/w:tc>/g;
+          cRe.lastIndex = 0;
+
+          while ((cellMatch = cRe.exec(rowXml)) !== null) {
+            cells.push({
+              xml: cellMatch[0],
+              text: extractText(cellMatch[0]),
+              start: cellMatch.index,
+            });
+          }
+
+          // Look for label cell
+          for (let i = 0; i < cells.length; i++) {
+            const cellText = normalizeLabel(cells[i].text);
+
+            // Check if this cell contains our field label
+            if (cellText === normalizedField ||
+                cellText === normalizedField + ":" ||
+                cellText.endsWith(normalizedField) ||
+                cellText.endsWith(normalizedField + ":")) {
+
+              // ── Adjacent cell: value is in the NEXT cell ──
+              if (i + 1 < cells.length) {
+                const oldValueCell = cells[i + 1].xml;
+                const newValueCell = setCellValue(oldValueCell, val);
+
+                // Replace in the row
+                const newRowXml = rowXml.replace(oldValueCell, newValueCell);
+                // Replace the row in the table
+                const newTableXml = tableXml.replace(rowXml, newRowXml);
+                // Replace the table in the document
+                documentXml = documentXml.replace(tableXml, newTableXml);
+                matched = true;
+                break;
+              }
+
+              // ── Same cell: label and value in one cell (e.g. "Date: Jan 31, 2026") ──
+              // The label is part of the cell text; we need to keep the label but replace the value
+              // Find the label text runs and the value text runs
+              const cellXml = cells[i].xml;
+
+              // Find all <w:r> runs in this cell
+              const runs: { xml: string; text: string }[] = [];
+              let runMatch;
+              const runRe = /<w:r\b[^>]*>[\s\S]*?<\/w:r>/g;
+              runRe.lastIndex = 0;
+              while ((runMatch = runRe.exec(cellXml)) !== null) {
+                runs.push({ xml: runMatch[0], text: extractText(runMatch[0]) });
+              }
+
+              // Find where the label ends and value begins
+              let accText = "";
+              let labelEndIdx = -1;
+              for (let r = 0; r < runs.length; r++) {
+                accText += runs[r].text;
+                const accNorm = normalizeLabel(accText);
+                if (accNorm === normalizedField || accNorm.endsWith(normalizedField)) {
+                  labelEndIdx = r;
+                  break;
+                }
+              }
+
+              if (labelEndIdx >= 0 && labelEndIdx < runs.length - 1) {
+                // Clear all runs after the label, put value in the first one after label
+                let newCellXml = cellXml;
+                for (let r = labelEndIdx + 1; r < runs.length; r++) {
+                  if (r === labelEndIdx + 1) {
+                    // First value run: set to new value
+                    const cleaned = clearAllText(runs[r].xml);
+                    const withValue = cleaned.replace(
+                      /<w:t([^>]*)><\/w:t>/,
+                      `<w:t xml:space="preserve"> ${escapeXml(val)}</w:t>`
+                    );
+                    newCellXml = newCellXml.replace(runs[r].xml, withValue);
+                  } else {
+                    // Subsequent value runs: clear them
+                    newCellXml = newCellXml.replace(runs[r].xml, clearAllText(runs[r].xml));
+                  }
+                }
+                const newRowXml = rowXml.replace(cellXml, newCellXml);
+                const newTableXml = tableXml.replace(rowXml, newRowXml);
+                documentXml = documentXml.replace(tableXml, newTableXml);
+                matched = true;
+                break;
+              }
+            }
+          }
         }
+      }
 
-        // Pattern 2: Label and value in the same cell (label: value format)
-        // Look for "Label:" followed by text in the next run
-        const sameCellRegex = new RegExp(
-          `(${escaped}\\s*<\\/w:t>(?:(?!<\\/w:tc>)[\\s\\S])*?<w:t[^>]*>)([^<]*?)(<\\/w:t>)`,
+      // ── Strategy 2: Standalone paragraphs (outside tables) ──
+      // Look for paragraphs with label text followed by value text
+      if (!matched) {
+        // Try to find the label in standalone paragraphs
+        const labelVariants = [
+          fieldName + ":",
+          fieldName,
+          fieldName.replace(/\s+/g, " "),
+        ];
+
+        for (const label of labelVariants) {
+          const escaped = label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+          // Find a paragraph containing this label, then replace text in next run
+          const paraWithLabel = new RegExp(
+            `(<w:p\\b[^>]*>(?:(?!<\\/w:p>)[\\s\\S])*?<w:t[^>]*>[^<]*${escaped}[^<]*<\\/w:t>)` +
+            `((?:(?!<\\/w:p>)[\\s\\S])*?)(<\\/w:p>)`,
+            "i"
+          );
+
+          if (paraWithLabel.test(documentXml)) {
+            documentXml = documentXml.replace(paraWithLabel, (fullMatch, beforeLabel, afterLabel, closeP) => {
+              // Clear all <w:t> in the after-label portion and set first one to value
+              let cleared = clearAllText(afterLabel);
+              let set = false;
+              cleared = cleared.replace(/<w:t([^>]*)><\/w:t>/, (m: string, attrs: string) => {
+                if (set) return m;
+                set = true;
+                return `<w:t xml:space="preserve"> ${escapeXml(val)}</w:t>`;
+              });
+              // If no <w:t> existed in after portion, append a run
+              if (!set) {
+                cleared += `<w:r><w:t xml:space="preserve"> ${escapeXml(val)}</w:t></w:r>`;
+              }
+              return beforeLabel + cleared + closeP;
+            });
+            matched = true;
+            break;
+          }
+        }
+      }
+
+      // ── Strategy 3: Fallback — broad text replacement ──
+      // If structured approaches failed, try a simple find-and-replace of the old value
+      // This handles edge cases where the label isn't in a standard position
+      if (!matched) {
+        // Try to find the field label anywhere and replace the next <w:t> content
+        const escaped = fieldName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        const broadRegex = new RegExp(
+          `(${escaped}[:\\s]*<\\/w:t>(?:[\\s\\S]*?)<w:t[^>]*>)([^<]*)(<\\/w:t>)`,
           "i"
         );
-
-        if (sameCellRegex.test(documentXml)) {
-          documentXml = documentXml.replace(sameCellRegex, `$1${escapeXml(val)}$3`);
-          break;
+        if (broadRegex.test(documentXml)) {
+          documentXml = documentXml.replace(broadRegex, `$1${escapeXml(val)}$3`);
         }
       }
     }
