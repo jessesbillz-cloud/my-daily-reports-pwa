@@ -997,8 +997,9 @@ function ReportEditor({job, user, onBack, reportDate}){
             if(c.lockVals)setLockVals(p=>({...p,...c.lockVals}));
             if(c.photos)setPhotos(c.photos);
             if(c.photoLayout)setPhotoLayout(c.photoLayout);
-            if(c.lockFields)setLockFields(c.lockFields);
-            if(c.editFields)setEditFields(c.editFields);
+            // Apply notes dedup to restored fields (fixes old drafts saved with duplicates)
+            if(c.lockFields){const editHasN=(c.editFields||initEdit).some(f=>isNotes(f.name));setLockFields(editHasN?c.lockFields.filter(f=>!isNotes(f.name)):dedupNotes(c.lockFields));}
+            if(c.editFields)setEditFields(dedupNotes(c.editFields));
           }
         }
       }catch(e){console.error("Load report error:",e);}
@@ -1099,15 +1100,20 @@ function ReportEditor({job, user, onBack, reportDate}){
 
   // Shared: draw fields onto a canvas context (for View Report preview)
   const drawFieldsOnCanvas=(ctx,fields,pageNum,scale,pageH)=>{
-    fields.filter(f=>(f.page||1)===pageNum&&f.val&&f.x&&f.y).forEach(f=>{
+    fields.filter(f=>(f.page||1)===pageNum&&f.val&&f.x!=null&&f.y!=null).forEach(f=>{
       // Skip values already baked into the PDF template (but always draw auto-date/auto-num)
       const isAutoField=f.autoFill==="date"||f.autoFill==="increment";
       if(!isAutoField&&f.originalValue&&f.val===f.originalValue)return;
       const sz=(f.fontSize||10)*scale;
       ctx.font=sz+"px Helvetica, Arial, sans-serif";
-      ctx.fillStyle="#000000";
       const drawX=f.x*scale;
       const drawY=f.y*scale+sz;
+      // For auto-date/auto-num fields, draw white bg to cover the old template date
+      if(isAutoField&&f.w){
+        ctx.fillStyle="#ffffff";
+        ctx.fillRect(drawX-1,f.y*scale-1,(f.w||120)*scale+2,(f.h||sz)*scale+2);
+      }
+      ctx.fillStyle="#000000";
       if(f.multiline&&f.w){
         const maxW=f.w*scale;
         const words=f.val.split(" ");let lines=[];let line="";
@@ -1226,7 +1232,7 @@ function ReportEditor({job, user, onBack, reportDate}){
       // ── 4. Draw field values onto template ──
       // Skip drawing any value that matches the original template value — copyPages already has it
       allFields.forEach(f=>{
-        if(!f.x||!f.y||!f.val)return;
+        if(f.x==null||f.y==null||!f.val)return;
         // If value hasn't changed from what's already baked into the PDF, don't redraw it
         // Always redraw auto-date and auto-increment fields (they change every report)
         const isAutoField=f.autoFill==="date"||f.autoFill==="increment";
@@ -1235,6 +1241,10 @@ function ReportEditor({job, user, onBack, reportDate}){
         if(pageIdx<0||pageIdx>=pages.length)return;
         const page=pages[pageIdx];const pageH=page.getHeight();
         const sz=f.fontSize||10;const pdfY=pageH-f.y-sz;
+        // For auto-date/auto-num, cover old template value with white rectangle first
+        if(isAutoField&&f.w){
+          page.drawRectangle({x:f.x-1,y:pdfY-2,width:(f.w||120)+2,height:(f.h||sz+4),color:rgb(1,1,1)});
+        }
         if(f.multiline&&f.w){
           const maxW=f.w;const words=f.val.split(" ");let lines=[];let line="";
           words.forEach(w=>{const test=line?line+" "+w:w;const tw=font.widthOfTextAtSize(test,sz);if(tw>maxW&&line){lines.push(line);line=w;}else line=test;});
