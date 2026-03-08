@@ -523,7 +523,7 @@ function CreateJob({user, onBack, onCreated}){
   const [jn,setJn]=useState("");
   const [addr,setAddr]=useState("");
   const [tf,setTf]=useState(null);
-  const [tfBuf,setTfBuf]=useState(null); // cached ArrayBuffer of template file
+  const [tfB64,setTfB64]=useState(null); // cached base64 string of template file (survives iOS Safari GC)
   const [freqOn,setFreqOn]=useState(false);
   const [sched,setSched]=useState("");
   const [days,setDays]=useState([]);
@@ -661,17 +661,18 @@ function CreateJob({user, onBack, onCreated}){
     if(!ALLOWED_EXTS.includes(e)){setErr("Accepted formats: PDF, DOCX, JPG, PNG");return;}
     setTf(f);setErr("");setUsedSavedId(null);setReportTitle(f.name.replace(/\.[^.]+$/,""));setFnConvention(null);setTplSaved(false);
     try{
-      const buf=await f.arrayBuffer();const copy=buf.slice(0);setTfBuf(copy);
+      const buf=await f.arrayBuffer();
+      // Store as base64 string — immune to iOS Safari releasing the file buffer
+      const u8=new Uint8Array(buf);const chunks=[];for(let i=0;i<u8.length;i+=8192)chunks.push(String.fromCharCode.apply(null,u8.subarray(i,i+8192)));
+      setTfB64(btoa(chunks.join("")));
       if(e==="pdf"){
-        parseFields(copy.slice(0),f.name);
+        parseFields(buf.slice(0),f.name);
       }else if(e==="docx"||e==="doc"){
-        // Send docx as base64 to edge function for XML parsing
-        parseDocxFields(copy.slice(0),f.name);
+        parseDocxFields(buf.slice(0),f.name);
       }else{
-        // Image template — no field parsing, just store as-is
         setFields([]);setParsing(false);
       }
-    }catch(bufErr){console.error("File buffer read:",bufErr);}
+    }catch(bufErr){console.error("File buffer read:",bufErr);setErr("Could not read file. Try again.");}
   };
 
   // Use a saved template — loads fields without re-parsing, but still needs the actual file uploaded
@@ -702,7 +703,7 @@ function CreateJob({user, onBack, onCreated}){
     const e=f.name.split(".").pop().toLowerCase();
     if(!ALLOWED_EXTS.includes(e)){setErr("Accepted formats: PDF, DOCX, JPG, PNG");return;}
     setTf(f);setErr("");
-    try{const buf=await f.arrayBuffer();setTfBuf(buf);}catch(bufErr){console.error("File buffer read:",bufErr);}
+    try{const buf=await f.arrayBuffer();const u8=new Uint8Array(buf);const chunks=[];for(let i=0;i<u8.length;i+=8192)chunks.push(String.fromCharCode.apply(null,u8.subarray(i,i+8192)));setTfB64(btoa(chunks.join("")));}catch(bufErr){console.error("File buffer read:",bufErr);setErr("Could not read file. Try again.");}
     // Fields already loaded from saved template — no parsing needed
   };
 
@@ -765,12 +766,11 @@ function CreateJob({user, onBack, onCreated}){
       if(tf&&job?.id){
         try{
           const ext=tf.name.split(".").pop().toLowerCase();
-          // Use cached buffer (read once when file was selected) — prevents Safari file-release issues
-          // Always use a fresh slice to avoid detached buffer issues
-          let fileBuf;
-          try{fileBuf=tfBuf?tfBuf.slice(0):await tf.arrayBuffer();}catch(e){console.error("Buffer read fallback:",e);}
-          if(!fileBuf){console.error("No file buffer available");throw new Error("Could not read template file. Please try uploading again.");}
-          const fileBlob=new Blob([fileBuf.slice(0)],{type:tf.type||"application/octet-stream"});
+          // Convert from base64 string back to Blob for upload
+          if(!tfB64)throw new Error("Template file data was lost. Please go back and re-upload the file.");
+          const raw=atob(tfB64);const u8=new Uint8Array(raw.length);for(let i=0;i<raw.length;i++)u8[i]=raw.charCodeAt(i);
+          const fileBuf=u8.buffer;
+          const fileBlob=new Blob([u8],{type:tf.type||"application/octet-stream"});
           const sp=await db.ulTpl(user.id,job.id,fileBlob,ext);
           let pagePaths=[];
           // Render PDF pages to images for preview cache (non-blocking)
@@ -800,7 +800,7 @@ function CreateJob({user, onBack, onCreated}){
         }
       }
       onCreated();
-    }catch(e){setErr(e.message);}finally{setSaving(false);}
+    }catch(e){setErr(e.message||"Something went wrong. Please try again.");}finally{setSaving(false);}
   };
 
   // Toggle box component
@@ -888,7 +888,7 @@ function CreateJob({user, onBack, onCreated}){
                   <div style={{fontSize:14,fontWeight:600,color:C.txt}}>{tf.name}</div>
                   <div style={{fontSize:12,color:C.mut}}>{usedSavedId?"Using saved template — no parsing needed":"New upload"}</div>
                 </div>
-                <button onClick={()=>{setTf(null);setTfBuf(null);setFields([]);setUsedSavedId(null);setReportTitle("");setFnConvention(null);setTplSaved(false);}} style={{background:"none",border:"none",color:"#ef4444",cursor:"pointer",fontSize:18}}>✕</button>
+                <button onClick={()=>{setTf(null);setTfB64(null);setFields([]);setUsedSavedId(null);setReportTitle("");setFnConvention(null);setTplSaved(false);}} style={{background:"none",border:"none",color:"#ef4444",cursor:"pointer",fontSize:18}}>✕</button>
               </div>
             </div>
           )}
