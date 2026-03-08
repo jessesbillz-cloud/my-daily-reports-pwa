@@ -1276,9 +1276,9 @@ function ReportEditor({job, user, onBack, reportDate}){
     setViewLoading(true);
     try{
       const tplRecord=await db.getTemplate(job.id);
-      if(!tplRecord||!tplRecord.storage_path)throw new Error("No template found.");
-      // For non-PDF templates, show a simple text preview
-      if(tplRecord.file_type&&tplRecord.file_type!=="pdf"){
+      // No template or non-PDF — show a text-based field preview
+      if(!tplRecord||!tplRecord.storage_path||
+        (tplRecord.file_type&&tplRecord.file_type!=="pdf")){
         const allFields=buildEditableFields();
         const cvs=document.createElement("canvas");cvs.width=612*2;cvs.height=792*2;
         const ctx=cvs.getContext("2d");ctx.fillStyle="#ffffff";ctx.fillRect(0,0,cvs.width,cvs.height);
