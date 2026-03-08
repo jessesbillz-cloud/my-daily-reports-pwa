@@ -30,12 +30,15 @@ COORDINATE PRECISION IS CRITICAL:
 - For fields side-by-side on the same row (like "Date:" on the left and "Project Name:" on the right), they share a similar y but have different x values.
 
 NOTES/OBSERVATIONS SECTION:
-- Many forms have a large notes area below the header table (labeled "IOR Notes:", "Observations:", etc.)
-- Output this as ONE field. The coordinates should point to the writable area BELOW the label — where the inspector writes their daily notes.
+- Many forms have a large notes area below the header table (labeled "IOR Notes:", "Observations:", "Notes:", etc.)
+- Output this as EXACTLY ONE field — pick the best name (e.g. "IOR Notes" or "Observations") and use it ONCE.
+- NEVER create BOTH an "IOR Notes" field AND a separate "Notes" field. They are the SAME section. Pick ONE name and output ONE field.
+- The coordinates should point to the writable area BELOW the label — where the inspector writes their daily notes.
 - Set "multiline": true, "voiceEnabled": true
 - The y should be just below the section label, x at the left margin of the writing area, w spanning the full width
 - If text already exists in this area (a standing note), include it in "value"
 - Do NOT also create a separate field for the same label if it appears in the header table
+- Do NOT create fields like "Notes and Comments", "Notes", etc. if you already have "IOR Notes" or "Observations" — ONE notes field total.
 
 SIGNATURE LINES: Ignore signature lines (like "x___Name___") — do not include them as fields.
 
@@ -98,12 +101,34 @@ serve(async (req) => {
         return true;
       });
     };
-    if (parsed.editable) parsed.editable = dedup(parsed.editable);
-    if (parsed.locked) parsed.locked = dedup(parsed.locked);
+    // Merge notes-like fields: if multiple fields contain "notes", "observations", or "comments", keep only the one with the largest area
+    const NOTES_KEYWORDS = ["notes", "observations", "comments"];
+    const mergeNotes = (arr: any[]) => {
+      const notesFields = (arr || []).filter((f) => {
+        const n = (f.name || "").toLowerCase();
+        return NOTES_KEYWORDS.some((k) => n.includes(k));
+      });
+      if (notesFields.length <= 1) return arr;
+      // Keep the one with the biggest writing area (w * h), or first if no dimensions
+      const best = notesFields.reduce((a, b) => ((a.w || 0) * (a.h || 0) >= (b.w || 0) * (b.h || 0) ? a : b));
+      const bestName = best.name;
+      return (arr || []).filter((f) => {
+        const n = (f.name || "").toLowerCase();
+        const isNotes = NOTES_KEYWORDS.some((k) => n.includes(k));
+        return !isNotes || f.name === bestName;
+      });
+    };
+    if (parsed.editable) parsed.editable = mergeNotes(dedup(parsed.editable));
+    if (parsed.locked) parsed.locked = mergeNotes(dedup(parsed.locked));
     // Also dedup across editable+locked (editable wins if same name in both)
     const editNames = new Set((parsed.editable || []).map((f: any) => (f.name || "").toLowerCase().trim()));
     if (parsed.locked) {
       parsed.locked = parsed.locked.filter((f: any) => !editNames.has((f.name || "").toLowerCase().trim()));
+    }
+    // Final check: no notes field in locked if one exists in editable
+    const editHasNotes = (parsed.editable || []).some((f: any) => NOTES_KEYWORDS.some((k) => (f.name || "").toLowerCase().includes(k)));
+    if (editHasNotes && parsed.locked) {
+      parsed.locked = parsed.locked.filter((f: any) => !NOTES_KEYWORDS.some((k) => (f.name || "").toLowerCase().includes(k)));
     }
 
     return new Response(JSON.stringify(parsed), {

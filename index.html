@@ -576,7 +576,17 @@ function CreateJob({user, onBack, onCreated}){
       if(parsed.error)throw new Error(parsed.error);
       // Merge editable + locked into one unified list (preserve coords for PDF fill)
       const all=[];const seenNames=new Set();
-      const addUnique=(f,mode)=>{const key=(f.name||"").toLowerCase().trim();if(seenNames.has(key))return;seenNames.add(key);all.push({name:f.name,value:f.value||"",mode,page:f.page,x:f.x,y:f.y,w:f.w,h:f.h,fontSize:f.fontSize,multiline:f.multiline});};
+      const NOTES_KW=["notes","observations","comments"];
+      const isNotesField=(n)=>NOTES_KW.some(k=>(n||"").toLowerCase().includes(k));
+      let notesAdded=false;
+      const addUnique=(f,mode)=>{
+        const key=(f.name||"").toLowerCase().trim();
+        if(seenNames.has(key))return;
+        // Only allow ONE notes-like field (first one wins)
+        if(isNotesField(f.name)){if(notesAdded)return;notesAdded=true;}
+        seenNames.add(key);
+        all.push({name:f.name,value:f.value||"",mode,page:f.page,x:f.x,y:f.y,w:f.w,h:f.h,fontSize:f.fontSize,multiline:f.multiline,voiceEnabled:f.voiceEnabled});
+      };
       (parsed.editable||[]).forEach(f=>{
         let mode="edit";
         if(f.autoFill==="date")mode="auto-date";
@@ -927,8 +937,15 @@ function ArchivedJobs({jobs, onBack, onSelect}){
 /* ── Report Editor ── */
 function ReportEditor({job, user, onBack, reportDate}){
   const fc=job.field_config||{editable:[],locked:[]};
-  const initEdit=[...(fc.editable||[])];
-  const initLock=[...(fc.locked||[])];
+  // Deduplicate notes-like fields from existing configs (fix for old jobs with duplicates)
+  const NOTES_KW=["notes","observations","comments"];
+  const isNotes=(n)=>NOTES_KW.some(k=>(n||"").toLowerCase().includes(k));
+  const dedupNotes=(arr)=>{let found=false;return(arr||[]).filter(f=>{if(!isNotes(f.name))return true;if(found)return false;found=true;return true;});};
+  const rawEdit=dedupNotes([...(fc.editable||[])]);
+  const editHasNotes=rawEdit.some(f=>isNotes(f.name));
+  const initEdit=rawEdit;
+  // If editable already has a notes field, remove any notes from locked too
+  const initLock=editHasNotes?[...(fc.locked||[])].filter(f=>!isNotes(f.name)):dedupNotes([...(fc.locked||[])]);
   const tz=Intl.DateTimeFormat().resolvedOptions().timeZone;
   const todayISO=reportDate||new Date().toLocaleDateString("en-CA",{timeZone:tz});
   const todayDisplay=new Date(todayISO+"T12:00:00").toLocaleDateString("en-US",{weekday:"long",month:"long",day:"numeric",year:"numeric",timeZone:tz});
@@ -952,7 +969,6 @@ function ReportEditor({job, user, onBack, reportDate}){
     });
     return v;
   });
-  const [notes,setNotes]=useState("");
   const [saving,setSaving]=useState(false);
 
   // Photo state
@@ -979,7 +995,6 @@ function ReportEditor({job, user, onBack, reportDate}){
               setVals(p=>({...p,...merged}));
             }
             if(c.lockVals)setLockVals(p=>({...p,...c.lockVals}));
-            if(c.notes)setNotes(c.notes);
             if(c.photos)setPhotos(c.photos);
             if(c.photoLayout)setPhotoLayout(c.photoLayout);
             if(c.lockFields)setLockFields(c.lockFields);
@@ -1054,7 +1069,7 @@ function ReportEditor({job, user, onBack, reportDate}){
   const saveWorking=async()=>{
     setSaving(true);
     try{
-      const content={vals,lockVals,notes,photos,photoLayout,lockFields,editFields};
+      const content={vals,lockVals,photos,photoLayout,lockFields,editFields};
       await db.saveReport({
         job_id:job.id,
         user_id:user.id,
@@ -1274,7 +1289,7 @@ function ReportEditor({job, user, onBack, reportDate}){
       const pdfFilename=baseName+".pdf";
 
       // ── 8. Save report, upload PDF, send email — all at once ──
-      const reportContent={vals,lockVals,notes,photos,photoLayout,lockFields,editFields};
+      const reportContent={vals,lockVals,photos,photoLayout,lockFields,editFields};
       await db.saveReport({
         job_id:job.id,user_id:user.id,report_date:todayISO,status:"submitted",
         content:JSON.stringify(reportContent),updated_at:new Date().toISOString()
