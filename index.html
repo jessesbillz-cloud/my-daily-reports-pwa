@@ -613,7 +613,7 @@ function CreateJob({user, onBack, onCreated}){
       if(f.mode==="lock"){
         const nameLC=(f.name||"").toLowerCase().trim();
         const isJobSpecific=JOB_SPECIFIC_FIELDS.some(js=>nameLC===js||nameLC.includes(js));
-        if(isJobSpecific)return{...f,mode:"edit",value:""};
+        if(isJobSpecific)return{...f,mode:"edit",value:"",lockAfterCreate:true};
       }
       return{...f};
     });
@@ -682,8 +682,9 @@ function CreateJob({user, onBack, onCreated}){
       // Store the original uploaded filename (minus extension) exactly as the pattern
       const fnPattern=tf?tf.name.replace(/\.[^.]+$/,""):("DR_01_"+jn.trim().replace(/\s+/g,"_")+"_"+new Date().toLocaleDateString("en-US",{month:"2-digit",day:"2-digit",year:"numeric",timeZone:tz}).replace(/\//g,""));
       const coords=(f)=>({page:f.page,x:f.x,y:f.y,w:f.w,h:f.h,fontSize:f.fontSize,multiline:f.multiline});
-      const editFields=fields.filter(f=>f.mode==="edit").map(f=>({name:f.name,value:f.value,originalValue:f.value||"",voiceEnabled:true,...coords(f)}));
-      const lockFields=fields.filter(f=>f.mode==="lock").map(f=>({name:f.name,value:f.value,...coords(f)}));
+      // Fields marked lockAfterCreate (from saved template reuse) go back to locked with the user's new values
+      const editFields=fields.filter(f=>f.mode==="edit"&&!f.lockAfterCreate).map(f=>({name:f.name,value:f.value,originalValue:f.value||"",voiceEnabled:true,...coords(f)}));
+      const lockFields=[...fields.filter(f=>f.mode==="lock"),...fields.filter(f=>f.mode==="edit"&&f.lockAfterCreate)].map(f=>({name:f.name,value:f.value,...coords(f)}));
       const autoFields=fields.filter(f=>f.mode==="auto-date"||f.mode==="auto-num").map(f=>({name:f.name,value:f.value,originalValue:f.value||"",autoFill:f.mode==="auto-date"?"date":"increment",...coords(f)}));
       const job=await db.mkJob({user_id:user.id,name:jn.trim(),site_address:addr.trim()||null,report_filename_pattern:fnPattern,schedule:es,schedule_days:es==="custom"?days:[],reminder_enabled:remOn,reminder_time:remOn?remT:null,reminder_hours_before:remOn?remH:null,scheduling_enabled:schedOn,field_config:{editable:[...editFields,...autoFields],locked:lockFields}});
       if(tf&&job?.id){
@@ -852,13 +853,16 @@ function CreateJob({user, onBack, onCreated}){
                     </div>
                     {/* Row 2: Value input — always visible */}
                     {f.mode!=="auto-date"&&f.mode!=="auto-num"&&(
-                      <input
-                        type="text"
-                        value={f.value}
-                        onChange={e=>setFieldValue(f.name,e.target.value)}
-                        placeholder={f.mode==="lock"?"Set locked value...":"Default value (optional)"}
-                        style={{width:"100%",padding:"8px 10px",background:C.bg,border:`1px solid ${C.brd}`,borderRadius:6,color:C.txt,fontSize:13}}
-                      />
+                      <>
+                        <input
+                          type="text"
+                          value={f.value}
+                          onChange={e=>setFieldValue(f.name,e.target.value)}
+                          placeholder={f.lockAfterCreate?"Enter value for this job...":f.mode==="lock"?"Set locked value...":"Default value (optional)"}
+                          style={{width:"100%",padding:"8px 10px",background:f.lockAfterCreate?"rgba(232,116,42,0.06)":C.bg,border:`1px solid ${f.lockAfterCreate?C.org:C.brd}`,borderRadius:6,color:C.txt,fontSize:13}}
+                        />
+                        {f.lockAfterCreate&&<div style={{fontSize:10,color:C.org,marginTop:4,fontStyle:"italic"}}>🔒 Will lock after job is created</div>}
+                      </>
                     )}
                     {f.mode==="auto-date"&&(
                       <div style={{fontSize:11,color:C.blu,fontStyle:"italic",padding:"4px 0"}}>Will auto-fill today's date on each report</div>
