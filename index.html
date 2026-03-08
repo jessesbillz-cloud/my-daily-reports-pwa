@@ -35,25 +35,6 @@ const SB_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJ
 const C = {bg:"#0f0f0f",card:"#1a1a1a",brd:"#333",inp:"#222",org:"#e8742a",orgH:"#d4691f",blu:"#5a8fc0",txt:"#fff",mut:"#888",lt:"#ccc",err:"#ef4444",ok:"#22c55e"};
 let AUTH_TOKEN = null;
 
-// Format a date according to an AI-detected format string
-function formatDateForFilename(d,fmt,tz){
-  const mm=d.toLocaleDateString("en-US",{month:"2-digit",timeZone:tz});
-  const dd=d.toLocaleDateString("en-US",{day:"2-digit",timeZone:tz});
-  const yyyy=d.toLocaleDateString("en-US",{year:"numeric",timeZone:tz});
-  const monthName=d.toLocaleDateString("en-US",{month:"long",timeZone:tz});
-  switch(fmt){
-    case"YYYY":return yyyy;
-    case"YYYYMMDD":return yyyy+mm+dd;
-    case"YYYY-MM-DD":return yyyy+"-"+mm+"-"+dd;
-    case"MM-DD-YYYY":return mm+"-"+dd+"-"+yyyy;
-    case"MM_DD_YYYY":return mm+"_"+dd+"_"+yyyy;
-    case"MM.DD.YYYY":return mm+"."+dd+"."+yyyy;
-    case"Month DD YYYY":return monthName+" "+dd+" "+yyyy;
-    case"DD Month YYYY":return dd+" "+monthName+" "+yyyy;
-    case"MMDDYYYY":default:return mm+dd+yyyy;
-  }
-}
-
 // Extract real text positions from PDF using pdf.js getTextContent()
 // Returns array of {str, x, y, w, h, page, fontSize} in top-left origin coordinates
 async function extractPdfTextStructure(pdfData){
@@ -183,7 +164,7 @@ const SL={daily_mf:"Daily M-F",daily_7:"Daily 7 Days",weekly:"Weekly",as_needed:
 
 /* ── MDR Logo SVG Component ── */
 function MDRLogo({size=36}){
-  return <img src="logo.jpg" alt="My Daily Reports" style={{width:size,height:size,borderRadius:"50%",objectFit:"cover"}}/>;
+  return <img src="logo.jpg" alt="My Daily Reports" style={{width:size,height:size,borderRadius:4,objectFit:"cover"}}/>;
 }
 
 /* ── Database Layer ── */
@@ -575,8 +556,6 @@ function CreateJob({user, onBack, onCreated}){
   const [addr,setAddr]=useState("");
   const [tf,setTf]=useState(null);
   const [tfBuf,setTfBuf]=useState(null); // cached ArrayBuffer of template file
-  const [fnPattern,setFnPattern]=useState(null); // AI-detected filename pattern
-  const [fnDateFmt,setFnDateFmt]=useState(null); // AI-detected date format
   const [freqOn,setFreqOn]=useState(false);
   const [sched,setSched]=useState("");
   const [days,setDays]=useState([]);
@@ -593,6 +572,7 @@ function CreateJob({user, onBack, onCreated}){
   const [loadingSaved,setLoadingSaved]=useState(true);
   const [showSaved,setShowSaved]=useState(false);
   const [usedSavedId,setUsedSavedId]=useState(null); // id of saved template being used
+  const [reportTitle,setReportTitle]=useState(""); // editable report title (for saved template reuse)
   const [savingTpl,setSavingTpl]=useState(false);
   const [tplSaved,setTplSaved]=useState(false); // whether current parse was saved
 
@@ -646,15 +626,13 @@ function CreateJob({user, onBack, onCreated}){
       });
       (parsed.locked||[]).forEach(f=>{addUnique(f,"lock");});
       setFields(all);
-      if(parsed.filenamePattern)setFnPattern(parsed.filenamePattern);
-      if(parsed.dateFormat)setFnDateFmt(parsed.dateFormat);
     }catch(e){
       console.error("Parse error:",e);
       setErr("Could not parse template fields. You can still create the job and configure fields later.");
     }finally{setParsing(false);}
   };
 
-  const doFile=async(f)=>{const e=f.name.split(".").pop().toLowerCase();if(e!=="pdf"){setErr("Only PDF files are accepted. Please convert Word docs to PDF first.");return;}setTf(f);setErr("");setUsedSavedId(null);setTplSaved(false);try{const buf=await f.arrayBuffer();const copy=buf.slice(0);setTfBuf(copy);parseFields(copy.slice(0),f.name);}catch(bufErr){console.error("File buffer read:",bufErr);}};
+  const doFile=async(f)=>{const e=f.name.split(".").pop().toLowerCase();if(e!=="pdf"){setErr("Only PDF files are accepted. Please convert Word docs to PDF first.");return;}setTf(f);setErr("");setUsedSavedId(null);setReportTitle(f.name.replace(/\.[^.]+$/,""));setTplSaved(false);try{const buf=await f.arrayBuffer();const copy=buf.slice(0);setTfBuf(copy);parseFields(copy.slice(0),f.name);}catch(bufErr){console.error("File buffer read:",bufErr);}};
 
   // Use a saved template — loads fields without re-parsing, but still needs the actual file uploaded
   // Job-specific locked fields become editable so user can enter new values for the new job
@@ -672,6 +650,7 @@ function CreateJob({user, onBack, onCreated}){
     });
     setFields(adjusted);
     setUsedSavedId(tpl.id);
+    setReportTitle(tpl.original_filename?tpl.original_filename.replace(/\.[^.]+$/,""):(tpl.name||""));
     setTplSaved(true);
     setShowSaved(false);
     setErr("");
@@ -732,15 +711,14 @@ function CreateJob({user, onBack, onCreated}){
     if(!ok)return;setSaving(true);setErr("");
     try{
       const es=effSch();
-      // Use AI-detected pattern if available, fall back to uploaded filename
-      const filePattern=fnPattern||( tf?tf.name.replace(/\.[^.]+$/,""):("DR_{report_number}_"+jn.trim().replace(/\s+/g,"_")+"_{date}"));
+      // Use edited report title if set, otherwise fall back to uploaded filename
+      const filePattern=reportTitle.trim()||(tf?tf.name.replace(/\.[^.]+$/,""):"");
       const coords=(f)=>({page:f.page,x:f.x,y:f.y,w:f.w,h:f.h,fontSize:f.fontSize,multiline:f.multiline});
       // Fields marked lockAfterCreate (from saved template reuse) go back to locked with the user's new values
       const editFields=fields.filter(f=>f.mode==="edit"&&!f.lockAfterCreate).map(f=>({name:f.name,value:f.value,originalValue:f.value||"",voiceEnabled:true,...coords(f)}));
       const lockFields=[...fields.filter(f=>f.mode==="lock"),...fields.filter(f=>f.mode==="edit"&&f.lockAfterCreate)].map(f=>({name:f.name,value:f.value,...coords(f)}));
       const autoFields=fields.filter(f=>f.mode==="auto-date"||f.mode==="auto-num").map(f=>({name:f.name,value:f.value,originalValue:f.value||"",autoFill:f.mode==="auto-date"?"date":"increment",...coords(f)}));
       const fc={editable:[...editFields,...autoFields],locked:lockFields};
-      if(fnDateFmt)fc.dateFormat=fnDateFmt;
       const job=await db.mkJob({user_id:user.id,name:jn.trim(),site_address:addr.trim()||null,report_filename_pattern:filePattern,schedule:es,schedule_days:es==="custom"?days:[],reminder_enabled:remOn,reminder_time:remOn?remT:null,reminder_hours_before:remOn?remH:null,scheduling_enabled:schedOn,field_config:fc});
       if(tf&&job?.id){
         const ext=tf.name.split(".").pop().toLowerCase();
@@ -861,11 +839,20 @@ function CreateJob({user, onBack, onCreated}){
                   <div style={{fontSize:14,fontWeight:600,color:C.txt}}>{tf.name}</div>
                   <div style={{fontSize:12,color:C.mut}}>{usedSavedId?"Using saved template — no parsing needed":"New upload"}</div>
                 </div>
-                <button onClick={()=>{setTf(null);setTfBuf(null);setFields([]);setUsedSavedId(null);setTplSaved(false);}} style={{background:"none",border:"none",color:"#ef4444",cursor:"pointer",fontSize:18}}>✕</button>
+                <button onClick={()=>{setTf(null);setTfBuf(null);setFields([]);setUsedSavedId(null);setReportTitle("");setTplSaved(false);}} style={{background:"none",border:"none",color:"#ef4444",cursor:"pointer",fontSize:18}}>✕</button>
               </div>
             </div>
           )}
         </div>
+
+        {/* Report Title — editable, populated from uploaded filename or saved template */}
+        {reportTitle&&(
+          <div style={{marginBottom:20}}>
+            <label style={ls}>Report Title</label>
+            <input type="text" value={reportTitle} onChange={e=>setReportTitle(e.target.value)} style={fs} placeholder="e.g. Daily Report 45 Woodland Park 2026"/>
+            <p style={{color:C.mut,fontSize:11,marginTop:4}}>This is the naming convention for generated reports. Edit if needed.</p>
+          </div>
+        )}
 
         {/* AI Parsing indicator with spinner */}
         {parsing&&(
@@ -1421,28 +1408,23 @@ function ReportEditor({job, user, onBack, reportDate}){
       try{const cntR=await fetch(`${SB_URL}/rest/v1/reports?select=report_number&job_id=eq.${job.id}&order=report_number.desc&limit=1`,{headers:db._h()});const topR=cntR.ok?await cntR.json():[];rptNumber=(topR[0]?.report_number||0)+1;}catch(e){}
       if(draftId){try{const exR=await fetch(`${SB_URL}/rest/v1/reports?select=report_number&id=eq.${draftId}`,{headers:db._h()});const exD=exR.ok?await exR.json():[];if(exD[0]?.report_number)rptNumber=exD[0].report_number;}catch(e){}}
       const rptNum=String(rptNumber).padStart(2,"0");
+      // Filename = exact uploaded name with only number and date swapped in place
+      const fnSource=job.report_filename_pattern||tplRecord?.original_filename||job.name||"Report";
+      let baseName=fnSource.replace(/\.[^.]+$/,"");
+      // Swap the report number: find standalone 1-3 digit number (not inside a longer number)
+      baseName=baseName.replace(/(?<!\d)\d{1,3}(?!\d)/,rptNum);
+      // Swap the date: match whatever date format is in the original filename
       const now=new Date();
-      const dateFmt=job.field_config?.dateFormat||"MMDDYYYY";
-      const formattedDate=formatDateForFilename(now,dateFmt,tz);
-      const pattern=job.report_filename_pattern||"";
-      let baseName;
-      // Use token-based pattern if it contains {tokens}
-      if(pattern.includes("{report_number}")||pattern.includes("{date}")){
-        const projectName=(lockVals["Project Name"]||lockVals["Project"]||job.name||"Report").replace(/\s+/g," ");
-        baseName=pattern
-          .replace(/\{report_number\}/g,rptNum)
-          .replace(/\{date\}/g,formattedDate)
-          .replace(/\{project_name\}/g,projectName);
-      }else{
-        // Legacy: regex-based replacement on original filename
-        const fnSource=tplRecord.original_filename||pattern||job.name||"Report";
-        baseName=fnSource.replace(/\.[^.]+$/,"");
-        baseName=baseName.replace(/(?<!\d)\d{1,2}(?!\d)/,rptNum);
-        const legacyDateFull=formatDateForFilename(now,"MMDDYYYY",tz);
-        const legacyYear=formatDateForFilename(now,"YYYY",tz);
-        if(/\d{6,8}/.test(baseName)){baseName=baseName.replace(/\d{6,8}/,legacyDateFull);}
-        else{baseName=baseName.replace(/\b(20\d{2})\b/,legacyYear);}
-      }
+      const mm=now.toLocaleDateString("en-US",{month:"2-digit",timeZone:tz});
+      const dd=now.toLocaleDateString("en-US",{day:"2-digit",timeZone:tz});
+      const yyyy=now.toLocaleDateString("en-US",{year:"numeric",timeZone:tz});
+      // Try each known date pattern and replace with today in the SAME format
+      if(/\d{2}-\d{2}-\d{4}/.test(baseName))baseName=baseName.replace(/\d{2}-\d{2}-\d{4}/,mm+"-"+dd+"-"+yyyy);
+      else if(/\d{2}_\d{2}_\d{4}/.test(baseName))baseName=baseName.replace(/\d{2}_\d{2}_\d{4}/,mm+"_"+dd+"_"+yyyy);
+      else if(/\d{2}\.\d{2}\.\d{4}/.test(baseName))baseName=baseName.replace(/\d{2}\.\d{2}\.\d{4}/,mm+"."+dd+"."+yyyy);
+      else if(/\d{4}-\d{2}-\d{2}/.test(baseName))baseName=baseName.replace(/\d{4}-\d{2}-\d{2}/,yyyy+"-"+mm+"-"+dd);
+      else if(/\d{8}/.test(baseName))baseName=baseName.replace(/\d{8}/,mm+dd+yyyy);
+      else if(/\b20\d{2}\b/.test(baseName))baseName=baseName.replace(/\b20\d{2}\b/,yyyy);
       const pdfFilename=baseName+".pdf";
 
       // ── 8. Save report, upload PDF, send email — all at once ──
@@ -1839,23 +1821,21 @@ function JobDetail({job, user, onBack, onDeleted}){
   // Build display filename from template's original_filename — only swap sequential number and date
   const buildReportName=(num,reportDate)=>{
     const padNum=String(num).padStart(2,"0");
-    const pattern=job.report_filename_pattern||"";
-    // Format date using AI-detected format
-    const dateFmt=job.field_config?.dateFormat||"MMDDYYYY";
-    const d=reportDate instanceof Date?reportDate:new Date(reportDate.length===8?(reportDate.slice(0,2)+"/"+reportDate.slice(2,4)+"/"+reportDate.slice(4)):reportDate);
-    const fmtDate=formatDateForFilename(d,dateFmt,tz);
-    // Use token-based pattern if available
-    if(pattern.includes("{report_number}")||pattern.includes("{date}")){
-      const projectName=(job.name||"Report").replace(/\s+/g," ");
-      return pattern.replace(/\{report_number\}/g,padNum).replace(/\{date\}/g,fmtDate).replace(/\{project_name\}/g,projectName);
-    }
-    // Legacy fallback
-    const src=tplFilename||pattern||job.name||"Report";
+    const src=tplFilename||job.report_filename_pattern||job.name||"Report";
     let n=src.replace(/\.[^.]+$/,"");
-    n=n.replace(/(?<!\d)\d{1,2}(?!\d)/,padNum);
-    const legacyDate=formatDateForFilename(d,"MMDDYYYY",tz);
-    if(/\d{6,8}/.test(n)){n=n.replace(/\d{6,8}/,legacyDate);}
-    else{n=n.replace(/\b(20\d{2})\b/,formatDateForFilename(d,"YYYY",tz));}
+    // Swap report number
+    n=n.replace(/(?<!\d)\d{1,3}(?!\d)/,padNum);
+    // Swap date — parse the reportDate and match whatever format is in the original
+    const d=reportDate instanceof Date?reportDate:new Date(typeof reportDate==="string"&&reportDate.length===8?(reportDate.slice(0,2)+"/"+reportDate.slice(2,4)+"/"+reportDate.slice(4)+"T12:00:00"):(reportDate+"T12:00:00"));
+    const mm=d.toLocaleDateString("en-US",{month:"2-digit",timeZone:tz});
+    const dd=d.toLocaleDateString("en-US",{day:"2-digit",timeZone:tz});
+    const yyyy=d.toLocaleDateString("en-US",{year:"numeric",timeZone:tz});
+    if(/\d{2}-\d{2}-\d{4}/.test(n))n=n.replace(/\d{2}-\d{2}-\d{4}/,mm+"-"+dd+"-"+yyyy);
+    else if(/\d{2}_\d{2}_\d{4}/.test(n))n=n.replace(/\d{2}_\d{2}_\d{4}/,mm+"_"+dd+"_"+yyyy);
+    else if(/\d{2}\.\d{2}\.\d{4}/.test(n))n=n.replace(/\d{2}\.\d{2}\.\d{4}/,mm+"."+dd+"."+yyyy);
+    else if(/\d{4}-\d{2}-\d{2}/.test(n))n=n.replace(/\d{4}-\d{2}-\d{2}/,yyyy+"-"+mm+"-"+dd);
+    else if(/\d{8}/.test(n))n=n.replace(/\d{8}/,mm+dd+yyyy);
+    else if(/\b20\d{2}\b/.test(n))n=n.replace(/\b20\d{2}\b/,yyyy);
     return n;
   };
 
