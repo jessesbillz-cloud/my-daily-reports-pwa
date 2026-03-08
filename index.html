@@ -198,10 +198,10 @@ const db = {
       if(!r.ok){const e=await r.json();throw new Error(e.message||"Save failed");}
       return(await r.json())[0];
     }else{
-      // Get next report number for this job
-      const cntR=await fetch(`${SB_URL}/rest/v1/reports?select=id&job_id=eq.${d.job_id}`,{headers:this._h()});
-      const allRpts=cntR.ok?await cntR.json():[];
-      d.report_number=allRpts.length+1;
+      // Get next report number for this job (max existing + 1)
+      const cntR=await fetch(`${SB_URL}/rest/v1/reports?select=report_number&job_id=eq.${d.job_id}&order=report_number.desc&limit=1`,{headers:this._h()});
+      const topRpt=cntR.ok?await cntR.json():[];
+      d.report_number=(topRpt[0]?.report_number||0)+1;
       // Create new report
       const r=await fetch(`${SB_URL}/rest/v1/reports`,{method:"POST",headers:this._h(),body:JSON.stringify(d)});
       if(!r.ok){const e=await r.json();throw new Error(e.message||"Save failed");}
@@ -1337,7 +1337,7 @@ function ReportEditor({job, user, onBack, reportDate}){
 
       // ── 7. Build filename ──
       let rptNumber=1;
-      try{const cntR=await fetch(`${SB_URL}/rest/v1/reports?select=id&job_id=eq.${job.id}`,{headers:db._h()});const allR=cntR.ok?await cntR.json():[];rptNumber=allR.length+1;}catch(e){}
+      try{const cntR=await fetch(`${SB_URL}/rest/v1/reports?select=report_number&job_id=eq.${job.id}&order=report_number.desc&limit=1`,{headers:db._h()});const topR=cntR.ok?await cntR.json():[];rptNumber=(topR[0]?.report_number||0)+1;}catch(e){}
       if(draftId){try{const exR=await fetch(`${SB_URL}/rest/v1/reports?select=report_number&id=eq.${draftId}`,{headers:db._h()});const exD=exR.ok?await exR.json():[];if(exD[0]?.report_number)rptNumber=exD[0].report_number;}catch(e){}}
       const rptNum=String(rptNumber).padStart(2,"0");
       const tzDate=new Date().toLocaleDateString("en-US",{month:"2-digit",day:"2-digit",year:"numeric",timeZone:tz}).replace(/\//g,"");
@@ -1662,6 +1662,35 @@ function JobDetail({job, user, onBack, onDeleted}){
   const [showDel,setShowDel]=useState(false);
   const [deleting,setDeleting]=useState(false);
   const [showJobSet,setShowJobSet]=useState(false);
+  const [reparsing,setReparsing]=useState(false);
+  const reparseTemplate=async()=>{
+    setReparsing(true);
+    try{
+      const tpl=await db.getTemplate(job.id);
+      if(!tpl||!tpl.storage_path){showToast("No template found for this job.");return;}
+      const tplResp=await fetch(`${SB_URL}/storage/v1/object/report-source-docs/${tpl.storage_path}`,{headers:{apikey:SB_KEY,Authorization:`Bearer ${AUTH_TOKEN||SB_KEY}`}});
+      if(!tplResp.ok)throw new Error("Could not download template file.");
+      const buf=await tplResp.arrayBuffer();
+      const b64=btoa(new Uint8Array(buf).reduce((s,b)=>s+String.fromCharCode(b),""));
+      const resp=await fetch(`${SB_URL}/functions/v1/parse-template`,{method:"POST",headers:{"Content-Type":"application/json",Authorization:`Bearer ${SB_KEY}`,apikey:SB_KEY},body:JSON.stringify({file_base64:b64,file_name:tpl.original_filename||"template.pdf"})});
+      if(!resp.ok)throw new Error("AI parsing failed.");
+      const parsed=await resp.json();
+      if(parsed.error)throw new Error(parsed.error);
+      const coords=(f)=>({page:f.page,x:f.x,y:f.y,w:f.w,h:f.h,fontSize:f.fontSize,multiline:f.multiline});
+      const editFields=(parsed.editable||[]).map(f=>({name:f.name,value:f.value||"",originalValue:f.value||"",voiceEnabled:f.voiceEnabled||false,autoFill:f.autoFill||null,...coords(f)}));
+      const lockFields=(parsed.locked||[]).map(f=>({name:f.name,value:f.value||"",...coords(f)}));
+      await db.updateFieldConfig(job.id,{editable:editFields,locked:lockFields});
+      // Update local state
+      const fc={editable:editFields,locked:lockFields};
+      job.field_config=fc;
+      const initE=(fc.editable||[]).filter(f=>!f.autoFill);
+      const initL=fc.locked||[];
+      const initA=(fc.editable||[]).filter(f=>f.autoFill);
+      setEditFields([...initE,...initA]);setLockFields(initL);
+      showToast("Template re-parsed with updated field positions!");
+    }catch(e){console.error("Reparse error:",e);showToast("Re-parse failed: "+e.message);}
+    finally{setReparsing(false);}
+  };
   const [rpts,setRpts]=useState([]);
   const [loading,setLoading]=useState(true);
   const [showCompleted,setShowCompleted]=useState(false);
@@ -2002,6 +2031,9 @@ function JobDetail({job, user, onBack, onDeleted}){
             </button>
             <button onClick={()=>{if(!fieldEditFields){const fc=job.field_config||{};const all=[...(fc.editable||[]).map(f=>({...f,mode:f.autoFill==="date"?"auto-date":f.autoFill==="increment"?"auto-num":"edit"})),...(fc.locked||[]).map(f=>({...f,mode:"lock"}))];setFieldEditFields(all);}setShowFieldEdit(!showFieldEdit);}} style={{width:"100%",display:"flex",alignItems:"center",gap:10,padding:"14px 18px",background:"none",border:"none",borderBottom:`1px solid ${C.brd}`,cursor:"pointer",textAlign:"left"}}>
               <span style={{fontSize:16}}>📋</span><span style={{fontSize:14,fontWeight:600,color:C.lt}}>Edit Template Fields</span>
+            </button>
+            <button onClick={reparseTemplate} disabled={reparsing} style={{width:"100%",display:"flex",alignItems:"center",gap:10,padding:"14px 18px",background:"none",border:"none",borderBottom:`1px solid ${C.brd}`,cursor:reparsing?"default":"pointer",textAlign:"left",opacity:reparsing?0.6:1}}>
+              <span style={{fontSize:16}}>{reparsing?"⏳":"🔄"}</span><span style={{fontSize:14,fontWeight:600,color:C.lt}}>{reparsing?"Re-parsing template...":"Re-parse Template Fields"}</span>
             </button>
             <button onClick={()=>{setShowSchedSet(!showSchedSet);setShowTeam(false);}} style={{width:"100%",display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,padding:"14px 18px",background:"none",border:"none",borderBottom:`1px solid ${C.brd}`,cursor:"pointer",textAlign:"left"}}>
               <div style={{display:"flex",alignItems:"center",gap:10}}>
