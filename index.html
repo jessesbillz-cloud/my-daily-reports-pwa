@@ -35,6 +35,32 @@ const SB_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJ
 const C = {bg:"#0f0f0f",card:"#1a1a1a",brd:"#333",inp:"#222",org:"#e8742a",orgH:"#d4691f",blu:"#5a8fc0",txt:"#fff",mut:"#888",lt:"#ccc",err:"#ef4444",ok:"#22c55e"};
 let AUTH_TOKEN = null;
 
+// Extract real text positions from PDF using pdf.js getTextContent()
+// Returns array of {str, x, y, w, h, page, fontSize} in top-left origin coordinates
+async function extractPdfTextStructure(pdfData){
+  if(!window.pdfjsLib)throw new Error("pdf.js not loaded");
+  const doc=await window.pdfjsLib.getDocument({data:pdfData}).promise;
+  const allItems=[];
+  for(let p=1;p<=doc.numPages;p++){
+    const page=await doc.getPage(p);
+    const vp=page.getViewport({scale:1});
+    const pageH=vp.height;
+    const tc=await page.getTextContent();
+    tc.items.forEach(item=>{
+      if(!item.str||!item.str.trim())return;
+      const tx=item.transform;
+      const x=tx[4];
+      const yBottom=tx[5];
+      const y=pageH-yBottom-Math.abs(tx[3]||10); // top-left origin, top of text
+      const w=item.width||(item.str.length*fontSize*0.6); // estimate if missing
+      const h=item.height||Math.abs(tx[3])||10;
+      const fontSize=Math.abs(tx[0])||10;
+      allItems.push({str:item.str.trim(),x:Math.round(x*100)/100,y:Math.round(y*100)/100,w:Math.round(w*100)/100,h:Math.round(h*100)/100,page:p,fontSize:Math.round(fontSize*10)/10});
+    });
+  }
+  return allItems;
+}
+
 // Auth helper — sign in with email/password
 async function authSignIn(email,password){
   const r=await fetch(`${SB_URL}/auth/v1/token?grant_type=password`,{
@@ -561,11 +587,13 @@ function CreateJob({user, onBack, onCreated}){
 
   const readFileAsBase64=async(f)=>{return new Promise((res)=>{const r=new FileReader();r.onload=()=>res(r.result.split(",")[1]);r.readAsDataURL(f);});};
 
-  const parseFields=async(f)=>{
+  const parseFields=async(buf,fileName)=>{
     setParsing(true);setErr("");setFields([]);
     try{
-      const base64=await readFileAsBase64(f);
-      const payload={file_base64:base64,file_name:f.name};
+      // Step 1: Extract real text positions client-side with pdf.js
+      const textItems=await extractPdfTextStructure(new Uint8Array(buf));
+      // Step 2: Send text items (not base64 PDF) to edge function for semantic mapping
+      const payload={text_items:textItems,file_name:fileName};
       const resp=await fetch(`${SB_URL}/functions/v1/parse-template`,{
         method:"POST",
         headers:{"Content-Type":"application/json","Authorization":"Bearer "+SB_KEY,"apikey":SB_KEY},
@@ -601,7 +629,7 @@ function CreateJob({user, onBack, onCreated}){
     }finally{setParsing(false);}
   };
 
-  const doFile=async(f)=>{const e=f.name.split(".").pop().toLowerCase();if(e!=="pdf"){setErr("Only PDF files are accepted. Please convert Word docs to PDF first.");return;}setTf(f);setErr("");setUsedSavedId(null);setTplSaved(false);try{const buf=await f.arrayBuffer();setTfBuf(buf);}catch(bufErr){console.error("File buffer read:",bufErr);}parseFields(f);};
+  const doFile=async(f)=>{const e=f.name.split(".").pop().toLowerCase();if(e!=="pdf"){setErr("Only PDF files are accepted. Please convert Word docs to PDF first.");return;}setTf(f);setErr("");setUsedSavedId(null);setTplSaved(false);try{const buf=await f.arrayBuffer();setTfBuf(buf);parseFields(buf,f.name);}catch(bufErr){console.error("File buffer read:",bufErr);}};
 
   // Use a saved template — loads fields without re-parsing, but still needs the actual file uploaded
   // Job-specific locked fields become editable so user can enter new values for the new job
@@ -1671,8 +1699,9 @@ function JobDetail({job, user, onBack, onDeleted}){
       const tplResp=await fetch(`${SB_URL}/storage/v1/object/report-source-docs/${tpl.storage_path}`,{headers:{apikey:SB_KEY,Authorization:`Bearer ${AUTH_TOKEN||SB_KEY}`}});
       if(!tplResp.ok)throw new Error("Could not download template file.");
       const buf=await tplResp.arrayBuffer();
-      const b64=btoa(new Uint8Array(buf).reduce((s,b)=>s+String.fromCharCode(b),""));
-      const resp=await fetch(`${SB_URL}/functions/v1/parse-template`,{method:"POST",headers:{"Content-Type":"application/json",Authorization:`Bearer ${SB_KEY}`,apikey:SB_KEY},body:JSON.stringify({file_base64:b64,file_name:tpl.original_filename||"template.pdf"})});
+      // Extract real text positions client-side with pdf.js
+      const textItems=await extractPdfTextStructure(new Uint8Array(buf));
+      const resp=await fetch(`${SB_URL}/functions/v1/parse-template`,{method:"POST",headers:{"Content-Type":"application/json",Authorization:`Bearer ${SB_KEY}`,apikey:SB_KEY},body:JSON.stringify({text_items:textItems,file_name:tpl.original_filename||"template.pdf"})});
       if(!resp.ok)throw new Error("AI parsing failed.");
       const parsed=await resp.json();
       if(parsed.error)throw new Error(parsed.error);
