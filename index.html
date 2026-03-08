@@ -857,10 +857,10 @@ function CreateJob({user, onBack, onCreated}){
         {err&&<div style={{background:"#2d1214",border:"1px solid #5c2023",borderRadius:8,padding:"10px 14px",marginBottom:16,color:C.err,fontSize:13}}>{err}</div>}
 
         {/* Job Name — required */}
-        <div style={{marginBottom:20}}><label style={ls}>Job Name *</label><input type="text" placeholder="Oceanside District Office" value={jn} onChange={e=>setJn(e.target.value)} style={fs}/></div>
+        <div style={{marginBottom:20}}><label style={ls}>Job Name *</label><input type="text" value={jn} onChange={e=>setJn(e.target.value)} style={fs}/></div>
 
         {/* Site Address — optional */}
-        <div style={{marginBottom:20}}><label style={ls}>Site Address</label><input type="text" placeholder="2111 Mission Ave, Oceanside CA 92058" value={addr} onChange={e=>setAddr(e.target.value)} style={fs}/></div>
+        <div style={{marginBottom:20}}><label style={ls}>Site Address</label><input type="text" value={addr} onChange={e=>setAddr(e.target.value)} style={fs}/></div>
 
         {/* Template Section */}
         <div style={{marginBottom:20}}>
@@ -2248,7 +2248,23 @@ function JobDetail({job, user, onBack, onDeleted}){
               </button>
             </div>
             {schedEnabled&&(
-              <div style={{fontSize:12,color:C.ok,lineHeight:1.5,marginBottom:12}}>This job will appear on your shared calendar. Anyone with your calendar link can request visits for this job.</div>
+              <div>
+                <div style={{fontSize:12,color:C.ok,lineHeight:1.5,marginBottom:12}}>This job will appear on your shared calendar. Anyone with your calendar link can request visits for this job.</div>
+                <div style={{background:C.inp,border:`1px solid ${C.brd}`,borderRadius:8,padding:12,marginBottom:12}}>
+                  <div style={{fontSize:12,fontWeight:700,color:C.blu,marginBottom:6}}>Your Calendar Link</div>
+                  <div style={{fontSize:11,color:C.org,wordBreak:"break-all",marginBottom:8,fontWeight:600}}>{`${window.location.origin}${window.location.pathname.replace(/index\.html$/,"").replace(/\/$/,"")}/schedule.html#${slug}`}</div>
+                  <button onClick={async()=>{const url=`${window.location.origin}${window.location.pathname.replace(/index\.html$/,"").replace(/\/$/,"")}/schedule.html#${slug}`;try{await navigator.clipboard.writeText(url);alert("Calendar link copied!");}catch(e){alert(url);}}} style={{width:"100%",padding:"8px 0",fontSize:12,fontWeight:700,borderRadius:6,background:C.blu,border:"none",color:"#fff",cursor:"pointer",marginBottom:10}}>Copy Calendar Link</button>
+                  <details style={{borderTop:`1px solid ${C.brd}`,paddingTop:8}}>
+                    <summary style={{fontSize:12,color:C.blu,fontWeight:600,cursor:"pointer",listStyle:"none",display:"flex",justifyContent:"space-between",alignItems:"center"}}>Subscribe to Your Own Calendar<span style={{fontSize:14}}>+</span></summary>
+                    <div style={{paddingTop:8,fontSize:12,color:C.lt,lineHeight:1.6}}>
+                      <div style={{marginBottom:8}}><strong style={{color:C.txt}}>iPhone:</strong> Settings → Calendar → Accounts → Add Account → Other → Add Subscribed Calendar → paste the URL above</div>
+                      <div style={{marginBottom:8}}><strong style={{color:C.txt}}>Android / Google:</strong> Open Google Calendar on desktop → click + next to "Other calendars" → From URL → paste the URL above</div>
+                      <div style={{marginBottom:8}}><strong style={{color:C.txt}}>Outlook Desktop:</strong> Calendar view → Add Calendar → From Internet → paste the URL above</div>
+                      <div><strong style={{color:C.txt}}>Outlook Mobile:</strong> Calendar → Settings → Add Shared Calendar → Add from link → paste the URL above</div>
+                    </div>
+                  </details>
+                </div>
+              </div>
             )}
             <button onClick={async()=>{setSchedSaving(true);try{await fetch(`${SB_URL}/rest/v1/jobs?id=eq.${job.id}`,{method:"PATCH",headers:db._h(),body:JSON.stringify({scheduling_enabled:schedEnabled})});job.scheduling_enabled=schedEnabled;setShowSchedSet(false);}catch(e){alert("Save failed: "+e.message);}finally{setSchedSaving(false);}}} disabled={schedSaving} style={{width:"100%",padding:"12px 0",background:C.org,border:"none",borderRadius:8,color:"#fff",fontSize:14,fontWeight:700,cursor:schedSaving?"default":"pointer",opacity:schedSaving?0.6:1}}>
               {schedSaving?"Saving...":"Save Scheduling"}
