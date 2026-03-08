@@ -38,16 +38,28 @@ FILENAME PATTERN:
 Also analyze the uploaded filename (provided separately). Identify which parts correspond to:
 - {report_number} — the report/DR number (e.g. "45", "01")
 - {project_name} — project or job name
-- {date} — any date portion (could be MMDDYYYY, YYYY, MM-DD-YYYY, etc.)
+- {date} — any date portion
 - Everything else is literal text (like "Daily Report", underscores, spaces, dashes)
 
-Return a pattern string using these tokens. Examples:
-- "Daily Report 45 Woodland Park 2026.pdf" → "Daily Report {report_number} {project_name} {date}"
-- "DR_01_SchoolProject_03072026.pdf" → "DR_{report_number}_{project_name}_{date}"
-- "IOR_Report_23.pdf" → "IOR_Report_{report_number}"
+Return a pattern string using these tokens, PLUS a "dateFormat" string that describes the exact date format found in the filename. Use these format codes:
+- "MMDDYYYY" — e.g. 03072026
+- "MM-DD-YYYY" — e.g. 03-07-2026
+- "MM_DD_YYYY" — e.g. 03_07_2026
+- "YYYY-MM-DD" — e.g. 2026-03-07
+- "YYYYMMDD" — e.g. 20260307
+- "YYYY" — e.g. 2026 (year only)
+- "MM.DD.YYYY" — e.g. 03.07.2026
+- "Month DD YYYY" — e.g. March 07 2026
+- "DD Month YYYY" — e.g. 07 March 2026
+If no date is found in the filename, set dateFormat to "MMDDYYYY" as default.
+
+Examples:
+- "Daily Report 45 Woodland Park 2026.pdf" → pattern: "Daily Report {report_number} {project_name} {date}", dateFormat: "YYYY"
+- "DR_01_SchoolProject_03072026.pdf" → pattern: "DR_{report_number}_{project_name}_{date}", dateFormat: "MMDDYYYY"
+- "IOR_Report_23_2026-03-07.pdf" → pattern: "IOR_Report_{report_number}_{date}", dateFormat: "YYYY-MM-DD"
 
 Return ONLY valid JSON object (not array), no markdown:
-{"fields":[{"label":"Date:","name":"Date","category":"editable","layout":"inline","autoFill":"date","voiceEnabled":false,"multiline":false,"valueText":"04 February 2026"}],"filenamePattern":"Daily Report {report_number} {project_name} {date}"}`;
+{"fields":[...],"filenamePattern":"Daily Report {report_number} {project_name} {date}","dateFormat":"YYYY"}`;
 
 serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -101,6 +113,7 @@ serve(async (req) => {
     // Support both new format {fields:[], filenamePattern:""} and legacy array format
     const fieldMappings = Array.isArray(parsed) ? parsed : (parsed.fields || []);
     const filenamePattern = Array.isArray(parsed) ? null : (parsed.filenamePattern || null);
+    const dateFormat = Array.isArray(parsed) ? null : (parsed.dateFormat || null);
 
     // ── Reconstruct coordinates from real text positions ──
     // Build a lookup of text items by str for fast matching
@@ -297,6 +310,7 @@ serve(async (req) => {
 
     const result: any = { editable: dedupedEditable, locked: dedupedLocked };
     if (filenamePattern) result.filenamePattern = filenamePattern;
+    if (dateFormat) result.dateFormat = dateFormat;
 
     return new Response(JSON.stringify(result), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
