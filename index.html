@@ -263,6 +263,20 @@ const db = {
     const r=await fetch(`${SB_URL}/rest/v1/inspection_requests?id=eq.${id}`,{method:"DELETE",headers:this._h()});
     if(!r.ok)throw new Error("Delete failed");return true;
   },
+  // Saved templates — reusable parsed templates (avoids re-parsing)
+  async getSavedTemplates(userId){
+    const r=await fetch(`${SB_URL}/rest/v1/saved_templates?user_id=eq.${userId}&select=*&order=created_at.desc`,{headers:this._h()});
+    if(!r.ok)return[];return await r.json();
+  },
+  async saveParsedTemplate(d){
+    const r=await fetch(`${SB_URL}/rest/v1/saved_templates`,{method:"POST",headers:this._h(),body:JSON.stringify(d)});
+    if(!r.ok){const e=await r.json().catch(()=>({}));throw new Error(e.message||"Save template failed");}
+    const txt=await r.text();try{return JSON.parse(txt)[0];}catch(_){return null;}
+  },
+  async deleteSavedTemplate(id){
+    const r=await fetch(`${SB_URL}/rest/v1/saved_templates?id=eq.${id}`,{method:"DELETE",headers:this._h()});
+    if(!r.ok)throw new Error("Delete failed");return true;
+  },
 };
 
 /* ── Account Settings Page ── */
@@ -526,6 +540,17 @@ function CreateJob({user, onBack, onCreated}){
   const [drag,setDrag]=useState(false);
   const [parsing,setParsing]=useState(false);
   const [fields,setFields]=useState([]); // unified field list: {name, value, mode: "edit"|"lock"|"auto-date"|"auto-num"}
+  const [savedTpls,setSavedTpls]=useState([]); // user's saved/reusable templates
+  const [loadingSaved,setLoadingSaved]=useState(true);
+  const [showSaved,setShowSaved]=useState(false);
+  const [usedSavedId,setUsedSavedId]=useState(null); // id of saved template being used
+  const [savingTpl,setSavingTpl]=useState(false);
+  const [tplSaved,setTplSaved]=useState(false); // whether current parse was saved
+
+  // Load saved templates on mount
+  useEffect(()=>{
+    db.getSavedTemplates(user.id).then(t=>{setSavedTpls(t);setLoadingSaved(false);}).catch(()=>setLoadingSaved(false));
+  },[user.id]);
 
   const DS=["Mon","Tue","Wed","Thu","Fri","Sat","Sun"];
   const TS=["12:00 PM","1:00 PM","2:00 PM","3:00 PM","4:00 PM","5:00 PM","6:00 PM","7:00 PM","8:00 PM","9:00 PM"];
@@ -583,7 +608,47 @@ function CreateJob({user, onBack, onCreated}){
     }finally{setParsing(false);}
   };
 
-  const doFile=async(f)=>{const e=f.name.split(".").pop().toLowerCase();if(!["docx","pdf"].includes(e)){setErr("Only .docx and .pdf");return;}setTf(f);setErr("");try{const buf=await f.arrayBuffer();setTfBuf(buf);}catch(bufErr){console.error("File buffer read:",bufErr);}parseFields(f);};
+  const doFile=async(f)=>{const e=f.name.split(".").pop().toLowerCase();if(!["docx","pdf"].includes(e)){setErr("Only .docx and .pdf");return;}setTf(f);setErr("");setUsedSavedId(null);setTplSaved(false);try{const buf=await f.arrayBuffer();setTfBuf(buf);}catch(bufErr){console.error("File buffer read:",bufErr);}parseFields(f);};
+
+  // Use a saved template — loads fields without re-parsing, but still needs the actual file uploaded
+  const useSavedTemplate=(tpl)=>{
+    setFields(tpl.field_config||[]);
+    setUsedSavedId(tpl.id);
+    setTplSaved(true);
+    setShowSaved(false);
+    setErr("");
+    // Don't set tf — user still needs to upload the actual file, but parsing is skipped
+  };
+
+  // When file is uploaded after selecting a saved template, skip parsing
+  const doFileWithSaved=async(f)=>{
+    const e=f.name.split(".").pop().toLowerCase();
+    if(!["docx","pdf"].includes(e)){setErr("Only .docx and .pdf");return;}
+    setTf(f);setErr("");
+    try{const buf=await f.arrayBuffer();setTfBuf(buf);}catch(bufErr){console.error("File buffer read:",bufErr);}
+    // Fields already loaded from saved template — no parsing needed
+  };
+
+  // Save current parsed fields as a reusable template
+  const saveAsTemplate=async()=>{
+    if(!fields.length||!tf)return;
+    setSavingTpl(true);
+    try{
+      await db.saveParsedTemplate({
+        user_id:user.id,
+        name:tf.name.replace(/\.[^.]+$/,""),
+        original_filename:tf.name,
+        file_type:tf.name.split(".").pop().toLowerCase(),
+        field_config:fields,
+        storage_path:null // file stays with the job, this just saves the field mapping
+      });
+      setTplSaved(true);
+      // Refresh the list
+      const updated=await db.getSavedTemplates(user.id);
+      setSavedTpls(updated);
+    }catch(e){setErr("Could not save template: "+e.message);}
+    finally{setSavingTpl(false);}
+  };
 
   // Field management
   const setFieldMode=(name,mode)=>{setFields(p=>p.map(f=>f.name===name?{...f,mode}:f));};
@@ -682,23 +747,53 @@ function CreateJob({user, onBack, onCreated}){
         {/* Site Address — optional */}
         <div style={{marginBottom:20}}><label style={ls}>Site Address</label><input type="text" placeholder="2111 Mission Ave, Oceanside CA 92058" value={addr} onChange={e=>setAddr(e.target.value)} style={fs}/></div>
 
-        {/* Upload Template */}
+        {/* Template Section */}
         <div style={{marginBottom:20}}>
-          <label style={ls}>Upload Template</label>
+          <label style={ls}>Template</label>
+
+          {/* Saved Templates picker */}
+          {!tf&&savedTpls.length>0&&(
+            <div style={{marginBottom:12}}>
+              <button onClick={()=>setShowSaved(!showSaved)} style={{width:"100%",padding:"12px 16px",background:C.card,border:`1px solid ${C.blu}`,borderRadius:10,color:C.blu,fontSize:14,fontWeight:600,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+                <span>Use a Saved Template ({savedTpls.length})</span>
+                <span style={{fontSize:12}}>{showSaved?"▲":"▼"}</span>
+              </button>
+              {showSaved&&(
+                <div style={{marginTop:8,background:C.inp,border:`1px solid ${C.brd}`,borderRadius:10,overflow:"hidden",maxHeight:250,overflowY:"auto"}}>
+                  {savedTpls.map(t=>(
+                    <div key={t.id} onClick={()=>useSavedTemplate(t)} style={{padding:"12px 16px",borderBottom:`1px solid ${C.brd}`,cursor:"pointer",display:"flex",alignItems:"center",gap:10}}>
+                      <span style={{fontSize:18}}>📋</span>
+                      <div style={{flex:1}}>
+                        <div style={{fontSize:13,fontWeight:600,color:C.txt}}>{t.name}</div>
+                        <div style={{fontSize:11,color:C.mut}}>{(t.field_config||[]).length} fields — {t.file_type?.toUpperCase()}</div>
+                      </div>
+                      <span style={{color:C.blu,fontSize:12,fontWeight:600}}>Use</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <div style={{textAlign:"center",color:C.mut,fontSize:12,margin:"10px 0"}}>— or upload a new one —</div>
+            </div>
+          )}
+
+          {/* Upload area */}
           {!tf?(
-            <div onDragOver={e=>{e.preventDefault();setDrag(true);}} onDragLeave={()=>setDrag(false)} onDrop={e=>{e.preventDefault();setDrag(false);if(e.dataTransfer.files.length)doFile(e.dataTransfer.files[0]);}} onClick={()=>document.getElementById("fi").click()}
+            <div onDragOver={e=>{e.preventDefault();setDrag(true);}} onDragLeave={()=>setDrag(false)} onDrop={e=>{e.preventDefault();setDrag(false);if(e.dataTransfer.files.length)(usedSavedId?doFileWithSaved:doFile)(e.dataTransfer.files[0]);}} onClick={()=>document.getElementById("fi").click()}
               style={{border:`2px dashed ${drag?C.org:C.brd}`,borderRadius:12,padding:"32px 20px",textAlign:"center",cursor:"pointer",background:drag?"#1f1a14":C.inp}}>
-              <div style={{fontSize:32,marginBottom:8}}>📄</div>
-              <p style={{color:C.lt,fontSize:14,fontWeight:600,marginBottom:4}}>Drop your Word or PDF template here</p>
-              <p style={{color:C.mut,fontSize:12}}>or tap to browse • .docx or .pdf</p>
-              <input id="fi" type="file" accept=".docx,.pdf" style={{display:"none"}} onChange={e=>e.target.files[0]&&doFile(e.target.files[0])}/>
+              <div style={{fontSize:32,marginBottom:8}}>{usedSavedId?"📋":"📄"}</div>
+              <p style={{color:C.lt,fontSize:14,fontWeight:600,marginBottom:4}}>{usedSavedId?"Now upload the actual file (parsing will be skipped)":"Drop your Word or PDF template here"}</p>
+              <p style={{color:C.mut,fontSize:12}}>{usedSavedId?"Fields already loaded from saved template":"or tap to browse • .docx or .pdf"}</p>
+              <input id="fi" type="file" accept=".docx,.pdf" style={{display:"none"}} onChange={e=>e.target.files[0]&&(usedSavedId?doFileWithSaved:doFile)(e.target.files[0])}/>
             </div>
           ):(
             <div style={{background:C.inp,border:`1px solid ${C.brd}`,borderRadius:12,padding:"14px 16px"}}>
               <div style={{display:"flex",alignItems:"center",gap:12}}>
-                <div style={{fontSize:24}}>📄</div>
-                <div style={{flex:1}}><div style={{fontSize:14,fontWeight:600,color:C.txt}}>{tf.name}</div><div style={{fontSize:12,color:C.mut}}>{(tf.size/1024).toFixed(0)} KB</div></div>
-                <button onClick={()=>{setTf(null);setFields([]);}} style={{background:"none",border:"none",color:"#ef4444",cursor:"pointer",fontSize:18}}>✕</button>
+                <div style={{fontSize:24}}>{usedSavedId?"📋":"📄"}</div>
+                <div style={{flex:1}}>
+                  <div style={{fontSize:14,fontWeight:600,color:C.txt}}>{tf.name}</div>
+                  <div style={{fontSize:12,color:C.mut}}>{usedSavedId?"Using saved template — no parsing needed":"New upload"}</div>
+                </div>
+                <button onClick={()=>{setTf(null);setTfBuf(null);setFields([]);setUsedSavedId(null);setTplSaved(false);}} style={{background:"none",border:"none",color:"#ef4444",cursor:"pointer",fontSize:18}}>✕</button>
               </div>
             </div>
           )}
@@ -716,6 +811,15 @@ function CreateJob({user, onBack, onCreated}){
         {/* ── Unified Field List ── */}
         {!parsing&&fields.length>0&&(
           <div style={{marginBottom:20}}>
+            {/* Save as Template button — only for newly parsed (not already saved) */}
+            {!tplSaved&&!usedSavedId&&(
+              <button onClick={saveAsTemplate} disabled={savingTpl} style={{width:"100%",padding:"10px 0",background:"transparent",border:`1px solid ${C.blu}`,borderRadius:8,color:C.blu,fontSize:13,fontWeight:600,cursor:savingTpl?"default":"pointer",marginBottom:10,opacity:savingTpl?0.6:1}}>
+                {savingTpl?"Saving...":"Save as Reusable Template"}
+              </button>
+            )}
+            {tplSaved&&!usedSavedId&&(
+              <div style={{textAlign:"center",fontSize:12,color:C.ok,fontWeight:600,marginBottom:10}}>Template saved — available for future jobs</div>
+            )}
             <div style={{background:C.inp,border:`1px solid ${C.brd}`,borderRadius:12,overflow:"hidden"}}>
               <div style={{padding:"12px 16px",borderBottom:`1px solid ${C.brd}`,background:"rgba(232,116,42,0.06)"}}>
                 <div style={{fontWeight:700,fontSize:14,color:C.org}}>Template Fields ({fields.length})</div>
