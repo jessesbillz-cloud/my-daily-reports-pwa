@@ -34,8 +34,43 @@ CRITICAL RULES:
 4. Ignore signature lines and page numbers.
 5. The "label" field MUST exactly match a "str" value from the input text items.
 
-Return ONLY valid JSON array, no markdown:
-[{"label":"Date:","name":"Date","category":"editable","layout":"inline","autoFill":"date","voiceEnabled":false,"multiline":false,"valueText":"04 February 2026"},{"label":"IOR Notes","name":"IOR Notes","category":"editable","layout":"below","autoFill":null,"voiceEnabled":true,"multiline":true,"valueText":""}]`;
+Return ONLY valid JSON object with "fields" array, no markdown:
+{"fields":[{"label":"Date:","name":"Date","category":"editable","layout":"inline","autoFill":"date","voiceEnabled":false,"multiline":false,"valueText":"04 February 2026"},{"label":"IOR Notes","name":"IOR Notes","category":"editable","layout":"below","autoFill":null,"voiceEnabled":true,"multiline":true,"valueText":""}]}`;
+
+// Separate prompt for filename convention analysis
+const FILENAME_PROMPT = \`You are analyzing a PDF filename to determine its naming convention.
+
+Given a filename like "Daily Report 45 Woodland Park 03-08-2026", you must identify which parts are TOKENS that change per report and which parts are STATIC text.
+
+TOKENS to detect:
+- {report_number}: The report/inspection number (e.g. "45", "001", "12")
+- {date}: A date in any format (e.g. "03-08-2026", "2026-03-08", "03.08.2026", "03082026", "March 8 2026")
+- {year}: A standalone year (e.g. "2026") — only if no full date is present
+
+Return a JSON object:
+- "pattern": The filename with tokens replacing the dynamic parts. Keep ALL static text exactly as-is.
+- "dateFormat": The detected date format using these codes: MM=2-digit month, DD=2-digit day, YYYY=4-digit year, Month=full month name, Mon=abbreviated month. Use the actual separator found (dash, slash, dot, underscore, space, or none).
+  Examples: "MM-DD-YYYY", "YYYY-MM-DD", "MM.DD.YYYY", "MMDDYYYY", "Month DD YYYY", "MM/DD/YYYY"
+  If no date found, use "".
+- "numberPadding": How many digits the report number is zero-padded to (e.g. "45"→0, "045"→3, "01"→2). Use 0 if no padding detected.
+
+EXAMPLES:
+Filename: "Daily Report 45 Woodland Park 03-08-2026"
+→ {"pattern":"Daily Report {report_number} Woodland Park {date}","dateFormat":"MM-DD-YYYY","numberPadding":0}
+
+Filename: "DR_001_ProjectAlpha_2026-03-08"
+→ {"pattern":"DR_{report_number}_ProjectAlpha_{date}","dateFormat":"YYYY-MM-DD","numberPadding":3}
+
+Filename: "Inspection Report 12 - March 8 2026"
+→ {"pattern":"Inspection Report {report_number} - {date}","dateFormat":"Month DD YYYY","numberPadding":0}
+
+Filename: "Site Visit Log 003"
+→ {"pattern":"Site Visit Log {report_number}","dateFormat":"","numberPadding":3}
+
+Filename: "Highway Project DR7 2026"
+→ {"pattern":"Highway Project DR{report_number} {year}","dateFormat":"","numberPadding":0}
+
+Return ONLY valid JSON, no markdown.\`;
 
 serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -60,27 +95,56 @@ serve(async (req) => {
 
     const userMsg = `Here are ${text_items.length} text items extracted from "${file_name}":\n\n${itemsSummary}\n\n${PROMPT}`;
 
-    const response = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": Deno.env.get("ANTHROPIC_API_KEY"),
-        "anthropic-version": "2023-06-01",
-      },
-      body: JSON.stringify({
-        model: "claude-sonnet-4-20250514",
-        max_tokens: 4096,
-        messages: [{ role: "user", content: userMsg }],
-      }),
-    });
+    const apiKey = Deno.env.get("ANTHROPIC_API_KEY");
+    const apiHeaders = {
+      "Content-Type": "application/json",
+      "x-api-key": apiKey,
+      "anthropic-version": "2023-06-01",
+    };
 
-    const data = await response.json();
+    // Fire both requests in parallel — field analysis + filename convention
+    const cleanName = (file_name || "").replace(/\.[^.]+$/, "");
+    const fnMsg = `Analyze this filename and determine the naming convention:\n\n"${cleanName}"\n\n${FILENAME_PROMPT}`;
+
+    const [fieldsResp, fnResp] = await Promise.all([
+      fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: apiHeaders,
+        body: JSON.stringify({
+          model: "claude-sonnet-4-20250514",
+          max_tokens: 4096,
+          messages: [{ role: "user", content: userMsg }],
+        }),
+      }),
+      fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: apiHeaders,
+        body: JSON.stringify({
+          model: "claude-sonnet-4-20250514",
+          max_tokens: 512,
+          messages: [{ role: "user", content: fnMsg }],
+        }),
+      }),
+    ]);
+
+    const data = await fieldsResp.json();
+    const fnData = await fnResp.json();
 
     if (data.error) {
       return new Response(JSON.stringify({ error: data.error.message || "Anthropic API error" }), {
         status: 500,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
+    }
+
+    // Parse filename convention result
+    let filenameConvention: any = null;
+    try {
+      const fnRaw = fnData.content?.map((c: any) => c.text || "").join("") || "";
+      const fnClean = fnRaw.replace(/```json|```/g, "").trim();
+      filenameConvention = JSON.parse(fnClean);
+    } catch (_e) {
+      // Non-fatal — filename convention is optional
     }
 
     const rawText = data.content?.map((c: any) => c.text || "").join("") || "";
@@ -281,7 +345,10 @@ serve(async (req) => {
       dedupedLocked = dedupedLocked.filter((f: any) => !NOTES_KEYWORDS.some((k) => (f.name || "").toLowerCase().includes(k)));
     }
 
-    const result = { editable: dedupedEditable, locked: dedupedLocked };
+    const result: any = { editable: dedupedEditable, locked: dedupedLocked };
+    if (filenameConvention) {
+      result.filenameConvention = filenameConvention;
+    }
 
     return new Response(JSON.stringify(result), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },

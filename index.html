@@ -573,6 +573,7 @@ function CreateJob({user, onBack, onCreated}){
   const [showSaved,setShowSaved]=useState(false);
   const [usedSavedId,setUsedSavedId]=useState(null); // id of saved template being used
   const [reportTitle,setReportTitle]=useState(""); // editable report title (for saved template reuse)
+  const [fnConvention,setFnConvention]=useState(null); // AI-detected: {pattern, dateFormat, numberPadding}
   const [savingTpl,setSavingTpl]=useState(false);
   const [tplSaved,setTplSaved]=useState(false); // whether current parse was saved
 
@@ -626,13 +627,19 @@ function CreateJob({user, onBack, onCreated}){
       });
       (parsed.locked||[]).forEach(f=>{addUnique(f,"lock");});
       setFields(all);
+      // Store AI-detected filename convention
+      if(parsed.filenameConvention){
+        setFnConvention(parsed.filenameConvention);
+        // Update the editable report title to use the detected pattern (shows tokens to user)
+        if(parsed.filenameConvention.pattern)setReportTitle(parsed.filenameConvention.pattern);
+      }
     }catch(e){
       console.error("Parse error:",e);
       setErr("Could not parse template fields. You can still create the job and configure fields later.");
     }finally{setParsing(false);}
   };
 
-  const doFile=async(f)=>{const e=f.name.split(".").pop().toLowerCase();if(e!=="pdf"){setErr("Only PDF files are accepted. Please convert Word docs to PDF first.");return;}setTf(f);setErr("");setUsedSavedId(null);setReportTitle(f.name.replace(/\.[^.]+$/,""));setTplSaved(false);try{const buf=await f.arrayBuffer();const copy=buf.slice(0);setTfBuf(copy);parseFields(copy.slice(0),f.name);}catch(bufErr){console.error("File buffer read:",bufErr);}};
+  const doFile=async(f)=>{const e=f.name.split(".").pop().toLowerCase();if(e!=="pdf"){setErr("Only PDF files are accepted. Please convert Word docs to PDF first.");return;}setTf(f);setErr("");setUsedSavedId(null);setReportTitle(f.name.replace(/\.[^.]+$/,""));setFnConvention(null);setTplSaved(false);try{const buf=await f.arrayBuffer();const copy=buf.slice(0);setTfBuf(copy);parseFields(copy.slice(0),f.name);}catch(bufErr){console.error("File buffer read:",bufErr);}};
 
   // Use a saved template — loads fields without re-parsing, but still needs the actual file uploaded
   // Job-specific locked fields become editable so user can enter new values for the new job
@@ -711,14 +718,16 @@ function CreateJob({user, onBack, onCreated}){
     if(!ok)return;setSaving(true);setErr("");
     try{
       const es=effSch();
-      // Use edited report title if set, otherwise fall back to uploaded filename
+      // Use edited report title as the pattern — user can tweak what AI detected
       const filePattern=reportTitle.trim()||(tf?tf.name.replace(/\.[^.]+$/,""):"");
+      // Store the AI-detected convention (dateFormat, numberPadding) alongside the pattern
+      const convention=fnConvention?{pattern:filePattern,dateFormat:fnConvention.dateFormat||"",numberPadding:fnConvention.numberPadding||0}:{pattern:filePattern,dateFormat:"",numberPadding:0};
       const coords=(f)=>({page:f.page,x:f.x,y:f.y,w:f.w,h:f.h,fontSize:f.fontSize,multiline:f.multiline});
       // Fields marked lockAfterCreate (from saved template reuse) go back to locked with the user's new values
       const editFields=fields.filter(f=>f.mode==="edit"&&!f.lockAfterCreate).map(f=>({name:f.name,value:f.value,originalValue:f.value||"",voiceEnabled:true,...coords(f)}));
       const lockFields=[...fields.filter(f=>f.mode==="lock"),...fields.filter(f=>f.mode==="edit"&&f.lockAfterCreate)].map(f=>({name:f.name,value:f.value,...coords(f)}));
       const autoFields=fields.filter(f=>f.mode==="auto-date"||f.mode==="auto-num").map(f=>({name:f.name,value:f.value,originalValue:f.value||"",autoFill:f.mode==="auto-date"?"date":"increment",...coords(f)}));
-      const fc={editable:[...editFields,...autoFields],locked:lockFields};
+      const fc={editable:[...editFields,...autoFields],locked:lockFields,filenameConvention:convention};
       const job=await db.mkJob({user_id:user.id,name:jn.trim(),site_address:addr.trim()||null,report_filename_pattern:filePattern,schedule:es,schedule_days:es==="custom"?days:[],reminder_enabled:remOn,reminder_time:remOn?remT:null,reminder_hours_before:remOn?remH:null,scheduling_enabled:schedOn,field_config:fc});
       if(tf&&job?.id){
         const ext=tf.name.split(".").pop().toLowerCase();
@@ -839,18 +848,18 @@ function CreateJob({user, onBack, onCreated}){
                   <div style={{fontSize:14,fontWeight:600,color:C.txt}}>{tf.name}</div>
                   <div style={{fontSize:12,color:C.mut}}>{usedSavedId?"Using saved template — no parsing needed":"New upload"}</div>
                 </div>
-                <button onClick={()=>{setTf(null);setTfBuf(null);setFields([]);setUsedSavedId(null);setReportTitle("");setTplSaved(false);}} style={{background:"none",border:"none",color:"#ef4444",cursor:"pointer",fontSize:18}}>✕</button>
+                <button onClick={()=>{setTf(null);setTfBuf(null);setFields([]);setUsedSavedId(null);setReportTitle("");setFnConvention(null);setTplSaved(false);}} style={{background:"none",border:"none",color:"#ef4444",cursor:"pointer",fontSize:18}}>✕</button>
               </div>
             </div>
           )}
         </div>
 
-        {/* Report Title — editable, populated from uploaded filename or saved template */}
+        {/* Report Title — editable, populated from AI-detected pattern or saved template */}
         {reportTitle&&(
           <div style={{marginBottom:20}}>
-            <label style={ls}>Report Title</label>
-            <input type="text" value={reportTitle} onChange={e=>setReportTitle(e.target.value)} style={fs} placeholder="e.g. Daily Report 45 Woodland Park 2026"/>
-            <p style={{color:C.mut,fontSize:11,marginTop:4}}>This is the naming convention for generated reports. Edit if needed.</p>
+            <label style={ls}>Report Naming Convention</label>
+            <input type="text" value={reportTitle} onChange={e=>{setReportTitle(e.target.value);setFnConvention(prev=>prev?{...prev,pattern:e.target.value}:prev);}} style={fs} placeholder="e.g. Daily Report {report_number} Woodland Park {date}"/>
+            <p style={{color:C.mut,fontSize:11,marginTop:4}}>{"{report_number}"} = auto-incremented report # · {"{date}"} = today's date{fnConvention?.dateFormat?` (${fnConvention.dateFormat})`:""} · {"{year}"} = current year</p>
           </div>
         )}
 
@@ -1314,9 +1323,9 @@ function ReportEditor({job, user, onBack, reportDate}){
       const isPdfTemplate=tplRecord.file_type==="pdf";
 
       // ── 2. Load template — use copyPages to preserve original visual content ──
-      let pdfDoc;
+      let pdfDoc;let srcDoc=null;
       if(isPdfTemplate){
-        const srcDoc=await PDFDocument.load(tplBytes,{ignoreEncryption:true});
+        srcDoc=await PDFDocument.load(tplBytes,{ignoreEncryption:true});
         pdfDoc=await PDFDocument.create();
         const copiedPages=await pdfDoc.copyPages(srcDoc,srcDoc.getPageIndices());
         copiedPages.forEach(p=>pdfDoc.addPage(p));
@@ -1362,14 +1371,46 @@ function ReportEditor({job, user, onBack, reportDate}){
         }
       });
 
-      // ── 5. Photos on new page ──
+      // ── 5. Photos on new pages — embed header/footer clips from template onto blank pages ──
       // photoLayout: "1"=1 per page, "2"=2 per page (1 col, 2 rows), "4"=4 per page (2 cols, 2 rows)
       if(photos.length>0){
+        const pageW=pages.length>0?pages[0].getWidth():612;
+        const pageH=pages.length>0?pages[0].getHeight():792;
+        // Determine where header ends and footer starts from field positions (top-left coords)
+        const p1Fields=allFields.filter(f=>f.y!=null&&(f.page||1)===1);
+        let headerBottomTL=80,footerTopTL=pageH-40; // defaults in top-left coords
+        if(p1Fields.length>0){
+          headerBottomTL=Math.max(Math.min(...p1Fields.map(f=>f.y))-5,0);
+          footerTopTL=Math.min(Math.max(...p1Fields.map(f=>f.y+(f.h||12)))+5,pageH);
+        }
+        // Convert to PDF coords (bottom-left origin)
+        const headerBottomPDF=pageH-headerBottomTL; // PDF y where header ends
+        const footerTopPDF=pageH-footerTopTL; // PDF y where footer starts
+
+        // Embed header and footer as clipped regions from the template's first page
+        let headerEmbed=null,footerEmbed=null;
+        const headerH=pageH-headerBottomPDF>10?(pageH-headerBottomPDF):0;
+        const footerH=footerTopPDF>10?footerTopPDF:0;
+        if(srcDoc&&headerH>0){
+          const srcPage=srcDoc.getPage(0);
+          headerEmbed=await pdfDoc.embedPage(srcPage,{left:0,right:pageW,bottom:headerBottomPDF,top:pageH});
+        }
+        if(srcDoc&&footerH>0){
+          const srcPage=srcDoc.getPage(0);
+          footerEmbed=await pdfDoc.embedPage(srcPage,{left:0,right:pageW,bottom:0,top:footerTopPDF});
+        }
+
+        // Photo area = between header and footer
+        const photoAreaTop=headerBottomPDF-5;
+        const photoAreaBottom=footerTopPDF+5;
+        const usableH=photoAreaTop-photoAreaBottom;
+
         const cols=photoLayout==="4"?2:1;
         const perPage=photoLayout==="1"?1:photoLayout==="2"?2:4;
         const rows=Math.ceil(perPage/cols);
-        const maxSlotW=photoLayout==="1"?Math.min((612-72)/cols,380):(612-72-(cols-1)*12)/cols;
-        const maxSlotH=photoLayout==="1"?(792-100):(792-80-(rows-1)*12)/rows;
+        const bodyW=pageW-72;
+        const maxSlotW=photoLayout==="1"?Math.min(bodyW/cols,380):(bodyW-(cols-1)*12)/cols;
+        const maxSlotH=photoLayout==="1"?(usableH-20):(usableH-20-(rows-1)*12)/rows;
         for(let i=0;i<photos.length;i++){
           try{
             const imgData=photos[i].src||photos[i];
@@ -1377,21 +1418,26 @@ function ReportEditor({job, user, onBack, reportDate}){
             if(typeof imgData==="string"&&imgData.startsWith("data:image/png"))img=await pdfDoc.embedPng(imgData);
             else if(typeof imgData==="string")img=await pdfDoc.embedJpg(imgData);
             if(!img)continue;
-            if(i%perPage===0){const newPage=pdfDoc.addPage([612,792]);newPage.drawText("Photos — "+job.name,{x:36,y:760,size:12,font,color:rgb(0.4,0.4,0.4)});}
+            if(i%perPage===0){
+              // Fresh blank page, same size as template
+              const newPage=pdfDoc.addPage([pageW,pageH]);
+              // Draw header clip at the top
+              if(headerEmbed)newPage.drawPage(headerEmbed,{x:0,y:headerBottomPDF,width:pageW,height:headerH});
+              // Draw footer clip at the bottom
+              if(footerEmbed)newPage.drawPage(footerEmbed,{x:0,y:0,width:pageW,height:footerTopPDF});
+            }
             const pg=pdfDoc.getPages()[pdfDoc.getPageCount()-1];
-            // Auto-size: fit photo preserving real aspect ratio
             const ratio=img.width/img.height;
             let imgW,imgH;
             if(ratio>=1){imgW=Math.min(maxSlotW,maxSlotH*ratio);imgH=imgW/ratio;}
             else{imgH=Math.min(maxSlotH,maxSlotW/ratio);imgW=imgH*ratio;}
             const idxOnPage=i%perPage;
             const slot=idxOnPage%cols;const row=Math.floor(idxOnPage/cols);
-            // Center photo in its slot
-            const slotX=photoLayout==="1"?0:(36+slot*(maxSlotW+12));
-            const slotY=720-(row*(maxSlotH+12));
-            const xPos=photoLayout==="1"?((612-imgW)/2):(slotX+(maxSlotW-imgW)/2);
-            const yPos=photoLayout==="1"?(slotY-(maxSlotH-imgH)/2):(slotY-(maxSlotH-imgH)/2);
-            pg.drawImage(img,{x:xPos,y:yPos-imgH,width:imgW,height:imgH});
+            const slotX=36+slot*(maxSlotW+12);
+            const rowTop=photoAreaTop-10-(row*(maxSlotH+12));
+            const xPos=photoLayout==="1"?((pageW-imgW)/2):(slotX+(maxSlotW-imgW)/2);
+            const yPos=rowTop-imgH+(maxSlotH-imgH)/2;
+            pg.drawImage(img,{x:xPos,y:Math.max(yPos,photoAreaBottom),width:imgW,height:imgH});
           }catch(imgErr){console.error("Photo embed error:",imgErr);}
         }
       }
@@ -1403,28 +1449,35 @@ function ReportEditor({job, user, onBack, reportDate}){
       let binary="";for(let i=0;i<uint8.length;i++)binary+=String.fromCharCode(uint8[i]);
       const pdfBase64=btoa(binary);
 
-      // ── 7. Build filename ──
+      // ── 7. Build filename using AI-detected convention ──
       let rptNumber=1;
       try{const cntR=await fetch(`${SB_URL}/rest/v1/reports?select=report_number&job_id=eq.${job.id}&order=report_number.desc&limit=1`,{headers:db._h()});const topR=cntR.ok?await cntR.json():[];rptNumber=(topR[0]?.report_number||0)+1;}catch(e){}
       if(draftId){try{const exR=await fetch(`${SB_URL}/rest/v1/reports?select=report_number&id=eq.${draftId}`,{headers:db._h()});const exD=exR.ok?await exR.json():[];if(exD[0]?.report_number)rptNumber=exD[0].report_number;}catch(e){}}
-      const rptNum=String(rptNumber).padStart(2,"0");
-      // Filename = exact uploaded name with only number and date swapped in place
-      const fnSource=job.report_filename_pattern||tplRecord?.original_filename||job.name||"Report";
-      let baseName=fnSource.replace(/\.[^.]+$/,"");
-      // Swap the report number: find standalone 1-3 digit number (not inside a longer number)
-      baseName=baseName.replace(/(?<!\d)\d{1,3}(?!\d)/,rptNum);
-      // Swap the date: match whatever date format is in the original filename
+      const conv=job.field_config?.filenameConvention||{};
+      const padding=conv.numberPadding||0;
+      const rptNum=padding>0?String(rptNumber).padStart(padding,"0"):String(rptNumber);
+      // Format today's date according to the AI-detected format
       const now=new Date();
-      const mm=now.toLocaleDateString("en-US",{month:"2-digit",timeZone:tz});
-      const dd=now.toLocaleDateString("en-US",{day:"2-digit",timeZone:tz});
-      const yyyy=now.toLocaleDateString("en-US",{year:"numeric",timeZone:tz});
-      // Try each known date pattern and replace with today in the SAME format
-      if(/\d{2}-\d{2}-\d{4}/.test(baseName))baseName=baseName.replace(/\d{2}-\d{2}-\d{4}/,mm+"-"+dd+"-"+yyyy);
-      else if(/\d{2}_\d{2}_\d{4}/.test(baseName))baseName=baseName.replace(/\d{2}_\d{2}_\d{4}/,mm+"_"+dd+"_"+yyyy);
-      else if(/\d{2}\.\d{2}\.\d{4}/.test(baseName))baseName=baseName.replace(/\d{2}\.\d{2}\.\d{4}/,mm+"."+dd+"."+yyyy);
-      else if(/\d{4}-\d{2}-\d{2}/.test(baseName))baseName=baseName.replace(/\d{4}-\d{2}-\d{2}/,yyyy+"-"+mm+"-"+dd);
-      else if(/\d{8}/.test(baseName))baseName=baseName.replace(/\d{8}/,mm+dd+yyyy);
-      else if(/\b20\d{2}\b/.test(baseName))baseName=baseName.replace(/\b20\d{2}\b/,yyyy);
+      const fmtMM=now.toLocaleDateString("en-US",{month:"2-digit",timeZone:tz});
+      const fmtDD=now.toLocaleDateString("en-US",{day:"2-digit",timeZone:tz});
+      const fmtYYYY=now.toLocaleDateString("en-US",{year:"numeric",timeZone:tz});
+      const monthNames=["January","February","March","April","May","June","July","August","September","October","November","December"];
+      const monNames=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+      const monthIdx=now.toLocaleDateString("en-US",{month:"numeric",timeZone:tz})-1;
+      const fmtMonth=monthNames[monthIdx]||"";
+      const fmtMon=monNames[monthIdx]||"";
+      const fmtDay=String(parseInt(fmtDD));
+      const formatDate=(fmt)=>{
+        if(!fmt)return"";
+        return fmt.replace(/YYYY/g,fmtYYYY).replace(/MM/g,fmtMM).replace(/DD/g,fmtDD).replace(/Month/g,fmtMonth).replace(/Mon/g,fmtMon);
+      };
+      // Build filename from the stored pattern (which the user may have edited)
+      const pattern=conv.pattern||job.report_filename_pattern||job.name||"Report";
+      let baseName=pattern.replace(/\.[^.]+$/,"");
+      baseName=baseName.replace(/\{report_number\}/g,rptNum);
+      const dateStr=formatDate(conv.dateFormat);
+      baseName=baseName.replace(/\{date\}/g,dateStr);
+      baseName=baseName.replace(/\{year\}/g,fmtYYYY);
       const pdfFilename=baseName+".pdf";
 
       // ── 8. Save report, upload PDF, send email — all at once ──
@@ -1818,24 +1871,30 @@ function JobDetail({job, user, onBack, onDeleted}){
 
   // Track if user has started today's report this session
   const [reportStarted,setReportStarted]=useState(false);
-  // Build display filename from template's original_filename — only swap sequential number and date
+  // Build display filename using stored AI convention — swap tokens for actual values
   const buildReportName=(num,reportDate)=>{
-    const padNum=String(num).padStart(2,"0");
-    const src=tplFilename||job.report_filename_pattern||job.name||"Report";
-    let n=src.replace(/\.[^.]+$/,"");
-    // Swap report number
-    n=n.replace(/(?<!\d)\d{1,3}(?!\d)/,padNum);
-    // Swap date — parse the reportDate and match whatever format is in the original
-    const d=reportDate instanceof Date?reportDate:new Date(typeof reportDate==="string"&&reportDate.length===8?(reportDate.slice(0,2)+"/"+reportDate.slice(2,4)+"/"+reportDate.slice(4)+"T12:00:00"):(reportDate+"T12:00:00"));
+    const conv=job.field_config?.filenameConvention||{};
+    const padding=conv.numberPadding||0;
+    const padNum=padding>0?String(num).padStart(padding,"0"):String(num);
+    const pattern=conv.pattern||job.report_filename_pattern||job.name||"Report";
+    let n=pattern.replace(/\.[^.]+$/,"");
+    // Swap tokens
+    n=n.replace(/\{report_number\}/g,padNum);
+    // Parse the date for this report
+    const d=reportDate instanceof Date?reportDate:new Date(typeof reportDate==="string"&&/^\d{4}-\d{2}-\d{2}$/.test(reportDate)?(reportDate+"T12:00:00"):(reportDate+"T12:00:00"));
     const mm=d.toLocaleDateString("en-US",{month:"2-digit",timeZone:tz});
     const dd=d.toLocaleDateString("en-US",{day:"2-digit",timeZone:tz});
     const yyyy=d.toLocaleDateString("en-US",{year:"numeric",timeZone:tz});
-    if(/\d{2}-\d{2}-\d{4}/.test(n))n=n.replace(/\d{2}-\d{2}-\d{4}/,mm+"-"+dd+"-"+yyyy);
-    else if(/\d{2}_\d{2}_\d{4}/.test(n))n=n.replace(/\d{2}_\d{2}_\d{4}/,mm+"_"+dd+"_"+yyyy);
-    else if(/\d{2}\.\d{2}\.\d{4}/.test(n))n=n.replace(/\d{2}\.\d{2}\.\d{4}/,mm+"."+dd+"."+yyyy);
-    else if(/\d{4}-\d{2}-\d{2}/.test(n))n=n.replace(/\d{4}-\d{2}-\d{2}/,yyyy+"-"+mm+"-"+dd);
-    else if(/\d{8}/.test(n))n=n.replace(/\d{8}/,mm+dd+yyyy);
-    else if(/\b20\d{2}\b/.test(n))n=n.replace(/\b20\d{2}\b/,yyyy);
+    const monthNames=["January","February","March","April","May","June","July","August","September","October","November","December"];
+    const monNames=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+    const monthIdx=d.toLocaleDateString("en-US",{month:"numeric",timeZone:tz})-1;
+    const formatDate=(fmt)=>{
+      if(!fmt)return"";
+      return fmt.replace(/YYYY/g,yyyy).replace(/MM/g,mm).replace(/DD/g,dd).replace(/Month/g,monthNames[monthIdx]||"").replace(/Mon/g,monNames[monthIdx]||"");
+    };
+    const dateStr=formatDate(conv.dateFormat);
+    n=n.replace(/\{date\}/g,dateStr);
+    n=n.replace(/\{year\}/g,yyyy);
     return n;
   };
 
@@ -1942,7 +2001,7 @@ function JobDetail({job, user, onBack, onDeleted}){
           {working.length===0?(
             <div style={{textAlign:"center",padding:"16px 0",color:C.mut,fontSize:13}}>No drafts in progress</div>
           ):(
-            working.map((r,i)=>{const wDate=new Date(r.report_date+"T12:00:00").toLocaleDateString("en-US",{month:"2-digit",day:"2-digit",year:"numeric",timeZone:tz}).replace(/\//g,"");const rptName=buildReportName(r.report_number||1,wDate);return(
+            working.map((r,i)=>{const rptName=buildReportName(r.report_number||1,r.report_date);return(
               <button key={r.id} onClick={()=>openReport(r.report_date)} style={{width:"100%",display:"flex",alignItems:"center",gap:12,padding:"14px 16px",background:"transparent",border:"none",borderBottom:i<working.length-1?`1px solid ${C.brd}`:"none",cursor:"pointer",textAlign:"left"}}>
                 <div style={{width:10,height:10,borderRadius:"50%",background:C.org,flexShrink:0}}/>
                 <div style={{flex:1,minWidth:0}}>
@@ -1961,8 +2020,7 @@ function JobDetail({job, user, onBack, onDeleted}){
             <div style={{textAlign:"center",padding:"16px 0",color:C.mut,fontSize:13}}>No submitted reports yet</div>
           ):(
             submitted.map((r,i)=>{
-              const rptDate=new Date(r.report_date+"T12:00:00").toLocaleDateString("en-US",{month:"2-digit",day:"2-digit",year:"numeric",timeZone:tz}).replace(/\//g,"");
-              const rptName=buildReportName(r.report_number||i+1,rptDate);
+              const rptName=buildReportName(r.report_number||i+1,r.report_date);
               return(
               <button key={r.id} onClick={()=>openReport(r.report_date)} style={{width:"100%",display:"flex",alignItems:"center",gap:12,padding:"14px 16px",marginBottom:i<submitted.length-1?0:0,borderBottom:i<submitted.length-1?`1px solid ${C.brd}`:"none",background:"transparent",border:"none",borderBottomWidth:i<submitted.length-1?1:0,borderBottomStyle:"solid",borderBottomColor:C.brd,cursor:"pointer",textAlign:"left"}}>
                 <div style={{width:10,height:10,borderRadius:"50%",background:C.ok,flexShrink:0}}/>
