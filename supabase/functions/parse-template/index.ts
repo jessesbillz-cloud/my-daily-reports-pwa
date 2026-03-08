@@ -38,7 +38,7 @@ Return ONLY valid JSON object with "fields" array, no markdown:
 {"fields":[{"label":"Date:","name":"Date","category":"editable","layout":"inline","autoFill":"date","voiceEnabled":false,"multiline":false,"valueText":"04 February 2026"},{"label":"IOR Notes","name":"IOR Notes","category":"editable","layout":"below","autoFill":null,"voiceEnabled":true,"multiline":true,"valueText":""}]}`;
 
 // Separate prompt for filename convention analysis
-const FILENAME_PROMPT = \`You are analyzing a PDF filename to determine its naming convention.
+const FILENAME_PROMPT = `You are analyzing a PDF filename to determine its naming convention.
 
 Given a filename like "Daily Report 45 Woodland Park 03-08-2026", you must identify which parts are TOKENS that change per report and which parts are STATIC text.
 
@@ -70,7 +70,7 @@ Filename: "Site Visit Log 003"
 Filename: "Highway Project DR7 2026"
 → {"pattern":"Highway Project DR{report_number} {year}","dateFormat":"","numberPadding":0}
 
-Return ONLY valid JSON, no markdown.\`;
+Return ONLY valid JSON, no markdown.`;
 
 serve(async (req) => {
   if (req.method === "OPTIONS") {
