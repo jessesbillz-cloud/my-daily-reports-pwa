@@ -53,10 +53,10 @@ async function extractPdfTextStructure(pdfData){
       const tx=item.transform;
       const x=tx[4];
       const yBottom=tx[5];
-      const fontSize=Math.abs(tx[0])||10;
-      const y=pageH-yBottom-Math.abs(tx[3]||10); // top-left origin, top of text
+      const fontSize=Math.round(Math.max(Math.abs(tx[0]),Math.abs(tx[3]))*10)/10||10;
+      const y=pageH-yBottom-fontSize; // top-left origin, top of text
       const w=item.width||(item.str.length*fontSize*0.6); // estimate if missing
-      const h=item.height||Math.abs(tx[3])||10;
+      const h=item.height||fontSize;
       allItems.push({str:item.str.trim(),x:Math.round(x*100)/100,y:Math.round(y*100)/100,w:Math.round(w*100)/100,h:Math.round(h*100)/100,page:p,fontSize:Math.round(fontSize*10)/10});
     });
   }
@@ -1374,11 +1374,16 @@ function ReportEditor({job, user, onBack, reportDate}){
       try{const cntR=await fetch(`${SB_URL}/rest/v1/reports?select=report_number&job_id=eq.${job.id}&order=report_number.desc&limit=1`,{headers:db._h()});const topR=cntR.ok?await cntR.json():[];rptNumber=(topR[0]?.report_number||0)+1;}catch(e){}
       if(draftId){try{const exR=await fetch(`${SB_URL}/rest/v1/reports?select=report_number&id=eq.${draftId}`,{headers:db._h()});const exD=exR.ok?await exR.json():[];if(exD[0]?.report_number)rptNumber=exD[0].report_number;}catch(e){}}
       const rptNum=String(rptNumber).padStart(2,"0");
-      const tzDate=new Date().toLocaleDateString("en-US",{month:"2-digit",day:"2-digit",year:"numeric",timeZone:tz}).replace(/\//g,"");
+      const now=new Date();
+      const tzDateFull=now.toLocaleDateString("en-US",{month:"2-digit",day:"2-digit",year:"numeric",timeZone:tz}).replace(/\//g,"");
+      const tzYear=now.toLocaleDateString("en-US",{year:"numeric",timeZone:tz});
       const fnSource=tplRecord.original_filename||job.report_filename_pattern||job.name||"Report";
       let baseName=fnSource.replace(/\.[^.]+$/,"");
+      // Replace report number (1-2 digit standalone number, not part of a year)
       baseName=baseName.replace(/(?<!\d)\d{1,2}(?!\d)/,rptNum);
-      baseName=baseName.replace(/\d{6,8}/,tzDate);
+      // Replace date: try 6-8 digit dates first (MMDDYYYY), then 4-digit year
+      if(/\d{6,8}/.test(baseName)){baseName=baseName.replace(/\d{6,8}/,tzDateFull);}
+      else{baseName=baseName.replace(/\b(20\d{2})\b/,tzYear);}
       const pdfFilename=baseName+".pdf";
 
       // ── 8. Save report, upload PDF, send email — all at once ──
