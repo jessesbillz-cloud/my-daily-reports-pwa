@@ -556,6 +556,7 @@ function CreateJob({user, onBack, onCreated}){
   const [addr,setAddr]=useState("");
   const [tf,setTf]=useState(null);
   const [tfBuf,setTfBuf]=useState(null); // cached ArrayBuffer of template file
+  const [fnPattern,setFnPattern]=useState(null); // AI-detected filename pattern
   const [freqOn,setFreqOn]=useState(false);
   const [sched,setSched]=useState("");
   const [days,setDays]=useState([]);
@@ -625,6 +626,7 @@ function CreateJob({user, onBack, onCreated}){
       });
       (parsed.locked||[]).forEach(f=>{addUnique(f,"lock");});
       setFields(all);
+      if(parsed.filenamePattern)setFnPattern(parsed.filenamePattern);
     }catch(e){
       console.error("Parse error:",e);
       setErr("Could not parse template fields. You can still create the job and configure fields later.");
@@ -709,14 +711,14 @@ function CreateJob({user, onBack, onCreated}){
     if(!ok)return;setSaving(true);setErr("");
     try{
       const es=effSch();
-      // Store the original uploaded filename (minus extension) exactly as the pattern
-      const fnPattern=tf?tf.name.replace(/\.[^.]+$/,""):("DR_01_"+jn.trim().replace(/\s+/g,"_")+"_"+new Date().toLocaleDateString("en-US",{month:"2-digit",day:"2-digit",year:"numeric",timeZone:tz}).replace(/\//g,""));
+      // Use AI-detected pattern if available, fall back to uploaded filename
+      const filePattern=fnPattern||( tf?tf.name.replace(/\.[^.]+$/,""):("DR_{report_number}_"+jn.trim().replace(/\s+/g,"_")+"_{date}"));
       const coords=(f)=>({page:f.page,x:f.x,y:f.y,w:f.w,h:f.h,fontSize:f.fontSize,multiline:f.multiline});
       // Fields marked lockAfterCreate (from saved template reuse) go back to locked with the user's new values
       const editFields=fields.filter(f=>f.mode==="edit"&&!f.lockAfterCreate).map(f=>({name:f.name,value:f.value,originalValue:f.value||"",voiceEnabled:true,...coords(f)}));
       const lockFields=[...fields.filter(f=>f.mode==="lock"),...fields.filter(f=>f.mode==="edit"&&f.lockAfterCreate)].map(f=>({name:f.name,value:f.value,...coords(f)}));
       const autoFields=fields.filter(f=>f.mode==="auto-date"||f.mode==="auto-num").map(f=>({name:f.name,value:f.value,originalValue:f.value||"",autoFill:f.mode==="auto-date"?"date":"increment",...coords(f)}));
-      const job=await db.mkJob({user_id:user.id,name:jn.trim(),site_address:addr.trim()||null,report_filename_pattern:fnPattern,schedule:es,schedule_days:es==="custom"?days:[],reminder_enabled:remOn,reminder_time:remOn?remT:null,reminder_hours_before:remOn?remH:null,scheduling_enabled:schedOn,field_config:{editable:[...editFields,...autoFields],locked:lockFields}});
+      const job=await db.mkJob({user_id:user.id,name:jn.trim(),site_address:addr.trim()||null,report_filename_pattern:filePattern,schedule:es,schedule_days:es==="custom"?days:[],reminder_enabled:remOn,reminder_time:remOn?remT:null,reminder_hours_before:remOn?remH:null,scheduling_enabled:schedOn,field_config:{editable:[...editFields,...autoFields],locked:lockFields}});
       if(tf&&job?.id){
         const ext=tf.name.split(".").pop().toLowerCase();
         // Use cached buffer (read once when file was selected) — prevents Safari file-release issues
@@ -1377,13 +1379,23 @@ function ReportEditor({job, user, onBack, reportDate}){
       const now=new Date();
       const tzDateFull=now.toLocaleDateString("en-US",{month:"2-digit",day:"2-digit",year:"numeric",timeZone:tz}).replace(/\//g,"");
       const tzYear=now.toLocaleDateString("en-US",{year:"numeric",timeZone:tz});
-      const fnSource=tplRecord.original_filename||job.report_filename_pattern||job.name||"Report";
-      let baseName=fnSource.replace(/\.[^.]+$/,"");
-      // Replace report number (1-2 digit standalone number, not part of a year)
-      baseName=baseName.replace(/(?<!\d)\d{1,2}(?!\d)/,rptNum);
-      // Replace date: try 6-8 digit dates first (MMDDYYYY), then 4-digit year
-      if(/\d{6,8}/.test(baseName)){baseName=baseName.replace(/\d{6,8}/,tzDateFull);}
-      else{baseName=baseName.replace(/\b(20\d{2})\b/,tzYear);}
+      const pattern=job.report_filename_pattern||"";
+      let baseName;
+      // Use token-based pattern if it contains {tokens}
+      if(pattern.includes("{report_number}")||pattern.includes("{date}")){
+        const projectName=(lockVals["Project Name"]||lockVals["Project"]||job.name||"Report").replace(/\s+/g," ");
+        baseName=pattern
+          .replace(/\{report_number\}/g,rptNum)
+          .replace(/\{date\}/g,tzDateFull)
+          .replace(/\{project_name\}/g,projectName);
+      }else{
+        // Legacy: regex-based replacement on original filename
+        const fnSource=tplRecord.original_filename||pattern||job.name||"Report";
+        baseName=fnSource.replace(/\.[^.]+$/,"");
+        baseName=baseName.replace(/(?<!\d)\d{1,2}(?!\d)/,rptNum);
+        if(/\d{6,8}/.test(baseName)){baseName=baseName.replace(/\d{6,8}/,tzDateFull);}
+        else{baseName=baseName.replace(/\b(20\d{2})\b/,tzYear);}
+      }
       const pdfFilename=baseName+".pdf";
 
       // ── 8. Save report, upload PDF, send email — all at once ──
@@ -1780,10 +1792,18 @@ function JobDetail({job, user, onBack, onDeleted}){
   // Build display filename from template's original_filename — only swap sequential number and date
   const buildReportName=(num,dateStr)=>{
     const padNum=String(num).padStart(2,"0");
-    const src=tplFilename||job.report_filename_pattern||job.name||"Report";
+    const pattern=job.report_filename_pattern||"";
+    // Use token-based pattern if available
+    if(pattern.includes("{report_number}")||pattern.includes("{date}")){
+      const projectName=(job.name||"Report").replace(/\s+/g," ");
+      return pattern.replace(/\{report_number\}/g,padNum).replace(/\{date\}/g,dateStr).replace(/\{project_name\}/g,projectName);
+    }
+    // Legacy fallback
+    const src=tplFilename||pattern||job.name||"Report";
     let n=src.replace(/\.[^.]+$/,"");
     n=n.replace(/(?<!\d)\d{1,2}(?!\d)/,padNum);
-    n=n.replace(/\d{6,8}/,dateStr);
+    if(/\d{6,8}/.test(n)){n=n.replace(/\d{6,8}/,dateStr);}
+    else{n=n.replace(/\b(20\d{2})\b/,dateStr.slice(-4));}
     return n;
   };
 

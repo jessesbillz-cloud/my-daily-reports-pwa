@@ -34,8 +34,20 @@ CRITICAL RULES:
 4. Ignore signature lines and page numbers.
 5. The "label" field MUST exactly match a "str" value from the input text items.
 
-Return ONLY valid JSON array, no markdown:
-[{"label":"Date:","name":"Date","category":"editable","layout":"inline","autoFill":"date","voiceEnabled":false,"multiline":false,"valueText":"04 February 2026"},{"label":"IOR Notes","name":"IOR Notes","category":"editable","layout":"below","autoFill":null,"voiceEnabled":true,"multiline":true,"valueText":""}]`;
+FILENAME PATTERN:
+Also analyze the uploaded filename (provided separately). Identify which parts correspond to:
+- {report_number} — the report/DR number (e.g. "45", "01")
+- {project_name} — project or job name
+- {date} — any date portion (could be MMDDYYYY, YYYY, MM-DD-YYYY, etc.)
+- Everything else is literal text (like "Daily Report", underscores, spaces, dashes)
+
+Return a pattern string using these tokens. Examples:
+- "Daily Report 45 Woodland Park 2026.pdf" → "Daily Report {report_number} {project_name} {date}"
+- "DR_01_SchoolProject_03072026.pdf" → "DR_{report_number}_{project_name}_{date}"
+- "IOR_Report_23.pdf" → "IOR_Report_{report_number}"
+
+Return ONLY valid JSON object (not array), no markdown:
+{"fields":[{"label":"Date:","name":"Date","category":"editable","layout":"inline","autoFill":"date","voiceEnabled":false,"multiline":false,"valueText":"04 February 2026"}],"filenamePattern":"Daily Report {report_number} {project_name} {date}"}`;
 
 serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -85,7 +97,10 @@ serve(async (req) => {
 
     const rawText = data.content?.map((c: any) => c.text || "").join("") || "";
     const clean = rawText.replace(/```json|```/g, "").trim();
-    const fieldMappings = JSON.parse(clean);
+    const parsed = JSON.parse(clean);
+    // Support both new format {fields:[], filenamePattern:""} and legacy array format
+    const fieldMappings = Array.isArray(parsed) ? parsed : (parsed.fields || []);
+    const filenamePattern = Array.isArray(parsed) ? null : (parsed.filenamePattern || null);
 
     // ── Reconstruct coordinates from real text positions ──
     // Build a lookup of text items by str for fast matching
@@ -280,7 +295,8 @@ serve(async (req) => {
       dedupedLocked = dedupedLocked.filter((f: any) => !NOTES_KEYWORDS.some((k) => (f.name || "").toLowerCase().includes(k)));
     }
 
-    const result = { editable: dedupedEditable, locked: dedupedLocked };
+    const result: any = { editable: dedupedEditable, locked: dedupedLocked };
+    if (filenamePattern) result.filenamePattern = filenamePattern;
 
     return new Response(JSON.stringify(result), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
