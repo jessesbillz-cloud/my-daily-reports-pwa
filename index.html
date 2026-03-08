@@ -2014,58 +2014,43 @@ function JobDetail({job, user, onBack, onDeleted}){
 
 /* ── Training Center ── */
 const GUIDES=[
-  {icon:"🚀",color:C.blu,title:"Getting Started",sub:"Learn the basics of creating jobs and navigating the app",steps:[
-    {icon:"🔑",title:"Sign In to Your Account",body:"When you first open My Daily Reports you'll see the sign-in screen. Enter your email and password, or create a new account if you don't have one yet. Your data syncs across all your devices automatically.",tip:"Your name and email are set during sign up and can't be changed later, so double-check before you submit."},
-    {icon:"🏠",title:"The Dashboard",body:"After signing in you land on the Dashboard. From here you can create your first job, visit the Training Center, or review the Terms of Service and Privacy Policy. Your active jobs appear front and center with status indicators showing whether reports are due, in progress, or submitted.",tip:null},
-    {icon:"➕",title:"Create Your First Job",body:"Tap the orange \"+ New Job\" button to start. You'll need to enter a job name — that's it to get started. You can optionally add a site address and upload a PDF template for your daily reports.",tip:"The job name is used as the default project name on every report, so pick something descriptive like \"Oceanside District Office\"."},
-    {icon:"📄",title:"Upload a Report Template",body:"During job creation you can upload a PDF template. The AI will analyze your document and detect all the fillable fields automatically. You'll then decide which fields to Edit daily, Lock with a permanent value, Auto-Date, or Auto-Number. If your template is a Word doc, just save or export it as PDF first.",tip:"It helps to have a copy of your report open while you're defining fields the first time. The AI parses fields into a single vertical column, but your actual form may have several horizontal columns. Don't worry — you only have to do this once and you're set."},
-    {icon:"🔽",title:"Switching Between Jobs",body:"Use the Jobs dropdown in the top-left corner of the dashboard to switch between your active jobs. Tap any job to open its dashboard with today's report, working copies, completed reports, and photos.",tip:null},
+  {icon:"🚀",color:C.blu,title:"Getting Started",sub:"Create your first job and learn the basics",steps:[
+    {icon:"🔑",title:"Sign In",body:"Enter your email and password or create a new account. Your data syncs across all devices.",tip:"Name and email can't be changed after sign up — double-check before submitting."},
+    {icon:"🏠",title:"The Dashboard",body:"Your home screen. Active jobs show status dots: red = due, orange = in progress, green = submitted. Tap any job to open it.",tip:null},
+    {icon:"➕",title:"Create a Job",body:"Tap \"+ New Job\" and enter a job name. Upload a PDF template and the AI detects all fillable fields. Set each field to Edit, Lock, Auto-Date, or Auto-#.",tip:"Leave date and report number cells blank in your PDF template — auto-fill handles them."},
+    {icon:"💾",title:"Save as Template",body:"After parsing, tap \"Save as Reusable Template\" to reuse the same field layout on future jobs without re-parsing. Job-specific fields (project name, DSA #, etc.) become editable when you reuse it.",tip:null},
+    {icon:"🔽",title:"Switch Jobs",body:"Use the Jobs dropdown at the top to switch between active jobs.",tip:null},
   ]},
-  {icon:"📝",color:C.ok,title:"Creating Your First Report",sub:"Step-by-step guide to building a daily field report",steps:[
-    {icon:"▶️",title:"Start Today's Report",body:"From the job dashboard, tap the big orange \"Start Today's Report\" button. This opens the report editor with all your template fields pre-loaded. Locked fields are already filled in. Auto-date fields show today's date. Auto-number fields increment from your last report.",tip:"Only one report per day per job can be created. Working copies can be edited anytime."},
-    {icon:"✏️",title:"Fill In Your Fields",body:"The report editor shows all your editable fields ready to fill in. These are the fields you marked as \"Edit\" during job setup — things like weather conditions, work performed, notes, and observations that change daily.",tip:"Fields that stay the same every report (project name, address, architect, contractor) are already locked in from your job setup."},
-    {icon:"🎤",title:"Dictate Your Notes",body:"Tap into any text field and use your phone's built-in keyboard microphone to dictate your notes hands-free. No extra buttons or setup needed — just tap the mic on your keyboard and start talking. All notes you take throughout the day stay saved in your working copy.",tip:"If you close the app and come back, your report picks up right where you left off."},
-    {icon:"📷",title:"Add Photos",body:"Take photos throughout the day directly from the report editor. Photos automatically populate into your report based on the layout you chose during job setup — single page, 2x2 grid, or full photo page.",tip:"You can also pull in photos from your job's photo gallery if you saved reference shots earlier."},
-    {icon:"💾",title:"Save or Submit",body:"Your report auto-saves as a working copy as you go. When you're done for the day, tap \"Submit\" to finalize it. Submitting generates a PDF with a timestamp watermark and moves the report to your Completed Reports folder.",tip:"Working copies stay editable anytime — you can come back and update them whenever you need to."},
+  {icon:"📝",color:C.ok,title:"Creating Reports",sub:"Build and submit daily field reports",steps:[
+    {icon:"▶️",title:"Start a Report",body:"From the job dashboard, tap \"Start Today's Report\". Locked fields are pre-filled. Auto-date shows today. Auto-# increments from your last report.",tip:"One report per day per job. Working copies can be edited anytime."},
+    {icon:"✏️",title:"Fill In Fields",body:"Editable fields are ready for your daily entries — notes, weather, hours, observations. Locked fields (project name, architect, contractor) are already filled in.",tip:null},
+    {icon:"🎤",title:"Voice Dictation",body:"Tap any text field, then tap the mic on your keyboard. Speak naturally — your phone's built-in dictation does the rest. No extra setup needed.",tip:"Take notes throughout the day as things happen. Come back later and everything's saved."},
+    {icon:"📷",title:"Photos",body:"Take or upload photos from the report editor. Choose layout: 1 per page, 2 side-by-side, or 4 per page (2x2 grid).",tip:null},
+    {icon:"💾",title:"Save & Submit",body:"Tap \"Save Working Copy\" to save progress. Tap \"Submit\" when done — generates a PDF using your original template with your entries overlaid.",tip:null},
   ]},
-  {icon:"🎤",color:"#ef4444",title:"Using Voice Input",sub:"Dictate notes hands-free using your phone's built-in keyboard",steps:[
-    {icon:"⌨️",title:"Your Phone's Built-In Mic",body:"My Daily Reports uses the native microphone button on your phone's keyboard — the same one you use for texting. No extra permissions, no third-party speech engine, no setup required. Just tap into a field, tap the mic on your keyboard, and talk.",tip:"This works because your phone's speech-to-text is already excellent and it's free."},
-    {icon:"🗣️",title:"How to Dictate",body:"Tap into any text field in the report editor. Your keyboard appears. Tap the microphone icon on the keyboard. Speak naturally. Your words appear in real-time. Tap the mic again or the keyboard to stop.",tip:"You can edit the transcribed text afterward if anything came out wrong."},
-    {icon:"📝",title:"Notes Throughout the Day",body:"The real power is taking notes throughout the day as things happen. Open your report, tap into the notes field, hit the mic, and narrate what you're seeing. Close the app, come back later, and your notes are right where you left them. Add more whenever you need to.",tip:"This is the core time-saver — instead of writing everything up at the end of the day, you capture it in real-time while you're on site."},
-    {icon:"✅",title:"No Extra Permissions Needed",body:"Since we use your phone's native keyboard dictation, there are no microphone permissions to grant to the app itself. If dictation works in your text messages, it works here.",tip:null},
+  {icon:"📸",color:C.org,title:"Photos",sub:"Capture and organize site documentation",steps:[
+    {icon:"📷",title:"Take Photos",body:"Use \"Take Photo\" for camera or \"Library\" to pick from your phone. Photos attach to your report and appear in the layout you selected.",tip:"Context shots, close-ups of issues, and progress photos make the best documentation."},
+    {icon:"🗑️",title:"Remove Photos",body:"Tap the X on any photo thumbnail to remove it from the report.",tip:null},
   ]},
-  {icon:"📸",color:C.org,title:"Photo Documentation",sub:"Capture and organize site photos for your reports",steps:[
-    {icon:"🖼️",title:"Job Photo Gallery",body:"Every job has its own photo gallery on the job dashboard. This is where you store reference photos, progress shots, or anything you want to keep associated with the job. Photos here are separate from report photos — think of it as your job's camera roll.",tip:null},
-    {icon:"📷",title:"Take or Upload Photos",body:"From the job dashboard, open the Photos folder and tap \"Take or Upload Photo\" to capture a new photo or select from your phone's library. Photos are saved to the job and available to pull into any report.",tip:"Take photos throughout the day as you go. Good documentation means context shots, close-ups of issues, and progress photos."},
-    {icon:"📑",title:"Photos in Reports",body:"When you create a report, photos you take from within the report editor automatically populate into the report based on the layout you chose during job setup: single stack, 2x2 grid, or dedicated photo page. You set this once and every report follows the same layout.",tip:"You can also pull photos from the job gallery into a specific report if you took them earlier."},
-    {icon:"🗑️",title:"Remove a Photo",body:"Tap the X on any photo thumbnail to remove it from the job gallery. This doesn't delete it from your phone's photo library.",tip:null},
+  {icon:"📤",color:"#a855f7",title:"Exporting & Sharing",sub:"Generate PDFs and email reports",steps:[
+    {icon:"📄",title:"PDF Generation",body:"Submit generates a PDF from your original template with your daily entries overlaid. Includes a timestamp watermark.",tip:"Report numbers are sequential: DR#1, DR#2, DR#3 — based on submissions, not calendar days."},
+    {icon:"📧",title:"Email Reports",body:"Email the PDF to your project team on submit. Set up default recipients in your job's Project Team settings.",tip:null},
+    {icon:"🔄",title:"Past Reports",body:"Completed reports live in the Completed folder on your job dashboard. Re-download or resend anytime.",tip:null},
   ]},
-  {icon:"📤",color:"#a855f7",title:"Exporting & Sharing",sub:"Generate PDFs and share your completed reports",steps:[
-    {icon:"📄",title:"PDF Generation",body:"When you tap \"Submit\" on a report, the app generates a formatted PDF from your report data using your original template. The PDF includes a digital timestamp watermark showing when it was submitted and that it was created by My Daily Reports.",tip:null},
-    {icon:"📁",title:"Download to Files",body:"When submitting, you choose whether to download the PDF directly to your phone or computer's files. The file is named using the naming convention you set during job creation.",tip:"Report numbering is sequential based on actual submissions — DR#1, DR#2, DR#3 — not based on calendar days. If you work Monday, Tuesday, and Friday, those are DR#1, DR#2, DR#3."},
-    {icon:"📧",title:"Email Export",body:"You can also choose to email the report on submit. Enter the recipients and the PDF is attached automatically. Great for sending reports directly to your project team or client.",tip:"You can set default email recipients during job setup so you don't have to type them every time."},
-    {icon:"🔄",title:"Re-Download or Resend",body:"Every submitted report lives in your Completed Reports folder on the job dashboard. You can re-download the PDF or resend it via email anytime. No need to regenerate anything — the PDF is already saved.",tip:null},
-    {icon:"👁️",title:"Viewing Past Reports",body:"Tap any report in the Completed Reports or Working Copies folder to open it. You can review all the fields, and for working copies, continue editing. Submitted reports can be re-downloaded or resent but not modified.",tip:null},
+  {icon:"💼",color:"#14b8a6",title:"Managing Jobs",sub:"Edit, update, and organize your projects",steps:[
+    {icon:"⚙️",title:"Job Settings",body:"Tap the gear icon on any job dashboard. From here: edit job name and address, manage your project team (name + email), edit template fields and modes, toggle scheduling, or delete the job.",tip:null},
+    {icon:"📋",title:"Edit Template Fields",body:"In Job Settings, tap \"Edit Template Fields\" to change any field's mode (Edit, Lock, Auto-Date, Auto-#) or update its value. Changes apply to all future reports.",tip:null},
+    {icon:"📦",title:"Archive a Job",body:"When a project is done, archive it. Reports and data are preserved but the job hides from your active list.",tip:"Archive instead of delete — you may need old reports later."},
   ]},
-  {icon:"💼",color:"#14b8a6",title:"Managing Your Jobs",sub:"Edit, archive, and organize your projects",steps:[
-    {icon:"✏️",title:"Edit a Job",body:"From the job dashboard, tap the gear icon in the top-right corner and select \"Edit Job Details\". You can change the job name, site address, template fields, and scheduling settings. Everything about the job is editable from this one place.",tip:null},
-    {icon:"📦",title:"Archive a Job",body:"When a project is complete, archive the job instead of deleting it. Archived jobs keep all their reports and data but won't appear in your active job list. You can still view archived jobs and re-download their reports anytime.",tip:"Archiving is recommended over deleting. You never know when you might need to reference an old report."},
-    {icon:"🗑️",title:"Delete a Job",body:"If you need to permanently remove a job and all its reports, open the job dashboard, tap the gear icon, and scroll to \"Delete This Job\". You'll have to confirm before anything is deleted. This cannot be undone.",tip:null},
+  {icon:"📅",color:C.blu,title:"Scheduling Calendar",sub:"Share your availability with GCs and subs",steps:[
+    {icon:"📅",title:"Your Calendar",body:"Enable Jobsite Scheduling on any job (in Job Settings) and it appears on your shared calendar. One link covers all your scheduling-enabled jobs.",tip:null},
+    {icon:"🔗",title:"Share Your Link",body:"Tap \"Share Calendar\" on the dashboard. Send the link to your GC, subs, or anyone who needs to request a site visit.",tip:"Set your Scheduling Display Name in Account Settings so people recognize your calendar."},
+    {icon:"📋",title:"Requests",body:"Visitors pick a job and date from your calendar link. You see the request and can approve or reschedule it.",tip:"Scheduling requests don't auto-create reports — start your report when you're on site."},
   ]},
-  {icon:"📅",color:C.blu,title:"Sharing Your Calendar",sub:"Let your GC and subs request site visits through a shared link",steps:[
-    {icon:"📅",title:"Your Scheduling Calendar",body:"Every inspector gets one shared calendar link. It lives on the main dashboard below your job cards. When you enable Jobsite Scheduling on any job, that job automatically shows up on your shared calendar for others to request site visits on.",tip:"You can see which jobs have scheduling enabled by the 📅 icon on their job card."},
-    {icon:"🔗",title:"Your Calendar Link",body:"Your calendar link is unique to you — the last part comes from your Scheduling Display Name in Account Settings. You can change it anytime. This is the one link you share with everyone — all your scheduling-enabled jobs appear on it.",tip:"Set your Scheduling Display Name to something recognizable so people know it's your calendar when they open the link."},
-    {icon:"↗️",title:"How to Share",body:"Tap the blue \"Share Calendar\" button on the calendar. On iPhone this opens the share sheet — you can text it, email it, AirDrop it, or copy the link. On desktop it copies to your clipboard. Send it to your GC, subs, or anyone who needs to request a site visit.",tip:"Share it once per project team. They bookmark it and use it whenever they need to schedule a visit."},
-    {icon:"👥",title:"Project Team Contacts",body:"In each job's settings (gear icon), you'll find Project Team. Add the email addresses of everyone who should receive your submitted reports. These are also the people who can request site visits through your calendar for that job.",tip:"You can add or remove team members anytime from the job dashboard gear menu."},
-    {icon:"📋",title:"How Requests Work",body:"When someone opens your calendar link, they pick a job, choose a date, and submit a scheduling request. You see the request on your calendar and can approve or reschedule it. Once confirmed, both sides get a notification.",tip:"Scheduling requests don't automatically create a daily report — you still start your report when you're on site."},
-    {icon:"✅",title:"Enable Scheduling on a Job",body:"When creating a new job, toggle on \"Jobsite Scheduling\" in the job setup. For existing jobs, open the job dashboard, tap the gear icon, and find Jobsite Scheduling in the settings. Once enabled, the job appears on your shared calendar immediately.",tip:null},
-  ]},
-  {icon:"⚙️",color:C.mut,title:"Profile & Settings",sub:"Customize your account and app preferences",steps:[
-    {icon:"👤",title:"Access Settings",body:"Tap the gear icon in the top-right corner of the dashboard and select \"Account Settings\". Here you can view your profile, set your timezone, configure your scheduling display name, and manage your account.",tip:null},
-    {icon:"🔗",title:"Scheduling Display Name",body:"Your scheduling display name is how your name appears at the end of your scheduling URL. Set this to something recognizable so your project teams know it's your calendar.",tip:null},
-    {icon:"🕐",title:"Timezone",body:"Make sure your timezone is set correctly in Settings. This affects the timestamps on your submitted PDFs. The app defaults to your device's timezone.",tip:null},
-    {icon:"🔔",title:"Email Reminders",body:"Email reminders are configured per-job based on the reminder settings you set during job creation. You'll get an email reminder before your report is due based on the schedule and lead time you chose.",tip:null},
-    {icon:"🚪",title:"Sign Out",body:"To sign out, open Account Settings and tap \"Sign Out\" at the bottom. The app keeps you logged in by default so you shouldn't need to do this often. Your data stays saved and will be there when you sign back in.",tip:"The app is designed to keep you logged in. You shouldn't have to sign in again unless you specifically sign out or delete the app."},
+  {icon:"⚙️",color:C.mut,title:"Settings",sub:"Account, timezone, and preferences",steps:[
+    {icon:"👤",title:"Account Settings",body:"Tap the gear icon on the dashboard, then \"Account Settings\". View your profile, set timezone, and configure your scheduling display name.",tip:null},
+    {icon:"🔔",title:"Reminders",body:"Email reminders are set per-job during creation. You'll get reminded before your report is due based on your schedule.",tip:null},
+    {icon:"🚪",title:"Sign Out",body:"Account Settings → Sign Out. The app keeps you logged in by default. Your data stays saved when you come back.",tip:null},
   ]},
 ];
 
@@ -2089,27 +2074,27 @@ function TrainingCenter({onBack}){
           ))}
         </div>
         <div style={{textAlign:"center",fontSize:13,fontWeight:600,color:C.mut,marginBottom:16}}>Step {step+1} of {g.steps.length}</div>
-        <div style={{flex:1,overflowY:"auto",padding:"0 20px 20px",maxWidth:600,margin:"0 auto",width:"100%"}}>
-          <div style={{textAlign:"center",marginBottom:20}}>
-            <div style={{width:80,height:80,borderRadius:"50%",background:(typeof g.color==="string"?g.color:C.org)+"22",display:"flex",alignItems:"center",justifyContent:"center",margin:"0 auto 16px",fontSize:36}}>{s.icon}</div>
-            <div style={{fontSize:22,fontWeight:700,color:C.txt,marginBottom:12}}>{s.title}</div>
+        <div style={{flex:1,overflowY:"auto",padding:"0 24px 24px",maxWidth:600,margin:"0 auto",width:"100%"}}>
+          <div style={{textAlign:"center",marginBottom:24}}>
+            <div style={{width:90,height:90,borderRadius:"50%",background:(typeof g.color==="string"?g.color:C.org)+"22",display:"flex",alignItems:"center",justifyContent:"center",margin:"0 auto 20px",fontSize:42}}>{s.icon}</div>
+            <div style={{fontSize:26,fontWeight:700,color:C.txt,marginBottom:12}}>{s.title}</div>
           </div>
-          <div style={{fontSize:16,color:C.lt,lineHeight:1.7,marginBottom:16}}>{s.body}</div>
+          <div style={{fontSize:18,color:C.lt,lineHeight:1.8,marginBottom:20}}>{s.body}</div>
           {s.tip&&(
-            <div style={{display:"flex",gap:10,padding:14,background:C.inp,border:`1px solid ${C.brd}`,borderRadius:12}}>
-              <span style={{fontSize:18,flexShrink:0}}>💡</span>
-              <div style={{fontSize:14,color:C.mut,lineHeight:1.5}}>{s.tip}</div>
+            <div style={{display:"flex",gap:12,padding:16,background:C.inp,border:`1px solid ${C.brd}`,borderRadius:14}}>
+              <span style={{fontSize:22,flexShrink:0}}>💡</span>
+              <div style={{fontSize:16,color:C.mut,lineHeight:1.6}}>{s.tip}</div>
             </div>
           )}
         </div>
-        <div style={{display:"flex",gap:12,padding:"12px 20px 24px",maxWidth:600,margin:"0 auto",width:"100%"}}>
+        <div style={{display:"flex",gap:12,padding:"16px 24px 28px",maxWidth:600,margin:"0 auto",width:"100%"}}>
           {step>0&&(
-            <button onClick={()=>setStep(step-1)} style={{flex:1,padding:"14px 0",background:C.card,border:`1px solid ${C.brd}`,borderRadius:12,color:C.lt,fontSize:15,fontWeight:600,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",gap:6}}>
-              <span style={{fontSize:13}}>‹</span> Previous
+            <button onClick={()=>setStep(step-1)} style={{flex:1,padding:"16px 0",background:C.card,border:`1px solid ${C.brd}`,borderRadius:12,color:C.lt,fontSize:17,fontWeight:600,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",gap:6}}>
+              ‹ Previous
             </button>
           )}
-          <button onClick={()=>{if(step<g.steps.length-1)setStep(step+1);else{setSelGuide(null);setStep(0);}}} className="btn-o" style={{flex:1,padding:"14px 0",background:typeof g.color==="string"?g.color:C.org,border:"none",borderRadius:12,color:"#fff",fontSize:15,fontWeight:700,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",gap:6}}>
-            {step<g.steps.length-1?<>Next <span style={{fontSize:13}}>›</span></>:<>Done <span style={{fontSize:13}}>✓</span></>}
+          <button onClick={()=>{if(step<g.steps.length-1)setStep(step+1);else{setSelGuide(null);setStep(0);}}} className="btn-o" style={{flex:1,padding:"16px 0",background:typeof g.color==="string"?g.color:C.org,border:"none",borderRadius:12,color:"#fff",fontSize:17,fontWeight:700,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",gap:6}}>
+            {step<g.steps.length-1?<>Next ›</>:<>Done ✓</>}
           </button>
         </div>
       </div>
@@ -2123,23 +2108,20 @@ function TrainingCenter({onBack}){
         <MDRLogo size={28}/>
         <span style={{fontWeight:700,fontSize:17}}>Training Center</span>
       </div>
-      <div style={{maxWidth:600,margin:"0 auto",padding:"20px"}}>
-        <div style={{textAlign:"center",marginBottom:24}}>
-          <div style={{fontSize:48,marginBottom:10}}>🎓</div>
-          <div style={{fontSize:22,fontWeight:700,color:C.txt,marginBottom:6}}>Training Center</div>
-          <div style={{fontSize:14,color:C.mut,lineHeight:1.5,padding:"0 20px"}}>Step-by-step guides to help you get the most out of My Daily Reports</div>
+      <div style={{maxWidth:600,margin:"0 auto",padding:"24px"}}>
+        <div style={{textAlign:"center",marginBottom:28}}>
+          <div style={{fontSize:56,marginBottom:12}}>🎓</div>
+          <div style={{fontSize:26,fontWeight:700,color:C.txt,marginBottom:8}}>Training Center</div>
+          <div style={{fontSize:16,color:C.mut,lineHeight:1.5}}>Guides to help you get the most out of My Daily Reports</div>
         </div>
         {GUIDES.map((g,i)=>(
-          <button key={i} onClick={()=>{setSelGuide(i);setStep(0);}} style={{width:"100%",display:"flex",alignItems:"center",gap:14,padding:"14px 16px",background:C.card,border:`1px solid ${C.brd}`,borderRadius:14,marginBottom:10,cursor:"pointer",textAlign:"left"}}>
-            <div style={{width:48,height:48,borderRadius:12,background:(typeof g.color==="string"?g.color:C.org)+"22",display:"flex",alignItems:"center",justifyContent:"center",fontSize:22,flexShrink:0}}>{g.icon}</div>
+          <button key={i} onClick={()=>{setSelGuide(i);setStep(0);}} style={{width:"100%",display:"flex",alignItems:"center",gap:16,padding:"18px 20px",background:C.card,border:`1px solid ${C.brd}`,borderRadius:16,marginBottom:12,cursor:"pointer",textAlign:"left"}}>
+            <div style={{width:56,height:56,borderRadius:14,background:(typeof g.color==="string"?g.color:C.org)+"22",display:"flex",alignItems:"center",justifyContent:"center",fontSize:26,flexShrink:0}}>{g.icon}</div>
             <div style={{flex:1}}>
-              <div style={{fontSize:16,fontWeight:600,color:C.txt,marginBottom:3}}>{g.title}</div>
-              <div style={{fontSize:13,color:C.mut,lineHeight:1.3}}>{g.sub}</div>
+              <div style={{fontSize:18,fontWeight:700,color:C.txt,marginBottom:4}}>{g.title}</div>
+              <div style={{fontSize:15,color:C.mut,lineHeight:1.4}}>{g.sub}</div>
             </div>
-            <div style={{display:"flex",alignItems:"center",gap:4,flexShrink:0}}>
-              <span style={{fontSize:12,color:C.mut}}>{g.steps.length} steps</span>
-              <span style={{color:C.mut,fontSize:14}}>›</span>
-            </div>
+            <span style={{color:C.mut,fontSize:18}}>›</span>
           </button>
         ))}
       </div>
