@@ -808,12 +808,13 @@ function CreateJob({user, onBack, onCreated}){
           )}
         </div>
 
-        {/* AI Parsing indicator */}
+        {/* AI Parsing indicator with spinner */}
         {parsing&&(
-          <div style={{background:C.inp,border:`1px solid ${C.brd}`,borderRadius:12,padding:"20px",marginBottom:20,textAlign:"center"}}>
-            <div style={{fontSize:24,marginBottom:8}}>🔍</div>
-            <p style={{color:C.lt,fontSize:14,fontWeight:600}}>Analyzing template fields...</p>
-            <p style={{color:C.mut,fontSize:12,marginTop:4}}>AI is detecting fillable fields in your document</p>
+          <div style={{background:C.inp,border:`1px solid ${C.brd}`,borderRadius:12,padding:"24px",marginBottom:20,textAlign:"center"}}>
+            <div style={{width:40,height:40,border:`3px solid ${C.brd}`,borderTop:`3px solid ${C.org}`,borderRadius:"50%",margin:"0 auto 12px",animation:"spin 1s linear infinite"}}/>
+            <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
+            <p style={{color:C.lt,fontSize:14,fontWeight:600,margin:"0 0 4px"}}>Analyzing template fields...</p>
+            <p style={{color:C.mut,fontSize:12,margin:0}}>AI is detecting fillable fields in your document. This may take 10-20 seconds.</p>
           </div>
         )}
 
@@ -1126,21 +1127,12 @@ function ReportEditor({job, user, onBack, reportDate}){
   // Shared: draw fields onto a canvas context (for View Report preview)
   const drawFieldsOnCanvas=(ctx,fields,pageNum,scale,pageH)=>{
     fields.filter(f=>(f.page||1)===pageNum&&f.val&&f.x!=null&&f.y!=null).forEach(f=>{
-      // Skip values already baked into the PDF template (but always draw auto-date/auto-num)
       const isAutoField=f.autoFill==="date"||f.autoFill==="increment";
       if(!isAutoField&&f.originalValue&&f.val===f.originalValue)return;
       const sz=(f.fontSize||10)*scale;
       ctx.font=sz+"px Helvetica, Arial, sans-serif";
       const drawX=f.x*scale;
       const drawY=f.y*scale+sz;
-      // Cover old template text with white rectangle before drawing new value
-      const hasOriginal=f.originalValue&&f.originalValue.trim();
-      if(hasOriginal){
-        ctx.fillStyle="#ffffff";
-        const coverW=(f.w||Math.max(ctx.measureText(f.originalValue).width+10,120))*scale;
-        const coverH=(f.h||sz+6)*scale;
-        ctx.fillRect(drawX-2*scale,f.y*scale-2*scale,coverW+4*scale,coverH+4*scale);
-      }
       ctx.fillStyle="#000000";
       if(f.multiline&&f.w){
         const maxW=f.w*scale;
@@ -1197,34 +1189,47 @@ function ReportEditor({job, user, onBack, reportDate}){
         // photoLayout: "1"=1 per page, "2"=2 per page (1 col, 2 rows), "4"=4 per page (2 cols, 2 rows)
         const cols=photoLayout==="4"?2:1;
         const perPage=photoLayout==="1"?1:photoLayout==="2"?2:4;
+        const rows=Math.ceil(perPage/cols);
         const pgW=612*scale;const pgH=792*scale;
-        // For 1-per-page: cap photo at 70% page width so it's not overwhelming
-        const maxImgW=photoLayout==="1"?Math.min((612-72)/cols,380):(612-72-(cols-1)*12)/cols;
-        const imgW=maxImgW*scale;const imgH=imgW*0.75;
-        let cvs=null,ctx=null,onPage=0;
+        const maxSlotW=(photoLayout==="1"?Math.min((612-72)/cols,380):(612-72-(cols-1)*12)/cols)*scale;
+        const maxSlotH=photoLayout==="1"?(pgH-100*scale):(pgH-80*scale-(rows-1)*12*scale)/rows;
+        // Pre-load all images to get real dimensions
+        const loaded=[];
         for(let i=0;i<photos.length;i++){
           try{
-            // Start a new page when needed
-            if(i%perPage===0){
-              if(cvs&&onPage>0)previewPages.push(cvs.toDataURL("image/jpeg",0.92));
-              cvs=document.createElement("canvas");cvs.width=pgW;cvs.height=pgH;
-              ctx=cvs.getContext("2d");
-              ctx.fillStyle="#ffffff";ctx.fillRect(0,0,pgW,pgH);
-              ctx.fillStyle="#666666";ctx.font=(12*scale)+"px Helvetica, Arial, sans-serif";
-              ctx.fillText("Photos — "+job.name,36*scale,40*scale);
-              onPage=0;
-            }
             const src=photos[i].src||photos[i];
             const im=new Image();
             await new Promise((res,rej)=>{im.onload=res;im.onerror=rej;im.src=src;});
-            const idxOnPage=i%perPage;
-            const slot=idxOnPage%cols;const row=Math.floor(idxOnPage/cols);
-            // Center photo horizontally for 1-per-page layout
-            const xPos=photoLayout==="1"?((pgW-imgW)/2):(36*scale+slot*(imgW+12*scale));
-            const yPos=60*scale+(row*(imgH+12*scale));
-            ctx.drawImage(im,xPos,yPos,imgW,imgH);
-            onPage++;
-          }catch(e){}
+            loaded.push(im);
+          }catch(e){loaded.push(null);}
+        }
+        let cvs=null,ctx=null,onPage=0;
+        for(let i=0;i<loaded.length;i++){
+          const im=loaded[i];if(!im)continue;
+          // Start a new page when needed
+          if(i%perPage===0){
+            if(cvs&&onPage>0)previewPages.push(cvs.toDataURL("image/jpeg",0.92));
+            cvs=document.createElement("canvas");cvs.width=pgW;cvs.height=pgH;
+            ctx=cvs.getContext("2d");
+            ctx.fillStyle="#ffffff";ctx.fillRect(0,0,pgW,pgH);
+            ctx.fillStyle="#666666";ctx.font=(12*scale)+"px Helvetica, Arial, sans-serif";
+            ctx.fillText("Photos — "+job.name,36*scale,40*scale);
+            onPage=0;
+          }
+          // Auto-size: fit photo within slot preserving real aspect ratio
+          const ratio=im.naturalWidth/im.naturalHeight;
+          let imgW,imgH;
+          if(ratio>=1){imgW=Math.min(maxSlotW,maxSlotH*ratio);imgH=imgW/ratio;}
+          else{imgH=Math.min(maxSlotH,maxSlotW/ratio);imgW=imgH*ratio;}
+          const idxOnPage=i%perPage;
+          const slot=idxOnPage%cols;const row=Math.floor(idxOnPage/cols);
+          // Center photo in its slot
+          const slotX=photoLayout==="1"?0:(36*scale+slot*(maxSlotW+12*scale));
+          const slotY=60*scale+(row*(maxSlotH+12*scale));
+          const xPos=photoLayout==="1"?((pgW-imgW)/2):(slotX+(maxSlotW-imgW)/2);
+          const yPos=photoLayout==="1"?(slotY+(maxSlotH-imgH)/2):(slotY+(maxSlotH-imgH)/2);
+          ctx.drawImage(im,xPos,yPos,imgW,imgH);
+          onPage++;
         }
         if(cvs&&onPage>0){previewPages.push(cvs.toDataURL("image/jpeg",0.92));cvs.width=0;cvs.height=0;}
       }
@@ -1279,14 +1284,6 @@ function ReportEditor({job, user, onBack, reportDate}){
         if(pageIdx<0||pageIdx>=pages.length)return;
         const page=pages[pageIdx];const pageH=page.getHeight();
         const sz=f.fontSize||10;const pdfY=pageH-f.y-sz;
-        // Cover old template text with white rectangle before drawing new value
-        // This handles auto-date, auto-num, AND any field whose value changed from original
-        const hasOriginal=f.originalValue&&f.originalValue.trim();
-        if(hasOriginal){
-          const coverW=f.w||Math.max(font.widthOfTextAtSize(f.originalValue,sz)+10,120);
-          const coverH=f.h||sz+6;
-          page.drawRectangle({x:f.x-2,y:pdfY-4,width:coverW+4,height:coverH+4,color:rgb(1,1,1)});
-        }
         if(f.multiline&&f.w){
           const maxW=f.w;const words=f.val.split(" ");let lines=[];let line="";
           words.forEach(w=>{const test=line?line+" "+w:w;const tw=font.widthOfTextAtSize(test,sz);if(tw>maxW&&line){lines.push(line);line=w;}else line=test;});
@@ -1302,9 +1299,9 @@ function ReportEditor({job, user, onBack, reportDate}){
       if(photos.length>0){
         const cols=photoLayout==="4"?2:1;
         const perPage=photoLayout==="1"?1:photoLayout==="2"?2:4;
-        // For 1-per-page: cap at 380pt wide (~5.3in) so it doesn't fill the whole page
-        const maxImgW=photoLayout==="1"?Math.min((612-72)/cols,380):(612-72-(cols-1)*12)/cols;
-        const imgW=maxImgW;const imgH=imgW*0.75;
+        const rows=Math.ceil(perPage/cols);
+        const maxSlotW=photoLayout==="1"?Math.min((612-72)/cols,380):(612-72-(cols-1)*12)/cols;
+        const maxSlotH=photoLayout==="1"?(792-100):(792-80-(rows-1)*12)/rows;
         for(let i=0;i<photos.length;i++){
           try{
             const imgData=photos[i].src||photos[i];
@@ -1314,11 +1311,18 @@ function ReportEditor({job, user, onBack, reportDate}){
             if(!img)continue;
             if(i%perPage===0){const newPage=pdfDoc.addPage([612,792]);newPage.drawText("Photos — "+job.name,{x:36,y:760,size:12,font,color:rgb(0.4,0.4,0.4)});}
             const pg=pdfDoc.getPages()[pdfDoc.getPageCount()-1];
+            // Auto-size: fit photo preserving real aspect ratio
+            const ratio=img.width/img.height;
+            let imgW,imgH;
+            if(ratio>=1){imgW=Math.min(maxSlotW,maxSlotH*ratio);imgH=imgW/ratio;}
+            else{imgH=Math.min(maxSlotH,maxSlotW/ratio);imgW=imgH*ratio;}
             const idxOnPage=i%perPage;
             const slot=idxOnPage%cols;const row=Math.floor(idxOnPage/cols);
-            // Center photo horizontally for 1-per-page layout
-            const xPos=photoLayout==="1"?((612-imgW)/2):(36+slot*(imgW+12));
-            const yPos=720-(row*(imgH+12));
+            // Center photo in its slot
+            const slotX=photoLayout==="1"?0:(36+slot*(maxSlotW+12));
+            const slotY=720-(row*(maxSlotH+12));
+            const xPos=photoLayout==="1"?((612-imgW)/2):(slotX+(maxSlotW-imgW)/2);
+            const yPos=photoLayout==="1"?(slotY-(maxSlotH-imgH)/2):(slotY-(maxSlotH-imgH)/2);
             pg.drawImage(img,{x:xPos,y:yPos-imgH,width:imgW,height:imgH});
           }catch(imgErr){console.error("Photo embed error:",imgErr);}
         }
@@ -1375,14 +1379,20 @@ function ReportEditor({job, user, onBack, reportDate}){
     }finally{setSubmitting(false);}
   };
 
-  // Post-submit: Download PDF to device
-  const downloadPdf=()=>{
+  // Post-submit: Download/save PDF to device
+  const downloadPdf=async()=>{
     if(!submitSuccess)return;
+    const file=new File([submitSuccess.pdfBlob],submitSuccess.pdfFilename,{type:"application/pdf"});
+    // Use Web Share API if available (iOS/Android "Save to Files" or share sheet)
+    if(navigator.canShare&&navigator.canShare({files:[file]})){
+      try{await navigator.share({files:[file],title:submitSuccess.pdfFilename});showToast("PDF shared!");return;}catch(e){if(e.name==="AbortError")return;}
+    }
+    // Fallback: trigger download
     const url=URL.createObjectURL(submitSuccess.pdfBlob);
     const a=document.createElement("a");a.href=url;a.download=submitSuccess.pdfFilename;
     document.body.appendChild(a);a.click();document.body.removeChild(a);
     URL.revokeObjectURL(url);
-    showToast("PDF downloaded!");
+    showToast("PDF saved!");
   };
 
   // Post-submit: Email to project team
@@ -1483,10 +1493,6 @@ function ReportEditor({job, user, onBack, reportDate}){
               </div>
             </button>
 
-            {/* Both */}
-            <button onClick={()=>{downloadPdf();emailToTeam();}} disabled={emailing} style={{width:"100%",padding:"14px 20px",background:"transparent",border:`1px solid ${C.brd}`,borderRadius:12,color:C.lt,fontSize:14,fontWeight:600,cursor:emailing?"default":"pointer",opacity:emailing?0.7:1}}>
-              Download & Email Both
-            </button>
           </div>
 
           <div style={{width:"100%",maxWidth:400,borderTop:`1px solid ${C.brd}`,paddingTop:16,marginTop:8}}>
@@ -2453,8 +2459,10 @@ function Dashboard({user, onLogout}){
                       <div key={rq.id} style={{background:C.inp,border:`1px solid ${C.brd}`,borderRadius:8,padding:12,marginBottom:8,position:"relative"}}>
                         {rq.status==="confirmed"&&<div style={{position:"absolute",top:8,right:10,fontSize:16}}>✅</div>}
                         <div style={{fontSize:13,fontWeight:700,color:C.txt}}>{rq.jobs?.name||"Job"}</div>
-                        <div style={{fontSize:12,color:C.lt,marginTop:2}}>{rq.inspection_type||"General Visit"} — {rq.requester_name}</div>
+                        <div style={{fontSize:12,color:C.lt,marginTop:2}}>{rq.inspection_type||(rq.inspection_types||[])[0]||"General Visit"}{rq.special_type?` — ${rq.special_type}`:""} — {rq.requester_name||rq.submitted_by||""}</div>
+                        {rq.inspection_time&&<div style={{fontSize:11,color:C.blu,marginTop:2}}>{(rq.inspection_time+"").substring(0,5)}{rq.duration?` (${rq.duration>=60?rq.duration/60+"hr":rq.duration+"min"})`:""}</div>}
                         <div style={{fontSize:11,color:C.mut,marginTop:2}}>{rq.requester_email}{rq.requester_company?` · ${rq.requester_company}`:""}</div>
+                        {rq.inspection_identifier&&<div style={{fontSize:11,color:C.mut,marginTop:2}}>#{rq.inspection_identifier}</div>}
                         {rq.notes&&<div style={{fontSize:11,color:C.mut,marginTop:4,fontStyle:"italic"}}>{rq.notes}</div>}
                         <div style={{display:"flex",gap:8,marginTop:10}}>
                           {rq.status!=="confirmed"&&(
