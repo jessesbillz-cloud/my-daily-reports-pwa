@@ -24,7 +24,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.9/babel.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<!-- JSZip removed — PDF-only uploads, no docx parsing needed -->
 <script src="https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <script>if(window.pdfjsLib){window.pdfjsLib.GlobalWorkerOptions.workerSrc="";window.pdfjsLib.GlobalWorkerOptions.workerPort=null;window.pdfjsLib.disableWorker=true;}</script>
@@ -561,27 +561,11 @@ function CreateJob({user, onBack, onCreated}){
 
   const readFileAsBase64=async(f)=>{return new Promise((res)=>{const r=new FileReader();r.onload=()=>res(r.result.split(",")[1]);r.readAsDataURL(f);});};
 
-  const extractDocxText=async(f)=>{
-    const zip=await JSZip.loadAsync(f);
-    const xml=await zip.file("word/document.xml").async("string");
-    const parser=new DOMParser();
-    const doc=parser.parseFromString(xml,"application/xml");
-    const ns="http://schemas.openxmlformats.org/wordprocessingml/2006/main";
-    const rows=doc.getElementsByTagNameNS(ns,"tr");
-    let text="";
-    for(let i=0;i<rows.length;i++){const cells=rows[i].getElementsByTagNameNS(ns,"tc");const cellTexts=[];for(let j=0;j<cells.length;j++){const paras=cells[j].getElementsByTagNameNS(ns,"t");let ct="";for(let k=0;k<paras.length;k++)ct+=paras[k].textContent;cellTexts.push(ct.trim());}text+=cellTexts.join(" | ")+"\n";}
-    const paras=doc.getElementsByTagNameNS(ns,"p");let pText="";
-    for(let i=0;i<paras.length;i++){const ts=paras[i].getElementsByTagNameNS(ns,"t");let line="";for(let j=0;j<ts.length;j++)line+=ts[j].textContent;if(line.trim())pText+=line.trim()+"\n";}
-    return"TABLE CONTENT:\n"+text+"\nPARAGRAPH CONTENT:\n"+pText;
-  };
-
   const parseFields=async(f)=>{
     setParsing(true);setErr("");setFields([]);
     try{
-      const isPdf=f.name.toLowerCase().endsWith(".pdf");
-      let payload;
-      if(isPdf){const base64=await readFileAsBase64(f);payload={file_base64:base64,file_name:f.name};}
-      else{const docText=await extractDocxText(f);payload={file_text:docText,file_name:f.name};}
+      const base64=await readFileAsBase64(f);
+      const payload={file_base64:base64,file_name:f.name};
       const resp=await fetch(`${SB_URL}/functions/v1/parse-template`,{
         method:"POST",
         headers:{"Content-Type":"application/json","Authorization":"Bearer "+SB_KEY,"apikey":SB_KEY},
@@ -591,16 +575,15 @@ function CreateJob({user, onBack, onCreated}){
       const parsed=await resp.json();
       if(parsed.error)throw new Error(parsed.error);
       // Merge editable + locked into one unified list (preserve coords for PDF fill)
-      const all=[];
+      const all=[];const seenNames=new Set();
+      const addUnique=(f,mode)=>{const key=(f.name||"").toLowerCase().trim();if(seenNames.has(key))return;seenNames.add(key);all.push({name:f.name,value:f.value||"",mode,page:f.page,x:f.x,y:f.y,w:f.w,h:f.h,fontSize:f.fontSize,multiline:f.multiline});};
       (parsed.editable||[]).forEach(f=>{
         let mode="edit";
         if(f.autoFill==="date")mode="auto-date";
         else if(f.autoFill==="increment")mode="auto-num";
-        all.push({name:f.name,value:f.value||"",mode,page:f.page,x:f.x,y:f.y,w:f.w,h:f.h,fontSize:f.fontSize,multiline:f.multiline});
+        addUnique(f,mode);
       });
-      (parsed.locked||[]).forEach(f=>{
-        all.push({name:f.name,value:f.value||"",mode:"lock",page:f.page,x:f.x,y:f.y,w:f.w,h:f.h,fontSize:f.fontSize,multiline:f.multiline});
-      });
+      (parsed.locked||[]).forEach(f=>{addUnique(f,"lock");});
       setFields(all);
     }catch(e){
       console.error("Parse error:",e);
@@ -608,11 +591,23 @@ function CreateJob({user, onBack, onCreated}){
     }finally{setParsing(false);}
   };
 
-  const doFile=async(f)=>{const e=f.name.split(".").pop().toLowerCase();if(!["docx","pdf"].includes(e)){setErr("Only .docx and .pdf");return;}setTf(f);setErr("");setUsedSavedId(null);setTplSaved(false);try{const buf=await f.arrayBuffer();setTfBuf(buf);}catch(bufErr){console.error("File buffer read:",bufErr);}parseFields(f);};
+  const doFile=async(f)=>{const e=f.name.split(".").pop().toLowerCase();if(e!=="pdf"){setErr("Only PDF files are accepted. Please convert Word docs to PDF first.");return;}setTf(f);setErr("");setUsedSavedId(null);setTplSaved(false);try{const buf=await f.arrayBuffer();setTfBuf(buf);}catch(bufErr){console.error("File buffer read:",bufErr);}parseFields(f);};
 
   // Use a saved template — loads fields without re-parsing, but still needs the actual file uploaded
+  // Job-specific locked fields become editable so user can enter new values for the new job
+  const JOB_SPECIFIC_FIELDS=["project name","project no","project number","owner","client","district","dsa file","dsa file #","dsa app","dsa app #","contractor","architect","engineer","inspector","ior","project inspector","project manager","address","location","jurisdiction"];
   const useSavedTemplate=(tpl)=>{
-    setFields(tpl.field_config||[]);
+    const raw=tpl.field_config||[];
+    // Convert job-specific locked fields to editable with cleared values
+    const adjusted=raw.map(f=>{
+      if(f.mode==="lock"){
+        const nameLC=(f.name||"").toLowerCase().trim();
+        const isJobSpecific=JOB_SPECIFIC_FIELDS.some(js=>nameLC===js||nameLC.includes(js));
+        if(isJobSpecific)return{...f,mode:"edit",value:""};
+      }
+      return{...f};
+    });
+    setFields(adjusted);
     setUsedSavedId(tpl.id);
     setTplSaved(true);
     setShowSaved(false);
@@ -623,7 +618,7 @@ function CreateJob({user, onBack, onCreated}){
   // When file is uploaded after selecting a saved template, skip parsing
   const doFileWithSaved=async(f)=>{
     const e=f.name.split(".").pop().toLowerCase();
-    if(!["docx","pdf"].includes(e)){setErr("Only .docx and .pdf");return;}
+    if(e!=="pdf"){setErr("Only PDF files are accepted. Please convert Word docs to PDF first.");return;}
     setTf(f);setErr("");
     try{const buf=await f.arrayBuffer();setTfBuf(buf);}catch(bufErr){console.error("File buffer read:",bufErr);}
     // Fields already loaded from saved template — no parsing needed
@@ -677,9 +672,9 @@ function CreateJob({user, onBack, onCreated}){
       // Store the original uploaded filename (minus extension) exactly as the pattern
       const fnPattern=tf?tf.name.replace(/\.[^.]+$/,""):("DR_01_"+jn.trim().replace(/\s+/g,"_")+"_"+new Date().toLocaleDateString("en-US",{month:"2-digit",day:"2-digit",year:"numeric",timeZone:tz}).replace(/\//g,""));
       const coords=(f)=>({page:f.page,x:f.x,y:f.y,w:f.w,h:f.h,fontSize:f.fontSize,multiline:f.multiline});
-      const editFields=fields.filter(f=>f.mode==="edit").map(f=>({name:f.name,value:f.value,voiceEnabled:true,...coords(f)}));
+      const editFields=fields.filter(f=>f.mode==="edit").map(f=>({name:f.name,value:f.value,originalValue:f.value||"",voiceEnabled:true,...coords(f)}));
       const lockFields=fields.filter(f=>f.mode==="lock").map(f=>({name:f.name,value:f.value,...coords(f)}));
-      const autoFields=fields.filter(f=>f.mode==="auto-date"||f.mode==="auto-num").map(f=>({name:f.name,value:f.value,autoFill:f.mode==="auto-date"?"date":"increment",...coords(f)}));
+      const autoFields=fields.filter(f=>f.mode==="auto-date"||f.mode==="auto-num").map(f=>({name:f.name,value:f.value,originalValue:f.value||"",autoFill:f.mode==="auto-date"?"date":"increment",...coords(f)}));
       const job=await db.mkJob({user_id:user.id,name:jn.trim(),site_address:addr.trim()||null,report_filename_pattern:fnPattern,schedule:es,schedule_days:es==="custom"?days:[],reminder_enabled:remOn,reminder_time:remOn?remT:null,reminder_hours_before:remOn?remH:null,scheduling_enabled:schedOn,field_config:{editable:[...editFields,...autoFields],locked:lockFields}});
       if(tf&&job?.id){
         const ext=tf.name.split(".").pop().toLowerCase();
@@ -754,9 +749,9 @@ function CreateJob({user, onBack, onCreated}){
           {/* Saved Templates picker */}
           {!tf&&savedTpls.length>0&&(
             <div style={{marginBottom:12}}>
-              <button onClick={()=>setShowSaved(!showSaved)} style={{width:"100%",padding:"12px 16px",background:C.card,border:`1px solid ${C.blu}`,borderRadius:10,color:C.blu,fontSize:14,fontWeight:600,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
-                <span>Use a Saved Template ({savedTpls.length})</span>
-                <span style={{fontSize:12}}>{showSaved?"▲":"▼"}</span>
+              <button onClick={()=>setShowSaved(!showSaved)} style={{width:"100%",padding:"14px 18px",background:showSaved?C.blu+"18":C.card,border:`2px solid ${C.blu}`,borderRadius:12,color:C.blu,fontSize:15,fontWeight:700,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+                <span>📋 Use a Saved Template ({savedTpls.length})</span>
+                <span style={{fontSize:14}}>{showSaved?"▲":"▼"}</span>
               </button>
               {showSaved&&(
                 <div style={{marginTop:8,background:C.inp,border:`1px solid ${C.brd}`,borderRadius:10,overflow:"hidden",maxHeight:250,overflowY:"auto"}}>
@@ -781,9 +776,9 @@ function CreateJob({user, onBack, onCreated}){
             <div onDragOver={e=>{e.preventDefault();setDrag(true);}} onDragLeave={()=>setDrag(false)} onDrop={e=>{e.preventDefault();setDrag(false);if(e.dataTransfer.files.length)(usedSavedId?doFileWithSaved:doFile)(e.dataTransfer.files[0]);}} onClick={()=>document.getElementById("fi").click()}
               style={{border:`2px dashed ${drag?C.org:C.brd}`,borderRadius:12,padding:"32px 20px",textAlign:"center",cursor:"pointer",background:drag?"#1f1a14":C.inp}}>
               <div style={{fontSize:32,marginBottom:8}}>{usedSavedId?"📋":"📄"}</div>
-              <p style={{color:C.lt,fontSize:14,fontWeight:600,marginBottom:4}}>{usedSavedId?"Now upload the actual file (parsing will be skipped)":"Drop your Word or PDF template here"}</p>
-              <p style={{color:C.mut,fontSize:12}}>{usedSavedId?"Fields already loaded from saved template":"or tap to browse • .docx or .pdf"}</p>
-              <input id="fi" type="file" accept=".docx,.pdf" style={{display:"none"}} onChange={e=>e.target.files[0]&&(usedSavedId?doFileWithSaved:doFile)(e.target.files[0])}/>
+              <p style={{color:C.lt,fontSize:14,fontWeight:600,marginBottom:4}}>{usedSavedId?"Now upload the actual PDF file (parsing will be skipped)":"Drop your PDF template here"}</p>
+              <p style={{color:C.mut,fontSize:12}}>{usedSavedId?"Fields already loaded from saved template":"or tap to browse • .pdf only"}</p>
+              <input id="fi" type="file" accept=".pdf" style={{display:"none"}} onChange={e=>e.target.files[0]&&(usedSavedId?doFileWithSaved:doFile)(e.target.files[0])}/>
             </div>
           ):(
             <div style={{background:C.inp,border:`1px solid ${C.brd}`,borderRadius:12,padding:"14px 16px"}}>
@@ -811,14 +806,21 @@ function CreateJob({user, onBack, onCreated}){
         {/* ── Unified Field List ── */}
         {!parsing&&fields.length>0&&(
           <div style={{marginBottom:20}}>
-            {/* Save as Template button — only for newly parsed (not already saved) */}
+            {/* Save as Reusable Template — prominent after parsing */}
             {!tplSaved&&!usedSavedId&&(
-              <button onClick={saveAsTemplate} disabled={savingTpl} style={{width:"100%",padding:"10px 0",background:"transparent",border:`1px solid ${C.blu}`,borderRadius:8,color:C.blu,fontSize:13,fontWeight:600,cursor:savingTpl?"default":"pointer",marginBottom:10,opacity:savingTpl?0.6:1}}>
-                {savingTpl?"Saving...":"Save as Reusable Template"}
-              </button>
+              <div style={{background:C.card,border:`2px solid ${C.blu}`,borderRadius:12,padding:"16px 18px",marginBottom:16,textAlign:"center"}}>
+                <div style={{fontSize:20,marginBottom:6}}>💾</div>
+                <div style={{fontSize:14,fontWeight:700,color:C.lt,marginBottom:4}}>Save This Template</div>
+                <div style={{fontSize:12,color:C.mut,marginBottom:12,lineHeight:1.4}}>Reuse these parsed fields on other jobs without re-parsing. Saves time and API costs.</div>
+                <button onClick={saveAsTemplate} disabled={savingTpl} style={{width:"100%",padding:"12px 0",background:C.blu,border:"none",borderRadius:8,color:"#fff",fontSize:14,fontWeight:700,cursor:savingTpl?"default":"pointer",opacity:savingTpl?0.6:1}}>
+                  {savingTpl?"Saving...":"Save as Reusable Template"}
+                </button>
+              </div>
             )}
             {tplSaved&&!usedSavedId&&(
-              <div style={{textAlign:"center",fontSize:12,color:C.ok,fontWeight:600,marginBottom:10}}>Template saved — available for future jobs</div>
+              <div style={{background:"rgba(34,197,94,0.08)",border:`1px solid ${C.ok}`,borderRadius:10,padding:"12px 16px",marginBottom:16,textAlign:"center"}}>
+                <span style={{fontSize:14,color:C.ok,fontWeight:700}}>✓ Template saved — available on all future jobs</span>
+              </div>
             )}
             <div style={{background:C.inp,border:`1px solid ${C.brd}`,borderRadius:12,overflow:"hidden"}}>
               <div style={{padding:"12px 16px",borderBottom:`1px solid ${C.brd}`,background:"rgba(232,116,42,0.06)"}}>
@@ -969,7 +971,13 @@ function ReportEditor({job, user, onBack, reportDate}){
           setDraftId(rpt.id);
           if(rpt.content){
             const c=typeof rpt.content==="string"?JSON.parse(rpt.content):rpt.content;
-            if(c.vals)setVals(p=>({...p,...c.vals}));
+            if(c.vals){
+              // Merge saved values but re-apply today's date for auto-date fields
+              const todayDate=new Date().toLocaleDateString("en-US",{timeZone:tz});
+              const merged={...c.vals};
+              initEdit.forEach(f=>{if(f.autoFill==="date")merged[f.name]=todayDate;});
+              setVals(p=>({...p,...merged}));
+            }
             if(c.lockVals)setLockVals(p=>({...p,...c.lockVals}));
             if(c.notes)setNotes(c.notes);
             if(c.photos)setPhotos(c.photos);
@@ -1074,12 +1082,12 @@ function ReportEditor({job, user, onBack, reportDate}){
   // Shared: build editable field values only — locked fields are already on the template
   const buildEditableFields=()=>editFields.map(f=>({...f,val:vals[f.name]||""}));
 
-  // Shared: draw fields + notes onto a canvas context (for View Report preview)
+  // Shared: draw fields onto a canvas context (for View Report preview)
   const drawFieldsOnCanvas=(ctx,fields,pageNum,scale,pageH)=>{
-    const notesFieldNames=["notes","ior notes","observations","comments","work observed","remarks","daily notes"];
-    let notesField=null;
     fields.filter(f=>(f.page||1)===pageNum&&f.val&&f.x&&f.y).forEach(f=>{
-      if(notesFieldNames.includes(f.name.toLowerCase()))notesField=f;
+      // Skip values already baked into the PDF template (but always draw auto-date/auto-num)
+      const isAutoField=f.autoFill==="date"||f.autoFill==="increment";
+      if(!isAutoField&&f.originalValue&&f.val===f.originalValue)return;
       const sz=(f.fontSize||10)*scale;
       ctx.font=sz+"px Helvetica, Arial, sans-serif";
       ctx.fillStyle="#000000";
@@ -1095,7 +1103,6 @@ function ReportEditor({job, user, onBack, reportDate}){
         ctx.fillText(String(f.val),drawX,drawY);
       }
     });
-    return notesField;
   };
 
   // View Report — renders original template with pdf.js, overlays field values + notes on canvas
@@ -1104,9 +1111,9 @@ function ReportEditor({job, user, onBack, reportDate}){
     try{
       const tplRecord=await db.getTemplate(job.id);
       if(!tplRecord||!tplRecord.storage_path)throw new Error("No template found.");
-      // Check if template is a PDF — docx/other formats can't be previewed with pdf.js
+      // Verify template is PDF
       if(tplRecord.file_type&&tplRecord.file_type!=="pdf"){
-        throw new Error("View Report preview requires a PDF template. Your template is a "+tplRecord.file_type.toUpperCase()+" file. Submit the report to generate the final PDF.");
+        throw new Error("Template is not a PDF. Please re-upload as PDF.");
       }
       const tplResp=await fetch(`${SB_URL}/storage/v1/object/report-source-docs/${tplRecord.storage_path}`,{
         headers:{apikey:SB_KEY,Authorization:`Bearer ${AUTH_TOKEN||SB_KEY}`}
@@ -1117,7 +1124,7 @@ function ReportEditor({job, user, onBack, reportDate}){
       const header=new Uint8Array(tplBytes.slice(0,5));
       const headerStr=String.fromCharCode(...header);
       if(!headerStr.startsWith("%PDF")){
-        throw new Error("Template file is not a valid PDF. It may be a DOCX or other format. Submit the report to generate the final PDF.");
+        throw new Error("Template file is not a valid PDF. Please re-upload a PDF template.");
       }
       if(!window.pdfjsLib)throw new Error("PDF viewer not loaded.");
       const allFields=buildEditableFields();
@@ -1132,29 +1139,14 @@ function ReportEditor({job, user, onBack, reportDate}){
         await pg.render({canvasContext:ctx,viewport:vp}).promise;
         // Draw field values on this page
         const pageH=pg.getViewport({scale:1}).height;
-        const notesField=drawFieldsOnCanvas(ctx,allFields,pi,scale,pageH);
-        // Draw freeform notes as bullets on the page that has the notes field
-        if(notes&&notes.trim()&&notesField&&(notesField.page||1)===pi){
-          const nSz=(notesField.fontSize||9)*scale;
-          const nX=notesField.x*scale;
-          const nW=notesField.w*scale;
-          let curY=notesField.y*scale+nSz;
-          ctx.font=nSz+"px Helvetica, Arial, sans-serif";
-          ctx.fillStyle="#000000";
-          notes.trim().split("\n").filter(l=>l.trim()).forEach(line=>{
-            const bullet="• "+line.trim();
-            const words=bullet.split(" ");let wrapped=[];let cur="";
-            words.forEach(w=>{const test=cur?cur+" "+w:w;if(ctx.measureText(test).width>nW&&cur){wrapped.push(cur);cur=w;}else cur=test;});
-            if(cur)wrapped.push(cur);
-            wrapped.forEach(wl=>{ctx.fillText(wl,nX,curY);curY+=nSz*1.3;});
-          });
-        }
+        drawFieldsOnCanvas(ctx,allFields,pi,scale,pageH);
         previewPages.push(cvs.toDataURL("image/jpeg",0.92));
         cvs.width=0;cvs.height=0;
       }
       // Render photos as an additional preview page
       if(photos.length>0){
-        const cols=parseInt(photoLayout)||2;
+        // photoLayout: "1"=1 per page (1 col), "2"=2 per page (1 col, 2 rows), "4"=4 per page (2 cols, 2 rows)
+        const cols=photoLayout==="1"?1:2;
         const pgW=612*scale;const pgH=792*scale;
         const cvs=document.createElement("canvas");cvs.width=pgW;cvs.height=pgH;
         const ctx=cvs.getContext("2d");
@@ -1217,11 +1209,13 @@ function ReportEditor({job, user, onBack, reportDate}){
       const allFields=buildEditableFields();
 
       // ── 4. Draw field values onto template ──
-      const notesFieldNames=["notes","ior notes","observations","comments","work observed","remarks","daily notes"];
-      let notesField=null;
+      // Skip drawing any value that matches the original template value — copyPages already has it
       allFields.forEach(f=>{
         if(!f.x||!f.y||!f.val)return;
-        if(notesFieldNames.includes(f.name.toLowerCase()))notesField=f;
+        // If value hasn't changed from what's already baked into the PDF, don't redraw it
+        // Always redraw auto-date and auto-increment fields (they change every report)
+        const isAutoField=f.autoFill==="date"||f.autoFill==="increment";
+        if(!isAutoField&&f.originalValue&&f.val===f.originalValue)return;
         const pageIdx=(f.page||1)-1;
         if(pageIdx<0||pageIdx>=pages.length)return;
         const page=pages[pageIdx];const pageH=page.getHeight();
@@ -1236,37 +1230,13 @@ function ReportEditor({job, user, onBack, reportDate}){
         }
       });
 
-      // ── 4b. Draw freeform notes as bullet points ──
-      if(notes&&notes.trim()){
-        const noteLines=notes.trim().split("\n").filter(l=>l.trim());
-        if(noteLines.length>0){
-          const nPage=(notesField?.page||1)-1;
-          const nX=(notesField?.x||72);
-          const nY=(notesField?.y||500);
-          const nW=(notesField?.w||468);
-          const nSz=(notesField?.fontSize||9);
-          const pg=pages[Math.min(nPage,pages.length-1)];
-          const pgH=pg.getHeight();
-          let curY=pgH-nY-nSz;
-          noteLines.forEach(line=>{
-            const bullet="• "+line.trim();
-            const words=bullet.split(" ");let wrapped=[];let cur="";
-            words.forEach(w=>{const test=cur?cur+" "+w:w;if(font.widthOfTextAtSize(test,nSz)>nW&&cur){wrapped.push(cur);cur=w;}else cur=test;});
-            if(cur)wrapped.push(cur);
-            wrapped.forEach(wl=>{
-              if(curY>36)pg.drawText(wl,{x:nX,y:curY,size:nSz,font,color:rgb(0,0,0)});
-              curY-=nSz*1.3;
-            });
-          });
-        }
-      }
-
       // ── 5. Photos on new page ──
+      // photoLayout: "1"=1 per page (1 col), "2"=2 per page (1 col, 2 rows), "4"=4 per page (2 cols, 2 rows)
       if(photos.length>0){
-        const cols=parseInt(photoLayout)||2;
+        const cols=photoLayout==="1"?1:2;
+        const perPage=photoLayout==="1"?1:photoLayout==="2"?2:4;
         const imgW=(612-72-(cols-1)*12)/cols;const imgH=imgW*0.75;
-        const maxRows=Math.floor(700/(imgH+12));
-        const maxPerPage=cols*maxRows;
+        const maxPerPage=perPage;
         for(let i=0;i<photos.length;i++){
           try{
             const imgData=photos[i].src||photos[i];
@@ -1325,7 +1295,8 @@ function ReportEditor({job, user, onBack, reportDate}){
       const emailHtml=`<div style="font-family:-apple-system,sans-serif;max-width:600px;margin:0 auto;"><div style="background:#e8742a;padding:20px 24px;border-radius:8px 8px 0 0;"><h1 style="color:#fff;margin:0;font-size:20px;">My Daily Reports</h1></div><div style="background:#f9f9f9;padding:24px;border:1px solid #e0e0e0;border-top:none;border-radius:0 0 8px 8px;"><p style="color:#333;font-size:16px;line-height:1.6;margin:0 0 8px;">Hi,</p><p style="color:#333;font-size:15px;line-height:1.6;margin:0 0 16px;">${userName} has submitted the daily field report for <strong>${job.name}</strong> on ${todayDisplay}.</p>${summaryTable}<p style="color:#555;font-size:14px;margin:16px 0 0;">The full PDF report is attached to this email.${photoNote?"":" No site photos were included."}</p>${photoNote}</div><p style="color:#999;font-size:11px;text-align:center;margin-top:16px;">Sent via My Daily Reports &bull; mydailyreports.com</p></div>`;
 
       // Store PDF info and show post-submit options instead of auto-emailing
-      const teamEmails=job.team_emails||[];
+      const rawTeam=job.team_emails||[];
+      const teamEmails=rawTeam.map(m=>typeof m==="string"?m:m.email).filter(Boolean);
       setSubmitSuccess({pdfBlob,pdfFilename,pdfBase64,emailHtml,teamEmails,jobName:job.name,todayDisplay,userName});
       showToast("Report submitted!");
     }catch(e){
@@ -1553,13 +1524,6 @@ function ReportEditor({job, user, onBack, reportDate}){
           </div>
         )}
 
-        {/* ── Notes ── */}
-        <div style={{marginBottom:20}}>
-          <div style={{fontSize:12,fontWeight:700,color:C.org,textTransform:"uppercase",letterSpacing:1,marginBottom:10}}>Notes</div>
-          <textarea value={notes} onChange={e=>setNotes(e.target.value)} placeholder="Tap here and use your keyboard mic to dictate notes throughout the day..." rows={6} style={{...fs,resize:"vertical",minHeight:120,lineHeight:1.6}}/>
-          <div style={{fontSize:11,color:C.mut,marginTop:6}}>Use your phone's keyboard microphone to dictate hands-free</div>
-        </div>
-
         {/* ── Photos ── */}
         <div style={{marginBottom:20}}>
           <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:10}}>
@@ -1633,9 +1597,13 @@ function JobDetail({job, user, onBack, onDeleted}){
   const [editName,setEditName]=useState(job.name||"");
   const [editAddr,setEditAddr]=useState(job.site_address||"");
   const [editSaving,setEditSaving]=useState(false);
-  const [teamEmails,setTeamEmails]=useState(job.team_emails||[]);
-  const [newEmail,setNewEmail]=useState("");
+  const [teamMembers,setTeamMembers]=useState((job.team_emails||[]).map(e=>typeof e==="string"?{name:"",email:e}:e));
+  const [newMemberName,setNewMemberName]=useState("");
+  const [newMemberEmail,setNewMemberEmail]=useState("");
   const [teamSaving,setTeamSaving]=useState(false);
+  const [showSchedSet,setShowSchedSet]=useState(false);
+  const [schedEnabled,setSchedEnabled]=useState(!!job.scheduling_enabled);
+  const [schedSaving,setSchedSaving]=useState(false);
 
   const [tplFilename,setTplFilename]=useState(null);
   const loadReports=useCallback(async()=>{
@@ -1828,27 +1796,60 @@ function JobDetail({job, user, onBack, onDeleted}){
         {/* ── Project Team (inline) ── */}
         {showTeam&&(
           <div style={{background:C.card,border:`1px solid ${C.blu}`,borderRadius:12,padding:20,marginBottom:16}}>
-            <div style={{fontWeight:700,fontSize:15,color:C.blu,marginBottom:6,display:"flex",alignItems:"center",gap:8}}>
-              <span>👥</span> Project Team
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:6}}>
+              <div style={{fontWeight:700,fontSize:15,color:C.blu,display:"flex",alignItems:"center",gap:8}}>
+                <span>👥</span> Project Team
+              </div>
+              <button onClick={()=>setShowTeam(false)} style={{background:"none",border:"none",color:C.mut,cursor:"pointer",fontSize:20,padding:"0 4px"}}>✕</button>
             </div>
             <div style={{fontSize:12,color:C.mut,marginBottom:16,lineHeight:1.5}}>These people will receive an email with the report attached when you tap Submit Report.</div>
-            {teamEmails.map((email,i)=>(
-              <div key={i} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 0",borderBottom:i<teamEmails.length-1?`1px solid ${C.brd}`:"none"}}>
-                <div style={{width:32,height:32,borderRadius:8,background:C.inp,border:`1px solid ${C.brd}`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:14,flexShrink:0}}>📧</div>
-                <span style={{flex:1,fontSize:14,color:C.lt,wordBreak:"break-all"}}>{email}</span>
-                <button onClick={()=>{const updated=teamEmails.filter((_,j)=>j!==i);setTeamEmails(updated);}} style={{background:"none",border:"none",color:C.err,cursor:"pointer",fontSize:16,padding:"0 4px"}}>✕</button>
+            {teamMembers.map((m,i)=>(
+              <div key={i} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 0",borderBottom:i<teamMembers.length-1?`1px solid ${C.brd}`:"none"}}>
+                <div style={{width:32,height:32,borderRadius:8,background:C.inp,border:`1px solid ${C.brd}`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:14,flexShrink:0}}>👤</div>
+                <div style={{flex:1,minWidth:0}}>
+                  <div style={{fontSize:14,fontWeight:600,color:C.lt}}>{m.name||"No name"}</div>
+                  <div style={{fontSize:12,color:C.mut,wordBreak:"break-all"}}>{m.email}</div>
+                </div>
+                <button onClick={()=>{setTeamMembers(p=>p.filter((_,j)=>j!==i));}} style={{background:"none",border:"none",color:C.err,cursor:"pointer",fontSize:16,padding:"0 4px"}}>✕</button>
               </div>
             ))}
-            <div style={{display:"flex",gap:8,marginTop:12}}>
-              <input type="email" value={newEmail} onChange={e=>setNewEmail(e.target.value)} placeholder="name@company.com" onKeyDown={e=>{if(e.key==="Enter"&&newEmail.trim()&&newEmail.includes("@")){setTeamEmails(p=>[...p,newEmail.trim()]);setNewEmail("");}}} style={{flex:1,padding:"10px 12px",background:C.inp,border:`1px solid ${C.brd}`,borderRadius:8,color:C.txt,fontSize:14}}/>
-              <button onClick={()=>{if(newEmail.trim()&&newEmail.includes("@")){setTeamEmails(p=>[...p,newEmail.trim()]);setNewEmail("");}}} style={{padding:"10px 16px",background:C.blu,border:"none",borderRadius:8,color:"#fff",fontSize:13,fontWeight:700,cursor:"pointer"}}>Add</button>
+            <div style={{marginTop:12,display:"flex",flexDirection:"column",gap:8}}>
+              <input type="text" value={newMemberName} onChange={e=>setNewMemberName(e.target.value)} placeholder="Name" style={{padding:"10px 12px",background:C.inp,border:`1px solid ${C.brd}`,borderRadius:8,color:C.txt,fontSize:14}}/>
+              <div style={{display:"flex",gap:8}}>
+                <input type="email" value={newMemberEmail} onChange={e=>setNewMemberEmail(e.target.value)} placeholder="Email" onKeyDown={e=>{if(e.key==="Enter"&&newMemberEmail.trim()&&newMemberEmail.includes("@")){setTeamMembers(p=>[...p,{name:newMemberName.trim(),email:newMemberEmail.trim()}]);setNewMemberName("");setNewMemberEmail("");}}} style={{flex:1,padding:"10px 12px",background:C.inp,border:`1px solid ${C.brd}`,borderRadius:8,color:C.txt,fontSize:14}}/>
+                <button onClick={()=>{if(newMemberEmail.trim()&&newMemberEmail.includes("@")){setTeamMembers(p=>[...p,{name:newMemberName.trim(),email:newMemberEmail.trim()}]);setNewMemberName("");setNewMemberEmail("");}}} style={{padding:"10px 16px",background:C.blu,border:"none",borderRadius:8,color:"#fff",fontSize:13,fontWeight:700,cursor:"pointer"}}>Add</button>
+              </div>
             </div>
-            <div style={{display:"flex",gap:10,marginTop:16}}>
-              <button onClick={()=>setShowTeam(false)} style={{flex:1,padding:"12px 0",background:C.inp,border:`1px solid ${C.brd}`,borderRadius:8,color:C.lt,fontSize:14,fontWeight:600,cursor:"pointer"}}>Cancel</button>
-              <button onClick={async()=>{setTeamSaving(true);try{await fetch(`${SB_URL}/rest/v1/jobs?id=eq.${job.id}`,{method:"PATCH",headers:db._h(),body:JSON.stringify({team_emails:teamEmails})});job.team_emails=teamEmails;setShowTeam(false);}catch(e){alert("Save failed: "+e.message);}finally{setTeamSaving(false);}}} disabled={teamSaving} className="btn-o" style={{flex:1,padding:"12px 0",background:C.blu,border:"none",borderRadius:8,color:"#fff",fontSize:14,fontWeight:700,cursor:teamSaving?"default":"pointer",opacity:teamSaving?0.6:1}}>
+            <div style={{marginTop:16}}>
+              <button onClick={async()=>{setTeamSaving(true);try{await fetch(`${SB_URL}/rest/v1/jobs?id=eq.${job.id}`,{method:"PATCH",headers:db._h(),body:JSON.stringify({team_emails:teamMembers})});job.team_emails=teamMembers;setShowTeam(false);}catch(e){alert("Save failed: "+e.message);}finally{setTeamSaving(false);}}} disabled={teamSaving} className="btn-o" style={{width:"100%",padding:"12px 0",background:C.blu,border:"none",borderRadius:8,color:"#fff",fontSize:14,fontWeight:700,cursor:teamSaving?"default":"pointer",opacity:teamSaving?0.6:1}}>
                 {teamSaving?"Saving...":"Save Team"}
               </button>
             </div>
+          </div>
+        )}
+
+        {/* ── Scheduling Settings (inline) ── */}
+        {showSchedSet&&(
+          <div style={{background:C.card,border:`1px solid ${C.org}`,borderRadius:12,padding:20,marginBottom:16}}>
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:6}}>
+              <div style={{fontWeight:700,fontSize:15,color:C.org,display:"flex",alignItems:"center",gap:8}}>
+                <span>📅</span> Jobsite Scheduling
+              </div>
+              <button onClick={()=>setShowSchedSet(false)} style={{background:"none",border:"none",color:C.mut,cursor:"pointer",fontSize:20,padding:"0 4px"}}>✕</button>
+            </div>
+            <div style={{fontSize:12,color:C.mut,marginBottom:16,lineHeight:1.5}}>When enabled, this job appears on your shared scheduling calendar so your GC and subs can request site visits.</div>
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"12px 14px",background:C.inp,border:`1px solid ${C.brd}`,borderRadius:8,marginBottom:16}}>
+              <span style={{fontSize:14,fontWeight:600,color:C.lt}}>Enable Scheduling</span>
+              <button onClick={()=>setSchedEnabled(!schedEnabled)} style={{width:48,height:26,borderRadius:13,border:"none",background:schedEnabled?C.ok:C.brd,cursor:"pointer",position:"relative",transition:"background 0.2s"}}>
+                <div style={{width:20,height:20,borderRadius:"50%",background:"#fff",position:"absolute",top:3,left:schedEnabled?25:3,transition:"left 0.2s"}}/>
+              </button>
+            </div>
+            {schedEnabled&&(
+              <div style={{fontSize:12,color:C.ok,lineHeight:1.5,marginBottom:12}}>This job will appear on your shared calendar. Anyone with your calendar link can request visits for this job.</div>
+            )}
+            <button onClick={async()=>{setSchedSaving(true);try{await fetch(`${SB_URL}/rest/v1/jobs?id=eq.${job.id}`,{method:"PATCH",headers:db._h(),body:JSON.stringify({scheduling_enabled:schedEnabled})});job.scheduling_enabled=schedEnabled;setShowSchedSet(false);}catch(e){alert("Save failed: "+e.message);}finally{setSchedSaving(false);}}} disabled={schedSaving} style={{width:"100%",padding:"12px 0",background:C.org,border:"none",borderRadius:8,color:"#fff",fontSize:14,fontWeight:700,cursor:schedSaving?"default":"pointer",opacity:schedSaving?0.6:1}}>
+              {schedSaving?"Saving...":"Save Scheduling"}
+            </button>
           </div>
         )}
 
@@ -1865,16 +1866,16 @@ function JobDetail({job, user, onBack, onDeleted}){
               <div style={{display:"flex",alignItems:"center",gap:10}}>
                 <span style={{fontSize:16}}>👥</span><span style={{fontSize:14,fontWeight:600,color:C.lt}}>Project Team</span>
               </div>
-              <span style={{fontSize:11,color:C.mut,background:C.inp,borderRadius:10,padding:"2px 8px"}}>{teamEmails.length}</span>
+              <span style={{fontSize:11,color:C.mut,background:C.inp,borderRadius:10,padding:"2px 8px"}}>{teamMembers.length}</span>
             </button>
             <button onClick={()=>alert("Edit field config coming soon")} style={{width:"100%",display:"flex",alignItems:"center",gap:10,padding:"14px 18px",background:"none",border:"none",borderBottom:`1px solid ${C.brd}`,cursor:"pointer",textAlign:"left"}}>
               <span style={{fontSize:16}}>📋</span><span style={{fontSize:14,fontWeight:600,color:C.lt}}>Edit Template Fields</span>
             </button>
-            <button onClick={()=>alert("Jobsite scheduling calendar setup coming soon. Once enabled, your GC and subs can request site visits through a shared link.")} style={{width:"100%",display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,padding:"14px 18px",background:"none",border:"none",borderBottom:`1px solid ${C.brd}`,cursor:"pointer",textAlign:"left"}}>
+            <button onClick={()=>{setShowSchedSet(!showSchedSet);setShowTeam(false);}} style={{width:"100%",display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,padding:"14px 18px",background:"none",border:"none",borderBottom:`1px solid ${C.brd}`,cursor:"pointer",textAlign:"left"}}>
               <div style={{display:"flex",alignItems:"center",gap:10}}>
                 <span style={{fontSize:16}}>📅</span><span style={{fontSize:14,fontWeight:600,color:C.lt}}>Jobsite Scheduling</span>
               </div>
-              <span style={{fontSize:11,color:job.scheduling_enabled?C.ok:C.mut,fontWeight:600}}>{job.scheduling_enabled?"ON":"OFF"}</span>
+              <span style={{fontSize:11,color:schedEnabled?C.ok:C.mut,fontWeight:600}}>{schedEnabled?"ON":"OFF"}</span>
             </button>
             <div style={{padding:"14px 18px",borderTop:`1px solid #5c2023`}}>
               {!showDel?(
@@ -1903,8 +1904,8 @@ const GUIDES=[
   {icon:"🚀",color:C.blu,title:"Getting Started",sub:"Learn the basics of creating jobs and navigating the app",steps:[
     {icon:"🔑",title:"Sign In to Your Account",body:"When you first open My Daily Reports you'll see the sign-in screen. Enter your email and password, or create a new account if you don't have one yet. Your data syncs across all your devices automatically.",tip:"Your name and email are set during sign up and can't be changed later, so double-check before you submit."},
     {icon:"🏠",title:"The Dashboard",body:"After signing in you land on the Dashboard. From here you can create your first job, visit the Training Center, or review the Terms of Service and Privacy Policy. Your active jobs appear front and center with status indicators showing whether reports are due, in progress, or submitted.",tip:null},
-    {icon:"➕",title:"Create Your First Job",body:"Tap the orange \"+ New Job\" button to start. You'll need to enter a job name — that's it to get started. You can optionally add a site address and upload a PDF or Word template for your daily reports.",tip:"The job name is used as the default project name on every report, so pick something descriptive like \"Oceanside District Office\"."},
-    {icon:"📄",title:"Upload a Report Template",body:"During job creation you can upload a .docx or .pdf template. The AI will analyze your document and detect all the fillable fields automatically. You'll then decide which fields to Edit daily, Lock with a permanent value, Auto-Date, or Auto-Number.",tip:"It helps to have a copy of your report open while you're defining fields the first time. The AI parses fields into a single vertical column, but your actual form may have several horizontal columns. Don't worry — you only have to do this once and you're set."},
+    {icon:"➕",title:"Create Your First Job",body:"Tap the orange \"+ New Job\" button to start. You'll need to enter a job name — that's it to get started. You can optionally add a site address and upload a PDF template for your daily reports.",tip:"The job name is used as the default project name on every report, so pick something descriptive like \"Oceanside District Office\"."},
+    {icon:"📄",title:"Upload a Report Template",body:"During job creation you can upload a PDF template. The AI will analyze your document and detect all the fillable fields automatically. You'll then decide which fields to Edit daily, Lock with a permanent value, Auto-Date, or Auto-Number. If your template is a Word doc, just save or export it as PDF first.",tip:"It helps to have a copy of your report open while you're defining fields the first time. The AI parses fields into a single vertical column, but your actual form may have several horizontal columns. Don't worry — you only have to do this once and you're set."},
     {icon:"🔽",title:"Switching Between Jobs",body:"Use the Jobs dropdown in the top-left corner of the dashboard to switch between your active jobs. Tap any job to open its dashboard with today's report, working copies, completed reports, and photos.",tip:null},
   ]},
   {icon:"📝",color:C.ok,title:"Creating Your First Report",sub:"Step-by-step guide to building a daily field report",steps:[

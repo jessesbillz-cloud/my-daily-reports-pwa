@@ -6,30 +6,43 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-const PROMPT = `Analyze this inspection report template. Find all fillable fields by looking for patterns like "Label:" or "Label: value" or table cells with labels and values.
+const PROMPT = `Analyze this inspection report template PDF. Find all fillable fields.
 
-For each field, determine if it CHANGES per report or STAYS THE SAME across reports.
+CRITICAL RULES:
+1. NEVER output duplicate field names. Each field appears EXACTLY ONCE. If a label like "IOR Notes" appears both in a header table AND as a section heading below it, output it ONLY ONCE — use the coordinates of the large writable area (the section below the table), not the table cell.
+2. The template may have pre-filled values (like a project name, date, or a standing note). Include those values in the "value" field so we know what's already printed on the form.
 
-Fields that typically CHANGE per report: Date, Report Date, Inspection Date, Report Number, Report No, DR#, Notes, IOR Notes, Observations, Comments, Work Observed, Weather, Hours, Time In, Time Out, Temperature, Correction Notices Issued, Observation Letters Issued.
+FIELD CLASSIFICATION — determine if each field CHANGES per report or STAYS THE SAME:
+- CHANGES per report (→ editable): Date, Report Date, Report Number, DR#, Notes, IOR Notes, Observations, Comments, Work Observed, Weather, Hours, Time In, Time Out, Temperature, Correction Notices Issued, Observation Letters Issued
+- STAYS THE SAME (→ locked): Project Name, Owner, Client, District, DSA File #, DSA App #, Contractor, Architect, Engineer, Inspector, IOR, Project Inspector, Address, Location, Project No, Project Manager, Jurisdiction
 
-Fields that typically STAY THE SAME: Project Name, Owner, Client, District, DSA File #, DSA App #, Contractor, Architect, Engineer, Inspector, IOR, Project Inspector, Address, Location, Project No, Project Manager, Jurisdiction.
+POSITION COORDINATES — estimate PRECISE position for each field:
+- "page": which page (1-indexed)
+- "x": x position in PDF points where the VALUE starts (after the label). 72pt = 1 inch, page width = 612pt
+- "y": y position in PDF points FROM THE TOP. Top of page ≈ 0, bottom ≈ 792. A field 2 inches from top = ~144pt.
+- "w": width of the value area in points
+- "h": height of the value area in points
+- "fontSize": estimated font size (typically 8-12pt)
 
-IMPORTANT: For each field, also estimate its position on the page so we can fill values back onto this template later. Provide:
-- "page": which page the field is on (1-indexed)
-- "x": approximate x position in points (from left edge, 72 points = 1 inch, letter width = 612 points)
-- "y": approximate y position in points FROM THE TOP of the page (letter height = 792 points). For a field near the top of the page y should be small (e.g. 50-100), for fields near the bottom y should be large (e.g. 600-750).
-- "w": approximate width of the value area in points
-- "h": approximate height of the value area in points
-- "fontSize": estimated font size in points used for the value text (typically 8-12)
+COORDINATE PRECISION IS CRITICAL:
+- x = where the VALUE text starts, not the label. "Date: 04 February 2026" → x points to where "04" starts.
+- Each field on a different line MUST have a different y value. Measure each independently.
+- For fields side-by-side on the same row (like "Date:" on the left and "Project Name:" on the right), they share a similar y but have different x values.
 
-The x position should be where the VALUE starts (after the label), not where the label starts. For example if "Project Name: Woodland Park" appears on the page, x should point to where "Woodland Park" starts.
+NOTES/OBSERVATIONS SECTION:
+- Many forms have a large notes area below the header table (labeled "IOR Notes:", "Observations:", etc.)
+- Output this as ONE field. The coordinates should point to the writable area BELOW the label — where the inspector writes their daily notes.
+- Set "multiline": true, "voiceEnabled": true
+- The y should be just below the section label, x at the left margin of the writing area, w spanning the full width
+- If text already exists in this area (a standing note), include it in "value"
+- Do NOT also create a separate field for the same label if it appears in the header table
 
-For multi-line fields like Notes or Observations, provide a larger h value and set "multiline": true.
+SIGNATURE LINES: Ignore signature lines (like "x___Name___") — do not include them as fields.
 
-Return ONLY valid JSON with no other text or markdown:
-{"editable":[{"name":"Date","value":"","autoFill":"date","page":1,"x":180,"y":120,"w":120,"h":14,"fontSize":10},{"name":"IOR Notes","value":"","voiceEnabled":true,"page":1,"x":72,"y":500,"w":468,"h":100,"fontSize":10,"multiline":true}],"locked":[{"name":"Project Name","value":"Woodland Park MS","page":1,"x":180,"y":85,"w":200,"h":14,"fontSize":10}]}
+Return ONLY valid JSON, no markdown or explanation:
+{"editable":[{"name":"Date","value":"04 February 2026","autoFill":"date","page":1,"x":110,"y":148,"w":160,"h":14,"fontSize":10}],"locked":[{"name":"Project Name","value":"Woodland Park MS Mod","page":1,"x":395,"y":148,"w":180,"h":14,"fontSize":10}]}
 
-autoFill can be "date" or "increment" (for report numbers). voiceEnabled=true for notes/observations fields. Include the current value if one exists in the template.`;
+autoFill values: "date" (for date fields) or "increment" (for report numbers). voiceEnabled=true for notes/observations fields.`;
 
 serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -38,27 +51,15 @@ serve(async (req) => {
 
   try {
     const body = await req.json();
-    const { file_base64, file_name, file_text } = body;
-    const isPdf = file_name.toLowerCase().endsWith(".pdf");
+    const { file_base64, file_name } = body;
 
-    let content;
-
-    if (isPdf) {
-      content = [
-        {
-          type: "document",
-          source: { type: "base64", media_type: "application/pdf", data: file_base64 },
-        },
-        { type: "text", text: PROMPT },
-      ];
-    } else {
-      content = [
-        {
-          type: "text",
-          text: "Here is the extracted text content from a Word document (.docx) inspection report template:\n\n---\n" + (file_text || "No text extracted") + "\n---\n\n" + PROMPT,
-        },
-      ];
-    }
+    const content = [
+      {
+        type: "document",
+        source: { type: "base64", media_type: "application/pdf", data: file_base64 },
+      },
+      { type: "text", text: PROMPT },
+    ];
 
     const response = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
@@ -86,6 +87,24 @@ serve(async (req) => {
     const text = data.content?.map((c) => c.text || "").join("") || "";
     const clean = text.replace(/```json|```/g, "").trim();
     const parsed = JSON.parse(clean);
+
+    // Safety net: deduplicate fields by name (keep first occurrence)
+    const dedup = (arr: any[]) => {
+      const seen = new Set<string>();
+      return (arr || []).filter((f) => {
+        const key = (f.name || "").toLowerCase().trim();
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+    };
+    if (parsed.editable) parsed.editable = dedup(parsed.editable);
+    if (parsed.locked) parsed.locked = dedup(parsed.locked);
+    // Also dedup across editable+locked (editable wins if same name in both)
+    const editNames = new Set((parsed.editable || []).map((f: any) => (f.name || "").toLowerCase().trim()));
+    if (parsed.locked) {
+      parsed.locked = parsed.locked.filter((f: any) => !editNames.has((f.name || "").toLowerCase().trim()));
+    }
 
     return new Response(JSON.stringify(parsed), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
