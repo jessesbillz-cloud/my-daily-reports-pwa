@@ -2047,6 +2047,28 @@ const GUIDES=[
     {icon:"🔗",title:"Share Your Link",body:"Tap \"Share Calendar\" on the dashboard. Send the link to your GC, subs, or anyone who needs to request a site visit.",tip:"Set your Scheduling Display Name in Account Settings so people recognize your calendar."},
     {icon:"📋",title:"Requests",body:"Visitors pick a job and date from your calendar link. You see the request and can approve or reschedule it.",tip:"Scheduling requests don't auto-create reports — start your report when you're on site."},
   ]},
+  {icon:"🖼️",color:"#f59e0b",title:"Preparing Your Template",sub:"Visual guide to uploading a clean PDF",steps:[
+    {icon:"📄",title:"Start With a Clean PDF",body:"Export your report as a PDF with blank value cells. Labels stay, values go. The AI reads the labels to detect fields — blank cells give it a clean surface to write on.",tip:null,
+      illustration:{type:"form",rows:[
+        {label:"Date:",value:"",good:true,note:"Leave blank — Auto-Date fills this"},
+        {label:"Project Name:",value:"Woodland Park MS",good:true,note:"Pre-filled values become locked fields"},
+        {label:"DR #:",value:"",good:true,note:"Leave blank — Auto-# fills this"},
+      ]}},
+    {icon:"🚫",title:"Remove Old Dates & Numbers",body:"If your template has a date like \"04 February 2026\" or a report number already filled in, delete those values before uploading. The app overwrites them but the old text can show through underneath.",tip:null,
+      illustration:{type:"compare",bad:{label:"Date:",value:"04 February 2026",caption:"Old date bleeds through"},good:{label:"Date:",value:"",caption:"Clean — auto-date fills it fresh"}}},
+    {icon:"📝",title:"Notes Section",body:"Label your notes area clearly with a colon — \"IOR Notes:\" or \"Observations:\". You can leave a standing note (like a general availability message) and the app will keep it. New notes get added below.",tip:null,
+      illustration:{type:"form",rows:[
+        {label:"IOR Notes:",value:"Available for daily communication...",good:true,note:"Standing notes are preserved"},
+      ]}},
+    {icon:"📐",title:"Best Practices",body:"Use standard letter size (8.5\" x 11\"). Single page works best. Use real text labels with colons, not empty boxes. Delete any blank extra pages. Signature lines are automatically ignored.",tip:null,
+      illustration:{type:"checklist",items:[
+        {text:"Single page PDF",ok:true},
+        {text:"Clear labels with colons",ok:true},
+        {text:"Blank value cells for changing fields",ok:true},
+        {text:"No hidden text boxes or overlapping elements",ok:true},
+        {text:"Signature lines — ignored automatically",ok:true},
+      ]}},
+  ]},
   {icon:"⚙️",color:C.mut,title:"Settings",sub:"Account, timezone, and preferences",steps:[
     {icon:"👤",title:"Account Settings",body:"Tap the gear icon on the dashboard, then \"Account Settings\". View your profile, set timezone, and configure your scheduling display name.",tip:null},
     {icon:"🔔",title:"Reminders",body:"Email reminders are set per-job during creation. You'll get reminded before your report is due based on your schedule.",tip:null},
@@ -2081,9 +2103,56 @@ function TrainingCenter({onBack}){
           </div>
           <div style={{fontSize:18,color:C.lt,lineHeight:1.8,marginBottom:20}}>{s.body}</div>
           {s.tip&&(
-            <div style={{display:"flex",gap:12,padding:16,background:C.inp,border:`1px solid ${C.brd}`,borderRadius:14}}>
+            <div style={{display:"flex",gap:12,padding:16,background:C.inp,border:`1px solid ${C.brd}`,borderRadius:14,marginBottom:20}}>
               <span style={{fontSize:22,flexShrink:0}}>💡</span>
               <div style={{fontSize:16,color:C.mut,lineHeight:1.6}}>{s.tip}</div>
+            </div>
+          )}
+          {/* Inline illustrations for visual guides */}
+          {s.illustration&&s.illustration.type==="form"&&(
+            <div style={{background:"#fff",borderRadius:12,padding:16,border:"2px solid "+C.brd,marginBottom:16}}>
+              {s.illustration.rows.map((r,ri)=>(
+                <div key={ri} style={{marginBottom:ri<s.illustration.rows.length-1?12:0}}>
+                  <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:4}}>
+                    <div style={{display:"flex",alignItems:"center",border:"1px solid #ccc",borderRadius:6,overflow:"hidden",flex:1}}>
+                      <div style={{padding:"10px 12px",background:"#f5f5f5",fontWeight:700,fontSize:14,color:"#333",whiteSpace:"nowrap",borderRight:"1px solid #ccc"}}>{r.label}</div>
+                      <div style={{padding:"10px 12px",flex:1,fontSize:14,color:r.value?"#333":"#bbb",fontStyle:r.value?"normal":"italic"}}>{r.value||"(blank)"}</div>
+                    </div>
+                    {r.good&&<span style={{fontSize:18,flexShrink:0}}>✅</span>}
+                  </div>
+                  {r.note&&<div style={{fontSize:13,color:C.org,fontWeight:600,paddingLeft:4,display:"flex",alignItems:"center",gap:6}}>↑ {r.note}</div>}
+                </div>
+              ))}
+            </div>
+          )}
+          {s.illustration&&s.illustration.type==="compare"&&(
+            <div style={{display:"flex",flexDirection:"column",gap:12,marginBottom:16}}>
+              <div style={{background:"#fff",borderRadius:12,padding:14,border:"2px solid #ef4444"}}>
+                <div style={{fontSize:12,fontWeight:700,color:"#ef4444",marginBottom:8,display:"flex",alignItems:"center",gap:6}}>✕ DON'T</div>
+                <div style={{display:"flex",alignItems:"center",border:"1px solid #ccc",borderRadius:6,overflow:"hidden"}}>
+                  <div style={{padding:"10px 12px",background:"#f5f5f5",fontWeight:700,fontSize:14,color:"#333",whiteSpace:"nowrap",borderRight:"1px solid #ccc"}}>{s.illustration.bad.label}</div>
+                  <div style={{padding:"10px 12px",flex:1,fontSize:14,color:"#333"}}>{s.illustration.bad.value}</div>
+                </div>
+                <div style={{fontSize:13,color:"#ef4444",marginTop:6,fontWeight:600}}>↑ {s.illustration.bad.caption}</div>
+              </div>
+              <div style={{background:"#fff",borderRadius:12,padding:14,border:"2px solid "+C.ok}}>
+                <div style={{fontSize:12,fontWeight:700,color:C.ok,marginBottom:8,display:"flex",alignItems:"center",gap:6}}>✓ DO</div>
+                <div style={{display:"flex",alignItems:"center",border:"1px solid #ccc",borderRadius:6,overflow:"hidden"}}>
+                  <div style={{padding:"10px 12px",background:"#f5f5f5",fontWeight:700,fontSize:14,color:"#333",whiteSpace:"nowrap",borderRight:"1px solid #ccc"}}>{s.illustration.good.label}</div>
+                  <div style={{padding:"10px 12px",flex:1,fontSize:14,color:s.illustration.good.value?"#333":"#bbb",fontStyle:s.illustration.good.value?"normal":"italic"}}>{s.illustration.good.value||"(blank)"}</div>
+                </div>
+                <div style={{fontSize:13,color:C.ok,marginTop:6,fontWeight:600}}>↑ {s.illustration.good.caption}</div>
+              </div>
+            </div>
+          )}
+          {s.illustration&&s.illustration.type==="checklist"&&(
+            <div style={{background:"#fff",borderRadius:12,padding:16,border:"2px solid "+C.brd,marginBottom:16}}>
+              {s.illustration.items.map((item,ii)=>(
+                <div key={ii} style={{display:"flex",alignItems:"center",gap:12,padding:"10px 0",borderBottom:ii<s.illustration.items.length-1?"1px solid #eee":"none"}}>
+                  <span style={{fontSize:20,flexShrink:0}}>{item.ok?"✅":"❌"}</span>
+                  <span style={{fontSize:15,color:"#333",fontWeight:600}}>{item.text}</span>
+                </div>
+              ))}
             </div>
           )}
         </div>
