@@ -1133,10 +1133,13 @@ function ReportEditor({job, user, onBack, reportDate}){
       ctx.font=sz+"px Helvetica, Arial, sans-serif";
       const drawX=f.x*scale;
       const drawY=f.y*scale+sz;
-      // For auto-date/auto-num fields, draw white bg to cover the old template date
-      if(isAutoField&&f.w){
+      // Cover old template text with white rectangle before drawing new value
+      const hasOriginal=f.originalValue&&f.originalValue.trim();
+      if(hasOriginal){
         ctx.fillStyle="#ffffff";
-        ctx.fillRect(drawX-1,f.y*scale-1,(f.w||120)*scale+2,(f.h||sz)*scale+2);
+        const coverW=(f.w||Math.max(ctx.measureText(f.originalValue).width+10,120))*scale;
+        const coverH=(f.h||sz+6)*scale;
+        ctx.fillRect(drawX-2*scale,f.y*scale-2*scale,coverW+4*scale,coverH+4*scale);
       }
       ctx.fillStyle="#000000";
       if(f.multiline&&f.w){
@@ -1266,9 +1269,13 @@ function ReportEditor({job, user, onBack, reportDate}){
         if(pageIdx<0||pageIdx>=pages.length)return;
         const page=pages[pageIdx];const pageH=page.getHeight();
         const sz=f.fontSize||10;const pdfY=pageH-f.y-sz;
-        // For auto-date/auto-num, cover old template value with white rectangle first
-        if(isAutoField&&f.w){
-          page.drawRectangle({x:f.x-1,y:pdfY-2,width:(f.w||120)+2,height:(f.h||sz+4),color:rgb(1,1,1)});
+        // Cover old template text with white rectangle before drawing new value
+        // This handles auto-date, auto-num, AND any field whose value changed from original
+        const hasOriginal=f.originalValue&&f.originalValue.trim();
+        if(hasOriginal){
+          const coverW=f.w||Math.max(font.widthOfTextAtSize(f.originalValue,sz)+10,120);
+          const coverH=f.h||sz+6;
+          page.drawRectangle({x:f.x-2,y:pdfY-4,width:coverW+4,height:coverH+4,color:rgb(1,1,1)});
         }
         if(f.multiline&&f.w){
           const maxW=f.w;const words=f.val.split(" ");let lines=[];let line="";
