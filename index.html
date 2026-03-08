@@ -2056,9 +2056,10 @@ const GUIDES=[
       ]}},
     {icon:"🚫",title:"Remove Old Dates & Numbers",body:"If your template has a date like \"04 February 2026\" or a report number already filled in, delete those values before uploading. The app overwrites them but the old text can show through underneath.",tip:null,
       illustration:{type:"compare",bad:{label:"Date:",value:"04 February 2026",caption:"Old date bleeds through"},good:{label:"Date:",value:"",caption:"Clean — auto-date fills it fresh"}}},
-    {icon:"📝",title:"Notes Section",body:"Label your notes area clearly with a colon — \"IOR Notes:\" or \"Observations:\". You can leave a standing note (like a general availability message) and the app will keep it. New notes get added below.",tip:null,
+    {icon:"📝",title:"Notes Section",body:"If you have a standing note (like a general availability message), put it in its own separate text box on your PDF and lock it as a field. Then create a second, blank text box labeled \"IOR Notes:\" for your daily entries. This keeps the standing note untouched and gives you a clean area to write in every day.",tip:null,
       illustration:{type:"form",rows:[
-        {label:"IOR Notes:",value:"Available for daily communication...",good:true,note:"Standing notes are preserved"},
+        {label:"Standing Note:",value:"Available for daily communication...",good:true,note:"Separate box — lock this as a field"},
+        {label:"IOR Notes:",value:"",good:true,note:"Blank — this is where you write daily notes"},
       ]}},
     {icon:"📐",title:"Best Practices",body:"Use standard letter size (8.5\" x 11\"). Single page works best. Use real text labels with colons, not empty boxes. Delete any blank extra pages. Signature lines are automatically ignored.",tip:null,
       illustration:{type:"checklist",items:[
