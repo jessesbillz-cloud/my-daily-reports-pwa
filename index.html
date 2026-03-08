@@ -1123,6 +1123,13 @@ function ReportEditor({job, user, onBack, reportDate}){
   // Shared: build editable field values only — locked fields are already on the template
   const buildEditableFields=()=>editFields.map(f=>({...f,val:vals[f.name]||""}));
 
+  // Helper: get the x position where a field's value should start (right after label colon)
+  // Uses labelEndX if available; otherwise falls back to f.x as stored
+  const getValueX=(f)=>{
+    if(f.labelEndX!=null)return f.labelEndX+3;
+    return f.x;
+  };
+
   // Shared: draw fields onto a canvas context (for View Report preview)
   const drawFieldsOnCanvas=(ctx,fields,pageNum,scale,pageH)=>{
     fields.filter(f=>(f.page||1)===pageNum&&f.val&&f.x!=null&&f.y!=null).forEach(f=>{
@@ -1131,8 +1138,7 @@ function ReportEditor({job, user, onBack, reportDate}){
       if(!isAutoField&&f.originalValue&&f.val===f.originalValue)return;
       const sz=(f.fontSize||10)*scale;
       ctx.font=sz+"px Helvetica, Arial, sans-serif";
-      // Use labelEndX to position value right after the label colon
-      const baseX=(f.labelEndX!=null)?(f.labelEndX+3):f.x;
+      const baseX=getValueX(f);
       const drawX=baseX*scale;
       const drawY=f.y*scale+sz;
       // Cover old template text with white rectangle before drawing new value
@@ -1194,31 +1200,41 @@ function ReportEditor({job, user, onBack, reportDate}){
         previewPages.push(cvs.toDataURL("image/jpeg",0.92));
         cvs.width=0;cvs.height=0;
       }
-      // Render photos as an additional preview page
+      // Render photos as additional preview pages — paginate to match PDF output
       if(photos.length>0){
-        // photoLayout: "1"=1 per page (1 col), "2"=2 per page (1 col, 2 rows), "4"=4 per page (2 cols, 2 rows)
-        const cols=photoLayout==="1"?1:2;
+        // photoLayout: "1"=1 per page, "2"=2 per page (1 col, 2 rows), "4"=4 per page (2 cols, 2 rows)
+        const cols=photoLayout==="4"?2:1;
+        const perPage=photoLayout==="1"?1:photoLayout==="2"?2:4;
         const pgW=612*scale;const pgH=792*scale;
-        const cvs=document.createElement("canvas");cvs.width=pgW;cvs.height=pgH;
-        const ctx=cvs.getContext("2d");
-        ctx.fillStyle="#ffffff";ctx.fillRect(0,0,pgW,pgH);
-        ctx.fillStyle="#666666";ctx.font=(12*scale)+"px Helvetica, Arial, sans-serif";
-        ctx.fillText("Photos — "+job.name,36*scale,40*scale);
-        const imgW=(612-72-(cols-1)*12)/cols*scale;const imgH=imgW*0.75;
-        let loaded=0;
+        // For 1-per-page: cap photo at 70% page width so it's not overwhelming
+        const maxImgW=photoLayout==="1"?Math.min((612-72)/cols,380):(612-72-(cols-1)*12)/cols;
+        const imgW=maxImgW*scale;const imgH=imgW*0.75;
+        let cvs=null,ctx=null,onPage=0;
         for(let i=0;i<photos.length;i++){
           try{
+            // Start a new page when needed
+            if(i%perPage===0){
+              if(cvs&&onPage>0)previewPages.push(cvs.toDataURL("image/jpeg",0.92));
+              cvs=document.createElement("canvas");cvs.width=pgW;cvs.height=pgH;
+              ctx=cvs.getContext("2d");
+              ctx.fillStyle="#ffffff";ctx.fillRect(0,0,pgW,pgH);
+              ctx.fillStyle="#666666";ctx.font=(12*scale)+"px Helvetica, Arial, sans-serif";
+              ctx.fillText("Photos — "+job.name,36*scale,40*scale);
+              onPage=0;
+            }
             const src=photos[i].src||photos[i];
             const im=new Image();
             await new Promise((res,rej)=>{im.onload=res;im.onerror=rej;im.src=src;});
-            const slot=i%cols;const row=Math.floor(i/cols);
-            const xPos=36*scale+slot*(imgW+12*scale);const yPos=60*scale+(row*(imgH+12*scale));
+            const idxOnPage=i%perPage;
+            const slot=idxOnPage%cols;const row=Math.floor(idxOnPage/cols);
+            // Center photo horizontally for 1-per-page layout
+            const xPos=photoLayout==="1"?((pgW-imgW)/2):(36*scale+slot*(imgW+12*scale));
+            const yPos=60*scale+(row*(imgH+12*scale));
             ctx.drawImage(im,xPos,yPos,imgW,imgH);
-            loaded++;
+            onPage++;
           }catch(e){}
         }
-        if(loaded>0)previewPages.push(cvs.toDataURL("image/jpeg",0.92));
-        cvs.width=0;cvs.height=0;
+        if(cvs&&onPage>0){previewPages.push(cvs.toDataURL("image/jpeg",0.92));cvs.width=0;cvs.height=0;}
       }
       setViewingReport(previewPages);
     }catch(e){
@@ -1271,8 +1287,8 @@ function ReportEditor({job, user, onBack, reportDate}){
         if(pageIdx<0||pageIdx>=pages.length)return;
         const page=pages[pageIdx];const pageH=page.getHeight();
         const sz=f.fontSize||10;const pdfY=pageH-f.y-sz;
-        // Use labelEndX to position value right after the label colon, with a small gap
-        const valueX=(f.labelEndX!=null)?(f.labelEndX+3):f.x;
+        // Position value right after the label colon
+        const valueX=getValueX(f);
         // Cover old template text with white rectangle before drawing new value
         // This handles auto-date, auto-num, AND any field whose value changed from original
         const hasOriginal=f.originalValue&&f.originalValue.trim();
@@ -1292,12 +1308,13 @@ function ReportEditor({job, user, onBack, reportDate}){
       });
 
       // ── 5. Photos on new page ──
-      // photoLayout: "1"=1 per page (1 col), "2"=2 per page (1 col, 2 rows), "4"=4 per page (2 cols, 2 rows)
+      // photoLayout: "1"=1 per page, "2"=2 per page (1 col, 2 rows), "4"=4 per page (2 cols, 2 rows)
       if(photos.length>0){
-        const cols=photoLayout==="1"?1:2;
+        const cols=photoLayout==="4"?2:1;
         const perPage=photoLayout==="1"?1:photoLayout==="2"?2:4;
-        const imgW=(612-72-(cols-1)*12)/cols;const imgH=imgW*0.75;
-        const maxPerPage=perPage;
+        // For 1-per-page: cap at 380pt wide (~5.3in) so it doesn't fill the whole page
+        const maxImgW=photoLayout==="1"?Math.min((612-72)/cols,380):(612-72-(cols-1)*12)/cols;
+        const imgW=maxImgW;const imgH=imgW*0.75;
         for(let i=0;i<photos.length;i++){
           try{
             const imgData=photos[i].src||photos[i];
@@ -1305,11 +1322,13 @@ function ReportEditor({job, user, onBack, reportDate}){
             if(typeof imgData==="string"&&imgData.startsWith("data:image/png"))img=await pdfDoc.embedPng(imgData);
             else if(typeof imgData==="string")img=await pdfDoc.embedJpg(imgData);
             if(!img)continue;
-            if(i%maxPerPage===0){const newPage=pdfDoc.addPage([612,792]);newPage.drawText("Photos — "+job.name,{x:36,y:760,size:12,font,color:rgb(0.4,0.4,0.4)});}
+            if(i%perPage===0){const newPage=pdfDoc.addPage([612,792]);newPage.drawText("Photos — "+job.name,{x:36,y:760,size:12,font,color:rgb(0.4,0.4,0.4)});}
             const pg=pdfDoc.getPages()[pdfDoc.getPageCount()-1];
-            const idxOnPage=i%maxPerPage;
+            const idxOnPage=i%perPage;
             const slot=idxOnPage%cols;const row=Math.floor(idxOnPage/cols);
-            const xPos=36+slot*(imgW+12);const yPos=720-(row*(imgH+12));
+            // Center photo horizontally for 1-per-page layout
+            const xPos=photoLayout==="1"?((612-imgW)/2):(36+slot*(imgW+12));
+            const yPos=720-(row*(imgH+12));
             pg.drawImage(img,{x:xPos,y:yPos-imgH,width:imgW,height:imgH});
           }catch(imgErr){console.error("Photo embed error:",imgErr);}
         }
