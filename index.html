@@ -431,7 +431,7 @@ function AccountSettings({user, onBack, onLogout}){
                 </div>
 
                 <div style={{marginBottom:0}}>
-                  <label style={ls}>Scheduling Display Name</label>
+                  <label style={ls}>Calendar Display Name</label>
                   <input type="text" value={slug} onChange={e=>setSlug(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g,""))} placeholder="jesse-saltzman" style={fs}/>
                   <div style={{fontSize:12,color:C.mut,marginTop:6,lineHeight:1.4}}>This is how your name appears at the end of your scheduling URL</div>
                   <div style={{fontSize:12,color:C.blu,marginTop:4,fontWeight:600}}>hub.html?i={slug||"your-name"}</div>
@@ -2371,14 +2371,14 @@ const GUIDES=[
     {icon:"✏️",title:"Fill In Fields",body:"Editable fields are ready for your daily entries — notes, weather, hours, observations. Locked fields (project name, architect, contractor) are already filled in.",tip:null},
     {icon:"🎤",title:"Voice Dictation",body:"Tap any text field, then tap the mic on your keyboard. Speak naturally — your phone's built-in dictation does the rest. No extra setup needed.",tip:"Take notes throughout the day as things happen. Come back later and everything's saved."},
     {icon:"📷",title:"Photos",body:"Take or upload photos from the report editor. Choose layout: 1 per page, 2 side-by-side, or 4 per page (2x2 grid).",tip:null},
-    {icon:"💾",title:"Save & Submit",body:"Tap \"Save Working Copy\" to save progress. Tap \"Submit\" when done — generates a PDF using your original template with your entries overlaid.",tip:null},
+    {icon:"💾",title:"Save & Submit",body:"Tap \"Save Working Copy\" to save progress. Tap \"Submit\" when done — the submit button generates a PDF using your original template with your entries overlaid.",tip:null},
   ]},
   {icon:"📸",color:C.org,title:"Photos",sub:"Capture and organize site documentation",steps:[
     {icon:"📷",title:"Take Photos",body:"Use \"Take Photo\" for camera or \"Library\" to pick from your phone. Photos attach to your report and appear in the layout you selected.",tip:"Context shots, close-ups of issues, and progress photos make the best documentation."},
     {icon:"🗑️",title:"Remove Photos",body:"Tap the X on any photo thumbnail to remove it from the report.",tip:null},
   ]},
   {icon:"📤",color:"#a855f7",title:"Exporting & Sharing",sub:"Generate PDFs and email reports",steps:[
-    {icon:"📄",title:"PDF Generation",body:"Submit generates a PDF from your original template with your daily entries overlaid. Includes a timestamp watermark.",tip:"Report numbers are sequential: DR#1, DR#2, DR#3 — based on submissions, not calendar days."},
+    {icon:"📄",title:"PDF Generation",body:"The submit button generates a PDF from your original template with your daily entries overlaid. Includes a timestamp watermark.",tip:"Report numbers are sequential: DR#1, DR#2, DR#3 — based on submissions, not calendar days."},
     {icon:"📧",title:"Email Reports",body:"Email the PDF to your project team on submit. Set up default recipients in your job's Project Team settings.",tip:null},
     {icon:"🔄",title:"Past Reports",body:"Completed reports live in the Completed folder on your job dashboard. Re-download or resend anytime.",tip:null},
   ]},
@@ -2878,7 +2878,8 @@ function SetupWizard({user, onComplete}){
   const [slug,setSlug]=useState(()=>(user?.user_metadata?.full_name||"").toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/(^-|-$)/g,""));
   const [readSections,setReadSections]=useState({});
   const [openSections,setOpenSections]=useState({});
-  const toggleSection=(key)=>{setReadSections(p=>({...p,[key]:true}));setOpenSections(p=>({...p,[key]:!p[key]}));};
+  const SECTION_ORDER=["parsing","cleanDoc","notes","photos","bestPractices"];
+  const toggleSection=(key)=>{setReadSections(p=>({...p,[key]:true}));setOpenSections(p=>{const wasOpen=p[key];if(wasOpen){const idx=SECTION_ORDER.indexOf(key);const nextKey=idx>=0&&idx<SECTION_ORDER.length-1?SECTION_ORDER[idx+1]:null;const next={};if(nextKey)next[nextKey]=true;return next;}return{[key]:true};});};
 
   const TZ_OPTIONS=["America/New_York","America/Chicago","America/Denver","America/Phoenix","America/Los_Angeles","America/Anchorage","Pacific/Honolulu"];
   const TZ_LABELS={"America/New_York":"Eastern (ET)","America/Chicago":"Central (CT)","America/Denver":"Mountain (MT)","America/Phoenix":"Arizona (MST)","America/Los_Angeles":"Pacific (PT)","America/Anchorage":"Alaska (AKT)","Pacific/Honolulu":"Hawaii (HT)"};
@@ -2956,7 +2957,7 @@ function SetupWizard({user, onComplete}){
             <div style={{textAlign:"center",padding:"30px 0 20px"}}>
               <MDRLogo size={72}/>
               <h1 style={{fontSize:24,fontWeight:800,marginTop:16,marginBottom:8}}>Welcome to My Daily Reports</h1>
-              <p style={{fontSize:15,color:C.lt,lineHeight:1.6,maxWidth:400,margin:"0 auto"}}>Quick setup to get you started. Takes about 2 minutes.</p>
+              <p style={{fontSize:15,color:C.lt,lineHeight:1.6,maxWidth:400,margin:"0 auto"}}>Give us about 5 minutes to learn how to set up your first report template. Do it once, and you'll never have to do it again.</p>
             </div>
             <div style={{display:"flex",flexDirection:"column",gap:8}}>
               {WIZARD_STEPS.slice(1).map((s,i)=>(
@@ -2992,7 +2993,7 @@ function SetupWizard({user, onComplete}){
                 </select>
               </div>
               <div>
-                <label style={ls}>Scheduling Display Name</label>
+                <label style={ls}>Calendar Display Name</label>
                 <input type="text" value={slug} onChange={e=>setSlug(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g,""))} placeholder="jesse-saltzman" style={fs}/>
                 <div style={{fontSize:12,color:C.blu,marginTop:6,fontWeight:600}}>schedule.mydailyreports.org/{slug||"your-name"}</div>
               </div>
@@ -3023,7 +3024,7 @@ function SetupWizard({user, onComplete}){
             </div>
             <div style={cardS}>
               <div style={{fontSize:14,fontWeight:700,color:C.org,marginBottom:8}}>Report Generation</div>
-              <p style={{fontSize:13,color:C.lt,lineHeight:1.6}}>Submit generates a PDF using your original template with your daily entries overlaid. Notes appear in your notes area. Photos get added on additional pages.</p>
+              <p style={{fontSize:13,color:C.lt,lineHeight:1.6}}>The submit button generates a PDF using your original template with your daily entries overlaid. Notes appear in your notes area. Photos get added on additional pages.</p>
             </div>
             <div style={{fontSize:12,color:C.mut,textAlign:"center",marginTop:4}}>For detailed walkthroughs, visit the Training Center on the dashboard.</div>
           </div>
@@ -3036,31 +3037,31 @@ function SetupWizard({user, onComplete}){
             <p style={{fontSize:13,color:C.mut,marginBottom:16}}>Tap each section to review. All 5 required before continuing.</p>
 
             {[
-              {key:"parsing",icon:"🔍",title:"How Parsing Works",bullets:[
-                "AI looks for \"Label: value\" patterns and table cells",
-                "Field positions are estimated — works well for standard layouts",
-                "Fields show in a vertical list for configuration, even if your form has multiple columns",
+              {key:"parsing",icon:"🔍",title:"How It Reads Your Template",bullets:[
+                "Our AI scans your document and finds each field automatically (Date, Project Name, Notes, etc.)",
+                "It figures out which fields change daily (like Date and Notes) and which stay the same (like Project Name)",
+                "Your fields will show up in a simple list where you can review and adjust them",
               ]},
-              {key:"cleanDoc",icon:"🧹",title:"Clean Your Document",bullets:[
-                "Remove hidden text boxes that overlap form fields",
-                "Delete invisible or zero-opacity elements",
-                "Use clear labels followed by a colon (e.g., \"Project Name:\")",
+              {key:"cleanDoc",icon:"🧹",title:"Preparing Your Template",bullets:[
+                "Make sure each field has a clear label like \"Project Name:\" or \"Date:\"",
+                "Remove any extra text or overlapping boxes that might confuse the scanner",
+                "The cleaner your template, the better the results",
               ]},
               {key:"notes",icon:"📝",title:"Notes Section Setup",bullets:[
-                "Label your notes area with a colon — \"IOR Notes:\" or \"Observations:\"",
-                "Keep the notes area blank or minimal in the template",
-                "Notes appear as bullet points on the generated PDF",
+                "Label your notes area clearly — \"IOR Notes:\" or \"Observations:\"",
+                "Leave the notes area blank in your template so there's room to write",
+                "Your notes will appear as bullet points on the final report",
               ]},
               {key:"photos",icon:"📸",title:"Photo System",bullets:[
-                "Photos are added on new pages after your main report page",
-                "Photo pages include your template's header and footer",
-                "Upload a single-page template — delete any blank extra pages before uploading",
+                "Photos get added on new pages after your main report",
+                "Each photo page keeps your company header and footer",
+                "Upload a single-page template — remove any blank extra pages first",
               ]},
               {key:"bestPractices",icon:"📐",title:"Best Practices",bullets:[
-                "Single-page PDF format recommended",
+                "Single-page PDF or Word document recommended",
                 "Standard letter size (8.5\" x 11\") works best",
-                "Use real text labels, not just empty form boxes",
-                "One template upload per job — reused for every report",
+                "Use clear field labels, not just empty boxes",
+                "One template per job — reused for every report",
               ]},
             ].map(section=>{
               const wasRead=readSections[section.key];
