@@ -629,7 +629,7 @@ function CreateJob({user, onBack, onCreated}){
     }finally{setParsing(false);}
   };
 
-  const doFile=async(f)=>{const e=f.name.split(".").pop().toLowerCase();if(e!=="pdf"){setErr("Only PDF files are accepted. Please convert Word docs to PDF first.");return;}setTf(f);setErr("");setUsedSavedId(null);setTplSaved(false);try{const buf=await f.arrayBuffer();setTfBuf(buf);parseFields(buf,f.name);}catch(bufErr){console.error("File buffer read:",bufErr);}};
+  const doFile=async(f)=>{const e=f.name.split(".").pop().toLowerCase();if(e!=="pdf"){setErr("Only PDF files are accepted. Please convert Word docs to PDF first.");return;}setTf(f);setErr("");setUsedSavedId(null);setTplSaved(false);try{const buf=await f.arrayBuffer();const copy=buf.slice(0);setTfBuf(copy);parseFields(copy.slice(0),f.name);}catch(bufErr){console.error("File buffer read:",bufErr);}};
 
   // Use a saved template — loads fields without re-parsing, but still needs the actual file uploaded
   // Job-specific locked fields become editable so user can enter new values for the new job
