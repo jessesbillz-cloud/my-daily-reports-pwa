@@ -901,6 +901,7 @@ function CreateJob({user, onBack, onCreated}){
               <div style={{fontSize:32,marginBottom:8}}>{usedSavedId?"📋":"📄"}</div>
               <p style={{color:C.lt,fontSize:14,fontWeight:600,marginBottom:4}}>{usedSavedId?"Now upload the actual file (parsing will be skipped)":"Drop your template here"}</p>
               <p style={{color:C.mut,fontSize:12}}>{usedSavedId?"Fields already loaded from saved template":"or tap to browse • PDF, DOCX, JPG, PNG"}</p>
+              {!usedSavedId&&<p style={{color:C.mut,fontSize:11,marginTop:8,lineHeight:1.4,fontStyle:"italic"}}>Tip: Download the file to your phone first, then upload from your files. Uploading directly from email or cloud viewers may change the filename.</p>}
               <input id="fi" type="file" accept=".pdf,.docx,.doc,.jpg,.jpeg,.png" style={{display:"none"}} onChange={e=>e.target.files[0]&&(usedSavedId?doFileWithSaved:doFile)(e.target.files[0])}/>
             </div>
           ):(
@@ -939,28 +940,12 @@ function CreateJob({user, onBack, onCreated}){
         {/* ── Unified Field List ── */}
         {!parsing&&fields.length>0&&(
           <div style={{marginBottom:20}}>
-            {/* Save as Reusable Template — prominent after parsing */}
-            {!tplSaved&&!usedSavedId&&(
-              <div style={{background:C.card,border:`2px solid ${C.blu}`,borderRadius:12,padding:"16px 18px",marginBottom:16,textAlign:"center"}}>
-                <div style={{fontSize:20,marginBottom:6}}>💾</div>
-                <div style={{fontSize:14,fontWeight:700,color:C.lt,marginBottom:4}}>Save This Template</div>
-                <div style={{fontSize:12,color:C.mut,marginBottom:12,lineHeight:1.4}}>Reuse these parsed fields on other jobs without re-parsing. Saves time and API costs.</div>
-                <button onClick={saveAsTemplate} disabled={savingTpl} style={{width:"100%",padding:"12px 0",background:C.blu,border:"none",borderRadius:8,color:"#fff",fontSize:14,fontWeight:700,cursor:savingTpl?"default":"pointer",opacity:savingTpl?0.6:1}}>
-                  {savingTpl?"Saving...":"Save as Reusable Template"}
-                </button>
-              </div>
-            )}
-            {tplSaved&&!usedSavedId&&(
-              <div style={{background:"rgba(34,197,94,0.08)",border:`1px solid ${C.ok}`,borderRadius:10,padding:"12px 16px",marginBottom:16,textAlign:"center"}}>
-                <span style={{fontSize:14,color:C.ok,fontWeight:700}}>✓ Template saved — available on all future jobs</span>
-              </div>
-            )}
             <div style={{background:C.inp,border:`1px solid ${C.brd}`,borderRadius:12,overflow:"hidden"}}>
               <div style={{padding:"12px 16px",borderBottom:`1px solid ${C.brd}`,background:"rgba(232,116,42,0.06)"}}>
                 <div style={{fontWeight:700,fontSize:14,color:C.org}}>Template Fields ({fields.length})</div>
                 <div style={{fontSize:11,color:C.mut,marginTop:3}}>Set each field to Edit, Lock, or Auto-Date. Locked fields keep the same value every report.</div>
               </div>
-              <div style={{padding:8,maxHeight:500,overflowY:"auto"}}>
+              <div style={{padding:8}}>
                 {fields.map(f=>(
                   <div key={f.name} style={{padding:"10px 12px",background:C.card,border:`1px solid ${C.brd}`,borderRadius:8,marginBottom:6}}>
                     {/* Row 1: Field name + mode buttons */}
@@ -996,6 +981,22 @@ function CreateJob({user, onBack, onCreated}){
                 ))}
               </div>
             </div>
+            {/* Save as Reusable Template — after fields so users review first */}
+            {!tplSaved&&!usedSavedId&&(
+              <div style={{background:C.card,border:`2px solid ${C.blu}`,borderRadius:12,padding:"16px 18px",marginTop:16,textAlign:"center"}}>
+                <div style={{fontSize:20,marginBottom:6}}>💾</div>
+                <div style={{fontSize:14,fontWeight:700,color:C.lt,marginBottom:4}}>Save This Template</div>
+                <div style={{fontSize:12,color:C.mut,marginBottom:12,lineHeight:1.4}}>Reuse these parsed fields on other jobs without re-parsing. Saves time and API costs.</div>
+                <button onClick={saveAsTemplate} disabled={savingTpl} style={{width:"100%",padding:"12px 0",background:C.blu,border:"none",borderRadius:8,color:"#fff",fontSize:14,fontWeight:700,cursor:savingTpl?"default":"pointer",opacity:savingTpl?0.6:1}}>
+                  {savingTpl?"Saving...":"Save as Reusable Template"}
+                </button>
+              </div>
+            )}
+            {tplSaved&&!usedSavedId&&(
+              <div style={{background:"rgba(34,197,94,0.08)",border:`1px solid ${C.ok}`,borderRadius:10,padding:"12px 16px",marginTop:16,textAlign:"center"}}>
+                <span style={{fontSize:14,color:C.ok,fontWeight:700}}>✓ Template saved — available on all future jobs</span>
+              </div>
+            )}
           </div>
         )}
 
