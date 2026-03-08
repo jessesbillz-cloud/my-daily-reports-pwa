@@ -18,19 +18,18 @@ FIELD CLASSIFICATION — determine if each field CHANGES per report or STAYS THE
 
 POSITION COORDINATES — estimate PRECISE position for each field:
 - "page": which page (1-indexed)
-- "x": x position in PDF points where the VALUE starts (after the label). 72pt = 1 inch, page width = 612pt
+- "x": x position in PDF points of the VALUE BOX — the area right after the label colon where the actual value text begins. NOT the label position. 72pt = 1 inch, page width = 612pt.
 - "y": y position in PDF points FROM THE TOP. Top of page ≈ 0, bottom ≈ 792. A field 2 inches from top = ~144pt.
-- "w": width of the value area in points
+- "w": width of the value area in points (from x to the right edge of the value box)
 - "h": height of the value area in points
 - "fontSize": estimated font size (typically 8-12pt)
-- "labelEndX": x position in PDF points where the label text ENDS (right after the colon or last character of the label). This is critical — the value will be placed starting at labelEndX + a small gap, so it appears directly after the label text.
 
-COORDINATE PRECISION IS CRITICAL:
-- x = where the VALUE text starts, not the label. "Date: 04 February 2026" → x points to where "04" starts.
-- labelEndX = where the label colon/text ends. For "Date: 04 Feb..." → labelEndX points to right after the colon+space. x and labelEndX should be very close (within a few points).
-- Each field on a different line MUST have a different y value. Measure each independently.
+COORDINATE PRECISION IS CRITICAL — the app draws typed text exactly at (x, y), so accuracy matters:
+- x MUST point to the LEFT EDGE of the value box — immediately after the label colon/text. Example: if the label "Date:" ends at x=95 and the value "04 February 2026" starts at x=100, then x=100. The typed value will be drawn starting at exactly this x position.
+- DO NOT set x to the center of the cell or the center of the page. x is always the LEFT START of the value area, right after the label.
+- y is measured from the top of the page. Each field on a different line MUST have a different y value.
 - For fields side-by-side on the same row (like "Date:" on the left and "Project Name:" on the right), they share a similar y but have different x values.
-- The app will place typed values at labelEndX + 3pt, so be precise about where each label ends.
+- w should span from x to the right edge of the value area (not the full cell width — just the value portion after the label).
 
 NOTES/OBSERVATIONS SECTION:
 - Many forms have a large notes area below the header table (labeled "IOR Notes:", "Observations:", "Notes:", etc.)
@@ -46,7 +45,7 @@ NOTES/OBSERVATIONS SECTION:
 SIGNATURE LINES: Ignore signature lines (like "x___Name___") — do not include them as fields.
 
 Return ONLY valid JSON, no markdown or explanation:
-{"editable":[{"name":"Date","value":"04 February 2026","autoFill":"date","page":1,"x":110,"y":148,"w":160,"h":14,"fontSize":10,"labelEndX":107}],"locked":[{"name":"Project Name","value":"Woodland Park MS Mod","page":1,"x":395,"y":148,"w":180,"h":14,"fontSize":10,"labelEndX":392}]}
+{"editable":[{"name":"Date","value":"04 February 2026","autoFill":"date","page":1,"x":110,"y":148,"w":160,"h":14,"fontSize":10}],"locked":[{"name":"Project Name","value":"Woodland Park MS Mod","page":1,"x":395,"y":148,"w":180,"h":14,"fontSize":10}]}
 
 autoFill values: "date" (for date fields) or "increment" (for report numbers). voiceEnabled=true for notes/observations fields.`;
 
