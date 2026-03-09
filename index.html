@@ -544,13 +544,7 @@ function CreateJob({user, onBack, onCreated}){
   const [fnConvention,setFnConvention]=useState(null); // AI-detected: {pattern, dateFormat, numberPadding}
   const [savingTpl,setSavingTpl]=useState(false);
   const [tplSaved,setTplSaved]=useState(false); // whether current parse was saved
-  const [showCleanupTips,setShowCleanupTips]=useState(false);
-  const trackParseAttempt=(fileName)=>{
-    const key="mdr_parse_"+fileName.toLowerCase().replace(/\.[^.]+$/,"").replace(/\s+/g,"_");
-    const count=parseInt(localStorage.getItem(key)||"0")+1;
-    localStorage.setItem(key,String(count));
-    if(count>=3)setShowCleanupTips(true);
-  };
+  const trackParseAttempt=()=>{};
 
   // Load saved templates on mount
   useEffect(()=>{
@@ -899,7 +893,6 @@ function CreateJob({user, onBack, onCreated}){
           <div style={{marginBottom:20}}>
             <label style={ls}>Report Naming Convention</label>
             <input type="text" value={reportTitle} onChange={e=>{setReportTitle(e.target.value);setFnConvention(prev=>prev?{...prev,pattern:e.target.value}:prev);}} style={fs}/>
-            <p style={{color:C.mut,fontSize:11,marginTop:4}}>This will be your naming convention going forward. The report number and date will auto-populate sequentially.</p>
           </div>
         )}
 
@@ -913,24 +906,6 @@ function CreateJob({user, onBack, onCreated}){
           </div>
         )}
 
-        {/* ── Template Cleanup Tips (shows after 3+ parse attempts on same file) ── */}
-        {showCleanupTips&&!parsing&&(
-          <div style={{background:"rgba(232,116,42,0.08)",border:`1px solid ${C.org}`,borderRadius:12,padding:"16px 20px",marginBottom:20}}>
-            <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
-              <div style={{fontWeight:700,fontSize:14,color:C.org,marginBottom:8}}>Template Cleanup Tips</div>
-              <button onClick={()=>setShowCleanupTips(false)} style={{background:"none",border:"none",color:C.mut,fontSize:18,cursor:"pointer",padding:0,lineHeight:1}}>&times;</button>
-            </div>
-            <p style={{color:C.lt,fontSize:13,margin:"0 0 10px",lineHeight:1.5}}>Looks like this template needs some cleanup. Hidden formatting, extra blank pages, or embedded form fields can interfere with field detection.</p>
-            <p style={{color:C.lt,fontSize:13,margin:"0 0 8px",lineHeight:1.5,fontWeight:600}}>Quick fix — paste this into Copilot or Gemini with your file:</p>
-            <div style={{background:C.inp,border:`1px solid ${C.brd}`,borderRadius:8,padding:"10px 12px",fontSize:12,color:C.mut,lineHeight:1.5,marginBottom:10,userSelect:"all",cursor:"text"}}>
-              Analyze this PDF template and create a clean version. Remove: hidden text layers, embedded form fields, blank continuation pages with little content. Keep the exact same visual layout, tables, headers, logos, and colors. Output as a new clean PDF.
-            </div>
-            <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-              <a href="https://copilot.microsoft.com" target="_blank" rel="noopener" style={{display:"inline-block",padding:"8px 16px",background:C.blu,color:"#fff",borderRadius:8,fontSize:13,fontWeight:600,textDecoration:"none"}}>Open Copilot</a>
-              <a href="https://gemini.google.com" target="_blank" rel="noopener" style={{display:"inline-block",padding:"8px 16px",background:C.blu,color:"#fff",borderRadius:8,fontSize:13,fontWeight:600,textDecoration:"none"}}>Open Gemini</a>
-            </div>
-          </div>
-        )}
 
         {/* ── Unified Field List ── */}
         {!parsing&&fields.length>0&&(
