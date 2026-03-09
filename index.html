@@ -749,7 +749,7 @@ function CreateJob({user, onBack, onCreated}){
   const ok=jn.trim();
 
   const create=async()=>{
-    if(!ok)return;setSaving(true);setErr("");
+    if(!ok){setErr("Job name is required.");return;}setSaving(true);setErr("");
     try{
       const es=effSch();
       // Use edited report title as the pattern — user can tweak what AI detected
@@ -1297,10 +1297,15 @@ function ReportEditor({job, user, onBack, reportDate}){
         setViewLoading(false);
         return;
       }
-      const tplResp=await fetch(`${SB_URL}/storage/v1/object/report-source-docs/${tplRecord.storage_path}`,{
+      let tplResp=await fetch(`${SB_URL}/storage/v1/object/report-source-docs/${tplRecord.storage_path}`,{
         headers:{apikey:SB_KEY,Authorization:`Bearer ${AUTH_TOKEN||SB_KEY}`}
       });
-      if(!tplResp.ok)throw new Error("Could not download template.");
+      // If auth fails, try refreshing the session and retry once
+      if(tplResp.status===401||tplResp.status===403){
+        const refreshed=await authGetSession();
+        if(refreshed){tplResp=await fetch(`${SB_URL}/storage/v1/object/report-source-docs/${tplRecord.storage_path}`,{headers:{apikey:SB_KEY,Authorization:`Bearer ${AUTH_TOKEN||SB_KEY}`}});}
+      }
+      if(!tplResp.ok)throw new Error("Could not download template ("+tplResp.status+"). Try signing out and back in.");
       const tplBytes=await tplResp.arrayBuffer();
       // Validate PDF magic bytes
       const header=new Uint8Array(tplBytes.slice(0,5));
@@ -1390,10 +1395,14 @@ function ReportEditor({job, user, onBack, reportDate}){
       // ── 1. Look up template ──
       const tplRecord=await db.getTemplate(job.id);
       if(!tplRecord||!tplRecord.storage_path)throw new Error("No template found. Upload a template in Job Settings first.");
-      const tplResp=await fetch(`${SB_URL}/storage/v1/object/report-source-docs/${tplRecord.storage_path}`,{
+      let tplResp=await fetch(`${SB_URL}/storage/v1/object/report-source-docs/${tplRecord.storage_path}`,{
         headers:{apikey:SB_KEY,Authorization:`Bearer ${AUTH_TOKEN||SB_KEY}`}
       });
-      if(!tplResp.ok)throw new Error("Could not download template file.");
+      if(tplResp.status===401||tplResp.status===403){
+        const refreshed=await authGetSession();
+        if(refreshed){tplResp=await fetch(`${SB_URL}/storage/v1/object/report-source-docs/${tplRecord.storage_path}`,{headers:{apikey:SB_KEY,Authorization:`Bearer ${AUTH_TOKEN||SB_KEY}`}});}
+      }
+      if(!tplResp.ok)throw new Error("Could not download template ("+tplResp.status+"). Try signing out and back in.");
       const tplBytes=await tplResp.arrayBuffer();
       const isPdfTemplate=tplRecord.file_type==="pdf";
       const isDocxTemplate=tplRecord.file_type==="docx"||tplRecord.file_type==="doc";
@@ -1943,6 +1952,8 @@ function ReportEditor({job, user, onBack, reportDate}){
 
 /* ── Job Detail (Job Dashboard) ── */
 function JobDetail({job, user, onBack, onDeleted}){
+  const [jdToast,setJdToast]=useState("");
+  const showToast=(msg)=>{setJdToast(msg);setTimeout(()=>setJdToast(""),3000);};
   const [showDel,setShowDel]=useState(false);
   const [deleting,setDeleting]=useState(false);
   const [showJobSet,setShowJobSet]=useState(false);
@@ -2088,6 +2099,7 @@ function JobDetail({job, user, onBack, onDeleted}){
 
   return(
     <div style={{minHeight:"100vh",background:C.bg,color:C.txt}}>
+      {jdToast&&<div style={{position:"fixed",top:60,left:"50%",transform:"translateX(-50%)",background:C.card,border:`1px solid ${C.ok}`,borderRadius:10,padding:"10px 20px",fontSize:14,fontWeight:600,color:C.ok,zIndex:9999}}>{jdToast}</div>}
       {/* Header */}
       <div style={{display:"flex",alignItems:"center",gap:12,padding:"16px 20px",borderBottom:`1px solid ${C.brd}`,background:C.card}}>
         <button onClick={onBack} style={{background:"none",border:"none",color:C.blu,fontSize:28,cursor:"pointer",padding:"8px 12px",lineHeight:1,borderRadius:8,minWidth:48,minHeight:48,display:"flex",alignItems:"center",justifyContent:"center"}}>←</button>
@@ -2878,9 +2890,9 @@ function Dashboard({user, onLogout}){
       <div style={{textAlign:"center",padding:"24px 20px 32px",color:C.mut,fontSize:12}}>
         <a href="#" onClick={e=>{e.preventDefault();setShowFairUse(true);}} style={{color:C.mut,textDecoration:"none"}}>Fair Use Agreement</a>
         <br/><br/>
-        <a href="#" onClick={e=>{e.preventDefault();alert("Terms coming soon");}} style={{color:C.mut,textDecoration:"none"}}>Terms of Service</a>
+        <span style={{color:C.mut,opacity:0.5,cursor:"default"}}>Terms of Service</span>
         <span style={{margin:"0 8px"}}>•</span>
-        <a href="#" onClick={e=>{e.preventDefault();alert("Privacy coming soon");}} style={{color:C.mut,textDecoration:"none"}}>Privacy Policy</a>
+        <span style={{color:C.mut,opacity:0.5,cursor:"default"}}>Privacy Policy</span>
       </div>
     </div>
   );
