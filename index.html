@@ -1505,42 +1505,65 @@ function WorkLogEditor({job, user, onBack, reportDate}){
       y-=10;
     }
 
-    // ── Photos Section — compact, 2 per row with contractor labels ──
-    const allPhotos=[];
-    contractors.forEach(c=>{(c.photos||[]).forEach(ph=>{allPhotos.push({contractor:c.name,data:ph.data,name:ph.name});});});
-    if(allPhotos.length>0){
-      ensureSpace(40);
-      page.drawRectangle({x:M,y:y-24,width:CW,height:24,color:rgb(.3,.3,.3)});
-      page.drawText("SITE PHOTOS",{x:M+8,y:y-16,size:11,font:fontB,color:rgb(1,1,1)});
-      y-=30;
-      const photoW=(CW-10)/2; // two columns with 10pt gap
-      const photoH=200; // max photo height per slot
-      let col=0;
-      for(const ph of allPhotos){
-        try{
-          const imgBytes=Uint8Array.from(atob(ph.data.split(",")[1]||""),c2=>c2.charCodeAt(0));
-          let img;
-          if(ph.data.includes("image/png"))img=await doc.embedPng(imgBytes);
-          else img=await doc.embedJpg(imgBytes);
-          // Each photo needs: label(16pt) + image(up to photoH) + gap(8pt)
-          const slotH=photoH+24;
-          if(col===0)ensureSpace(slotH);
-          const xPos=M+col*(photoW+10);
-          // Scale photo to fit in slot
-          const scl=Math.min(photoW/img.width,photoH/img.height,1);
-          const pw=img.width*scl,ph2=img.height*scl;
-          // Contractor label
-          page.drawText(ph.contractor,{x:xPos,y:y-12,size:9,font:fontB,color:rgb(.3,.3,.3)});
-          // Center image in slot
-          page.drawImage(img,{x:xPos+(photoW-pw)/2,y:y-16-ph2,width:pw,height:ph2});
-          // Light border around photo
-          page.drawRectangle({x:xPos+(photoW-pw)/2,y:y-16-ph2,width:pw,height:ph2,borderColor:rgb(.8,.8,.8),borderWidth:.5,color:undefined});
-          col++;
-          if(col>=2){col=0;y-=slotH;}
-        }catch(e){console.error("Photo embed error:",e);}
+    // ── Work Log Photos — Raken-style: grouped by contractor, 2-up, date stamps ──
+    const contractorsWithPhotos=contractors.filter(c=>(c.photos||[]).length>0);
+    if(contractorsWithPhotos.length>0){
+      // Section header bar
+      ensureSpace(50);
+      page.drawRectangle({x:M,y:y-30,width:CW,height:30,color:rgb(.45,.45,.45)});
+      page.drawText("Work Log Photos",{x:M+(CW-fontB.widthOfTextAtSize("Work Log Photos",14))/2,y:y-22,size:14,font:fontB,color:rgb(.92,.57,.17)});
+      y-=40;
+
+      const imgW=Math.floor((CW-8)/2); // two images side by side with 8pt gap
+      const imgH=160; // max height per photo
+
+      for(const c of contractorsWithPhotos){
+        const hrs=parseFloat(c.hours)||0;
+        const qty=parseInt(c.quantity)||1;
+        // Contractor label row: "Bravo Concrete:  | QTY: 8 | HRS: 0.0"
+        ensureSpace(imgH+30);
+        page.drawText(c.name+":",{x:M+4,y:y-14,size:12,font:fontB,color:rgb(.15,.15,.15)});
+        const labelW=fontB.widthOfTextAtSize(c.name+":",12);
+        page.drawText(`  | QTY: `,{x:M+4+labelW,y:y-14,size:10,font,color:rgb(.5,.5,.5)});
+        const q1W=font.widthOfTextAtSize(`  | QTY: `,10);
+        page.drawText(String(qty),{x:M+4+labelW+q1W,y:y-14,size:10,font:fontB,color:rgb(.92,.57,.17)});
+        const q2W=fontB.widthOfTextAtSize(String(qty),10);
+        page.drawText(` | HRS: `,{x:M+4+labelW+q1W+q2W,y:y-14,size:10,font,color:rgb(.5,.5,.5)});
+        const h1W=font.widthOfTextAtSize(` | HRS: `,10);
+        page.drawText(hrs.toFixed(1),{x:M+4+labelW+q1W+q2W+h1W,y:y-14,size:10,font:fontB,color:rgb(.92,.57,.17)});
+        y-=22;
+
+        // Draw photos 2-up
+        const photos=c.photos||[];
+        let pi=0;
+        while(pi<photos.length){
+          const rowPhotos=photos.slice(pi,pi+2);
+          ensureSpace(imgH+10);
+          for(let ri=0;ri<rowPhotos.length;ri++){
+            const ph=rowPhotos[ri];
+            try{
+              const imgBytes=Uint8Array.from(atob(ph.data.split(",")[1]||""),ch=>ch.charCodeAt(0));
+              let img;
+              if(ph.data.includes("image/png"))img=await doc.embedPng(imgBytes);
+              else img=await doc.embedJpg(imgBytes);
+              const xPos=M+ri*(imgW+8);
+              // Scale to fit slot while preserving aspect ratio
+              const scl=Math.min(imgW/img.width,imgH/img.height,1);
+              const pw=img.width*scl,ph2=img.height*scl;
+              // Draw image
+              page.drawImage(img,{x:xPos,y:y-ph2,width:pw,height:ph2});
+              // Date/time stamp overlay on bottom-left (dark semi-transparent bar)
+              const stampH=14;
+              page.drawRectangle({x:xPos,y:y-ph2,width:pw,height:stampH,color:rgb(.2,.2,.2),opacity:0.7});
+              const stamp=ph.ts?new Date(ph.ts).toLocaleString("en-US",{month:"2-digit",day:"2-digit",year:"2-digit",hour:"2-digit",minute:"2-digit",hour12:true,timeZone:tz}):"";
+              if(stamp)page.drawText(stamp,{x:xPos+4,y:y-ph2+3,size:7,font,color:rgb(1,1,1)});
+            }catch(e){console.error("Photo embed error:",e);}
+          }
+          pi+=rowPhotos.length;
+          y-=(imgH+8);
+        }
+        y-=6; // gap between contractor photo groups
       }
-      if(col===1)y-=(photoH+24); // finished mid-row, advance past it
-      y-=10;
     }
 
     // Add footers to all pages
