@@ -1676,7 +1676,10 @@ function WorkLogEditor({job, user, onBack, reportDate}){
                 <div style={{marginBottom:14}}>
                   <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:8}}>
                     <label style={{fontSize:12,color:C.lt,fontWeight:600}}>Photos ({(c.photos||[]).length})</label>
-                    <button onClick={()=>{setPhotoTarget(c.id);setTimeout(()=>photoRef.current?.click(),100);}} style={{padding:"6px 12px",background:C.org,border:"none",borderRadius:6,color:"#fff",fontSize:12,fontWeight:600,cursor:"pointer"}}>+ Add Photo</button>
+                    <div style={{display:"flex",gap:6}}>
+                      <button onClick={()=>{setPhotoTarget(c.id);setTimeout(()=>{photoRef.current?.setAttribute("capture","environment");photoRef.current?.click();},100);}} style={{padding:"6px 10px",background:C.org,border:"none",borderRadius:6,color:"#fff",fontSize:12,fontWeight:600,cursor:"pointer"}}>📷 Photo</button>
+                      <button onClick={()=>{setPhotoTarget(c.id);setTimeout(()=>{photoRef.current?.removeAttribute("capture");photoRef.current?.click();},100);}} style={{padding:"6px 10px",background:C.card,border:`1px solid ${C.brd}`,borderRadius:6,color:C.lt,fontSize:12,fontWeight:600,cursor:"pointer"}}>🖼️ Library</button>
+                    </div>
                   </div>
                   {(c.photos||[]).length>0&&(
                     <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
@@ -1735,7 +1738,7 @@ function WorkLogEditor({job, user, onBack, reportDate}){
       </div>
 
       {/* Hidden photo input */}
-      <input ref={photoRef} type="file" accept="image/*" capture="environment" style={{display:"none"}} onChange={handlePhotoUpload}/>
+      <input ref={photoRef} type="file" accept="image/*" style={{display:"none"}} onChange={handlePhotoUpload}/>
 
       {/* Toast */}
       {toast&&<div style={{position:"fixed",top:60,left:"50%",transform:"translateX(-50%)",background:C.card,border:`1px solid ${C.ok}`,borderRadius:10,padding:"10px 20px",fontSize:14,fontWeight:600,color:C.ok,zIndex:9999}}>{toast}</div>}
