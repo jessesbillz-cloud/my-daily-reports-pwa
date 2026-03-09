@@ -3,12 +3,12 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>MDR Admin — Template Provisioning</title>
+<title>MDR Admin — Drop Template to User</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0a0a0a; color: #e0e0e0; min-height: 100vh; padding: 20px; }
-  .container { max-width: 700px; margin: 0 auto; }
+  .container { max-width: 900px; margin: 0 auto; }
   h1 { font-size: 22px; margin-bottom: 8px; color: #fff; }
   .subtitle { color: #888; font-size: 14px; margin-bottom: 28px; }
   .card { background: #161616; border: 1px solid #2a2a2a; border-radius: 12px; padding: 24px; margin-bottom: 20px; }
@@ -16,31 +16,46 @@
   label { display: block; font-size: 13px; font-weight: 600; color: #999; margin-bottom: 6px; }
   input[type="text"], input[type="password"] { width: 100%; padding: 10px 14px; background: #1a1a1a; border: 1px solid #333; border-radius: 8px; color: #e0e0e0; font-size: 14px; margin-bottom: 14px; }
   input[type="file"] { margin-bottom: 14px; }
+  textarea { width: 100%; padding: 10px 14px; background: #1a1a1a; border: 1px solid #333; border-radius: 8px; color: #e0e0e0; font-size: 13px; font-family: 'SF Mono', Monaco, monospace; margin-bottom: 14px; resize: vertical; }
   .hint { font-size: 12px; color: #666; margin-top: -10px; margin-bottom: 14px; }
-  button { padding: 12px 24px; background: #2563eb; color: #fff; border: none; border-radius: 8px; font-size: 15px; font-weight: 600; cursor: pointer; width: 100%; }
+  button { padding: 12px 24px; background: #2563eb; color: #fff; border: none; border-radius: 8px; font-size: 15px; font-weight: 600; cursor: pointer; width: 100%; margin-bottom: 8px; }
   button:hover { background: #1d4ed8; }
   button:disabled { opacity: 0.4; cursor: not-allowed; }
-  .log { background: #0d0d0d; border: 1px solid #222; border-radius: 8px; padding: 14px; font-family: 'SF Mono', Monaco, monospace; font-size: 12px; line-height: 1.6; max-height: 400px; overflow-y: auto; white-space: pre-wrap; }
+  .btn-secondary { background: #333; }
+  .btn-secondary:hover { background: #444; }
+  .btn-green { background: #16a34a; }
+  .btn-green:hover { background: #15803d; }
+  .log { background: #0d0d0d; border: 1px solid #222; border-radius: 8px; padding: 14px; font-family: 'SF Mono', Monaco, monospace; font-size: 12px; line-height: 1.6; max-height: 300px; overflow-y: auto; white-space: pre-wrap; }
   .log .ok { color: #22c55e; }
   .log .err { color: #ef4444; }
   .log .info { color: #60a5fa; }
-  .log .warn { color: #f59e0b; }
-  .field-list { margin-top: 12px; }
-  .field-item { display: flex; justify-content: space-between; align-items: center; padding: 8px 12px; border-bottom: 1px solid #222; font-size: 13px; }
-  .field-item:last-child { border-bottom: none; }
-  .badge { font-size: 11px; padding: 2px 8px; border-radius: 6px; font-weight: 600; }
+  .user-info { background: #1a1a1a; border: 1px solid #333; border-radius: 8px; padding: 12px 14px; margin-bottom: 14px; font-size: 13px; }
+  .user-info strong { color: #fff; }
+  .preview-container { position: relative; display: inline-block; margin-bottom: 12px; }
+  .preview-container canvas { border: 1px solid #333; border-radius: 4px; }
+  .field-overlay { position: absolute; border: 2px solid #e8742a; background: rgba(232,116,42,0.12); border-radius: 3px; cursor: pointer; }
+  .field-overlay:hover { background: rgba(232,116,42,0.3); }
+  .field-overlay .field-label { position: absolute; top: -18px; left: -1px; font-size: 10px; font-weight: 700; background: #e8742a; color: #fff; padding: 1px 6px; border-radius: 3px 3px 0 0; white-space: nowrap; pointer-events: none; }
+  .field-overlay.locked { border-color: #f59e0b; background: rgba(245,158,11,0.1); }
+  .field-overlay.locked .field-label { background: #f59e0b; }
+  .field-overlay.auto { border-color: #22c55e; background: rgba(34,197,94,0.1); }
+  .field-overlay.auto .field-label { background: #22c55e; }
+  .page-nav { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
+  .page-nav button { width: auto; padding: 8px 16px; font-size: 13px; }
+  .field-table { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 12px; }
+  .field-table th { text-align: left; padding: 8px 10px; border-bottom: 2px solid #333; color: #999; font-weight: 600; }
+  .field-table td { padding: 6px 10px; border-bottom: 1px solid #222; }
+  .badge { font-size: 11px; padding: 2px 8px; border-radius: 6px; font-weight: 600; display: inline-block; }
   .badge.edit { background: #1e3a5f; color: #60a5fa; }
   .badge.lock { background: #3b2815; color: #f59e0b; }
   .badge.auto { background: #14332b; color: #22c55e; }
-  .user-info { background: #1a1a1a; border: 1px solid #333; border-radius: 8px; padding: 12px 14px; margin-bottom: 14px; font-size: 13px; }
-  .user-info strong { color: #fff; }
 </style>
 </head>
 <body>
 
 <div class="container">
-  <h1>MDR Admin — Template Provisioning</h1>
-  <p class="subtitle">Parse a template and drop it into a user's saved templates</p>
+  <h1>MDR Admin — Drop Template to User</h1>
+  <p class="subtitle">Preview the parsed template, then drop it into a user's saved templates</p>
 
   <div class="card">
     <h2>1. Auth</h2>
@@ -50,35 +65,56 @@
   </div>
 
   <div class="card">
-    <h2>2. Target User</h2>
+    <h2>2. Find User</h2>
     <label>User Email</label>
-    <input type="text" id="userEmail" placeholder="user@example.com" />
-    <button onclick="lookupUser()" id="lookupBtn" style="margin-bottom:12px;background:#333;">Look Up User</button>
+    <input type="text" id="userEmail" placeholder="ryan@example.com" />
+    <button onclick="lookupUser()" id="lookupBtn" class="btn-secondary">Look Up User</button>
     <div id="userInfo" style="display:none;" class="user-info"></div>
     <input type="hidden" id="userId" />
   </div>
 
   <div class="card">
-    <h2>3. Template File</h2>
-    <label>Upload PDF or DOCX</label>
-    <input type="file" id="templateFile" accept=".pdf,.docx" />
-    <label>Template Name (optional — defaults to filename)</label>
+    <h2>3. Template</h2>
+    <label>Template File (PDF or DOCX)</label>
+    <input type="file" id="templateFile" accept=".pdf,.docx" onchange="onFileChange()" />
+
+    <label>Template Name</label>
     <input type="text" id="templateName" placeholder="Daily Inspection Report" />
+    <div class="hint">Display name the user sees when picking a saved template.</div>
+
+    <label>Field Config JSON</label>
+    <textarea id="fieldConfig" rows="12" placeholder='[{"name":"Date","value":"","mode":"auto-date","page":1,"x":100,"y":50,"w":80,"h":14,"fontSize":12}, ...]'></textarea>
+    <div class="hint">Paste the flat field array from your Claude session. Include the filenameConvention entry if applicable.</div>
+
+    <button onclick="generatePreview()" class="btn-secondary" id="previewBtn">Preview Template with Fields</button>
   </div>
 
-  <div class="card">
-    <h2>4. Provision</h2>
-    <button onclick="provision()" id="provisionBtn">Parse & Save to User Account</button>
+  <!-- Preview Section -->
+  <div class="card" id="previewCard" style="display:none;">
+    <h2>4. Preview</h2>
+    <div class="page-nav" id="pageNav"></div>
+    <div style="overflow-x:auto;">
+      <div class="preview-container" id="previewContainer"></div>
+    </div>
+
+    <table class="field-table" id="fieldTable">
+      <thead>
+        <tr><th>Field</th><th>Mode</th><th>Value</th><th>Position</th></tr>
+      </thead>
+      <tbody id="fieldTableBody"></tbody>
+    </table>
+  </div>
+
+  <!-- Drop to User -->
+  <div class="card" id="dropCard" style="display:none;">
+    <h2>5. Drop to User</h2>
+    <div id="dropSummary" style="margin-bottom:16px;font-size:13px;color:#999;"></div>
+    <button onclick="dropTemplate()" id="dropBtn" class="btn-green">Looks Good — Drop Template into User Account</button>
   </div>
 
   <div class="card" id="logCard" style="display:none;">
     <h2>Log</h2>
     <div class="log" id="log"></div>
-  </div>
-
-  <div class="card" id="fieldsCard" style="display:none;">
-    <h2>Detected Fields</h2>
-    <div class="field-list" id="fieldList"></div>
   </div>
 </div>
 
@@ -86,23 +122,20 @@
 const SB_URL = "https://wluvkmpncafugdbunlkw.supabase.co";
 const SB_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndsdXZrbXBuY2FmdWdkYnVubGt3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzIzMDU1MTUsImV4cCI6MjA4Nzg4MTUxNX0.HZpQ2xVGpf4EQ0BVDmIEuPqW5T_eNG5OqBNAqT03rH8";
 
-// Set pdf.js worker
 if (window.pdfjsLib) {
   pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
 }
 
-function getServiceKey() {
-  return document.getElementById("serviceKey").value.trim();
-}
+let pdfDoc = null;
+let pdfBytes = null;
+let currentPage = 1;
+let parsedFields = null;
+
+function getServiceKey() { return document.getElementById("serviceKey").value.trim(); }
 
 function serviceHeaders() {
   const sk = getServiceKey();
-  return {
-    "Content-Type": "application/json",
-    apikey: SB_KEY,
-    Authorization: `Bearer ${sk}`,
-    Prefer: "return=representation"
-  };
+  return { "Content-Type": "application/json", apikey: SB_KEY, Authorization: `Bearer ${sk}`, Prefer: "return=representation" };
 }
 
 function log(msg, cls = "") {
@@ -123,7 +156,6 @@ async function lookupUser() {
 
   document.getElementById("lookupBtn").disabled = true;
   try {
-    // Use auth admin API to find user by email
     const r = await fetch(`${SB_URL}/auth/v1/admin/users?page=1&per_page=50`, {
       headers: { apikey: SB_KEY, Authorization: `Bearer ${sk}` }
     });
@@ -144,215 +176,215 @@ async function lookupUser() {
   }
 }
 
-async function provision() {
+async function onFileChange() {
+  const fileInput = document.getElementById("templateFile");
+  const file = fileInput.files?.[0];
+  if (!file) return;
+
+  // Auto-fill template name from filename
+  const nameInput = document.getElementById("templateName");
+  if (!nameInput.value.trim()) {
+    nameInput.value = file.name.replace(/\.[^.]+$/, "");
+  }
+
+  // Load PDF for preview
+  const ext = file.name.split(".").pop().toLowerCase();
+  if (ext === "pdf" && window.pdfjsLib) {
+    try {
+      pdfBytes = new Uint8Array(await file.arrayBuffer());
+      pdfDoc = await pdfjsLib.getDocument({ data: pdfBytes.slice() }).promise;
+    } catch (e) {
+      console.error("PDF load error:", e);
+      pdfDoc = null;
+    }
+  } else {
+    pdfDoc = null;
+    pdfBytes = null;
+  }
+}
+
+async function generatePreview() {
+  const fieldConfigRaw = document.getElementById("fieldConfig").value.trim();
+  if (!fieldConfigRaw) { alert("Paste the field config JSON first"); return; }
+
+  try {
+    parsedFields = JSON.parse(fieldConfigRaw);
+    if (!Array.isArray(parsedFields)) throw new Error("Must be an array");
+  } catch (e) {
+    alert("Invalid JSON: " + e.message);
+    return;
+  }
+
+  const regularFields = parsedFields.filter(f => !f._type);
+  const convention = parsedFields.find(f => f._type === "filenameConvention");
+
+  // Show field table
+  const tbody = document.getElementById("fieldTableBody");
+  tbody.innerHTML = "";
+  regularFields.forEach(f => {
+    const modeClass = f.mode === "lock" ? "lock" : (f.mode === "auto-date" || f.mode === "auto-num") ? "auto" : "edit";
+    const modeLabel = f.mode === "auto-date" ? "Auto-Date" : f.mode === "auto-num" ? "Auto-#" : f.mode === "lock" ? "Locked" : "Editable";
+    const pos = f.page ? `pg${f.page} (${f.x}, ${f.y})` : "—";
+    tbody.innerHTML += `<tr>
+      <td style="color:#fff;font-weight:600;">${f.name}</td>
+      <td><span class="badge ${modeClass}">${modeLabel}</span></td>
+      <td style="color:#888;">${f.value || "—"}</td>
+      <td style="color:#666;font-size:11px;">${pos}</td>
+    </tr>`;
+  });
+  if (convention) {
+    tbody.innerHTML += `<tr>
+      <td style="color:#e8742a;font-weight:600;">Filename Convention</td>
+      <td><span class="badge auto">pattern</span></td>
+      <td style="color:#888;">${convention.pattern || "—"}</td>
+      <td style="color:#666;font-size:11px;">date: ${convention.dateFormat || "none"}, pad: ${convention.numberPadding || 0}</td>
+    </tr>`;
+  }
+
+  document.getElementById("previewCard").style.display = "block";
+
+  // Render PDF preview with field overlays
+  if (pdfDoc) {
+    currentPage = 1;
+    await renderPage(currentPage);
+    buildPageNav();
+  } else {
+    document.getElementById("previewContainer").innerHTML = '<div style="padding:20px;color:#888;text-align:center;">PDF preview not available (upload a PDF file to see field positions overlaid)</div>';
+    document.getElementById("pageNav").innerHTML = "";
+  }
+
+  // Show drop section
+  document.getElementById("dropCard").style.display = "block";
+  const userName = document.getElementById("userInfo").style.display !== "none"
+    ? document.getElementById("userInfo").querySelector("strong")?.textContent || "user"
+    : "user";
+  const fileName = document.getElementById("templateFile").files?.[0]?.name || "template";
+  document.getElementById("dropSummary").innerHTML =
+    `<strong style="color:#fff;">${regularFields.length}</strong> fields mapped on <strong style="color:#fff;">${fileName}</strong>` +
+    (convention ? ` with filename pattern <strong style="color:#e8742a;">${convention.pattern}</strong>` : "");
+}
+
+function buildPageNav() {
+  if (!pdfDoc || pdfDoc.numPages <= 1) { document.getElementById("pageNav").innerHTML = ""; return; }
+  const nav = document.getElementById("pageNav");
+  nav.innerHTML = "";
+  for (let p = 1; p <= pdfDoc.numPages; p++) {
+    const btn = document.createElement("button");
+    btn.textContent = `Page ${p}`;
+    btn.className = p === currentPage ? "" : "btn-secondary";
+    btn.style.flex = "0 0 auto";
+    btn.onclick = async () => { currentPage = p; await renderPage(p); buildPageNav(); };
+    nav.appendChild(btn);
+  }
+}
+
+async function renderPage(pageNum) {
+  if (!pdfDoc) return;
+  const page = await pdfDoc.getPage(pageNum);
+  const scale = 1.5;
+  const viewport = page.getViewport({ scale });
+
+  const container = document.getElementById("previewContainer");
+
+  // Create or reuse canvas
+  let canvas = container.querySelector("canvas");
+  if (!canvas) { canvas = document.createElement("canvas"); container.prepend(canvas); }
+  canvas.width = viewport.width;
+  canvas.height = viewport.height;
+  await page.render({ canvasContext: canvas.getContext("2d"), viewport }).promise;
+
+  // Remove old overlays
+  container.querySelectorAll(".field-overlay").forEach(el => el.remove());
+
+  // Add field overlays for this page
+  if (!parsedFields) return;
+  const pageFields = parsedFields.filter(f => !f._type && f.page === pageNum && f.x != null && f.y != null);
+  pageFields.forEach(f => {
+    const div = document.createElement("div");
+    const modeClass = f.mode === "lock" ? "locked" : (f.mode === "auto-date" || f.mode === "auto-num") ? "auto" : "";
+    div.className = `field-overlay ${modeClass}`;
+    div.style.left = (f.x * scale) + "px";
+    div.style.top = (f.y * scale) + "px";
+    div.style.width = ((f.w || 80) * scale) + "px";
+    div.style.height = ((f.h || 14) * scale) + "px";
+    div.title = `${f.name} (${f.mode}) — ${f.value || "empty"}`;
+
+    const label = document.createElement("div");
+    label.className = "field-label";
+    label.textContent = f.name;
+    div.appendChild(label);
+
+    container.appendChild(div);
+  });
+}
+
+async function dropTemplate() {
   const sk = getServiceKey();
   const userId = document.getElementById("userId").value;
   const fileInput = document.getElementById("templateFile");
   const file = fileInput.files?.[0];
-  const customName = document.getElementById("templateName").value.trim();
+  const templateName = document.getElementById("templateName").value.trim();
 
   if (!sk) { alert("Enter service role key"); return; }
   if (!userId) { alert("Look up the target user first"); return; }
   if (!file) { alert("Select a template file"); return; }
+  if (!templateName) { alert("Enter a template name"); return; }
+  if (!parsedFields) { alert("Preview first to validate fields"); return; }
 
-  const btn = document.getElementById("provisionBtn");
+  const btn = document.getElementById("dropBtn");
   btn.disabled = true;
-  btn.textContent = "Processing...";
+  btn.textContent = "Dropping...";
   document.getElementById("log").innerHTML = "";
-  document.getElementById("fieldsCard").style.display = "none";
 
   const ext = file.name.split(".").pop().toLowerCase();
-  const templateName = customName || file.name.replace(/\.[^.]+$/, "");
+  const u8 = pdfBytes || new Uint8Array(await file.arrayBuffer());
 
   try {
-    // Step 1: Read file
-    log("Reading file: " + file.name, "info");
-    const arrayBuffer = await file.arrayBuffer();
-    const u8 = new Uint8Array(arrayBuffer);
-
-    // Step 2: Extract text items (PDF) or prepare base64 (DOCX)
-    let parseBody = { file_name: file.name };
-
-    if (ext === "pdf") {
-      log("Extracting text from PDF with pdf.js...", "info");
-      const pdfDoc = await pdfjsLib.getDocument({ data: u8.slice() }).promise;
-      const textItems = [];
-      for (let p = 1; p <= pdfDoc.numPages; p++) {
-        const page = await pdfDoc.getPage(p);
-        const content = await page.getTextContent();
-        const vp = page.getViewport({ scale: 1 });
-        content.items.forEach(item => {
-          if (!item.str || !item.str.trim()) return;
-          const tx = item.transform || [];
-          textItems.push({
-            str: item.str,
-            x: Math.round(tx[4] || 0),
-            y: Math.round(vp.height - (tx[5] || 0) - (item.height || 10)),
-            w: Math.round(item.width || 0),
-            h: Math.round(item.height || 10),
-            page: p,
-            fontSize: Math.round(tx[0] || 12),
-            bold: /bold/i.test(item.fontName || "")
-          });
-        });
-      }
-      log(`Extracted ${textItems.length} text items from ${pdfDoc.numPages} pages`, "ok");
-      parseBody.text_items = textItems;
-    } else {
-      log("Preparing DOCX for parsing...", "info");
-      // Convert to base64
-      const chunks = [];
-      for (let i = 0; i < u8.length; i += 8192) {
-        chunks.push(String.fromCharCode.apply(null, u8.subarray(i, i + 8192)));
-      }
-      parseBody.docx_base64 = btoa(chunks.join(""));
-      log("DOCX encoded (" + Math.round(u8.length / 1024) + " KB)", "ok");
-    }
-
-    // Step 3: Call parse-template edge function
-    log("Calling parse-template edge function (AI analysis)...", "info");
-    const parseResp = await fetch(`${SB_URL}/functions/v1/parse-template`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        apikey: SB_KEY,
-        Authorization: `Bearer ${sk}`
-      },
-      body: JSON.stringify(parseBody)
-    });
-
-    if (!parseResp.ok) {
-      const errText = await parseResp.text();
-      throw new Error(`parse-template failed (${parseResp.status}): ${errText}`);
-    }
-
-    const parsed = await parseResp.json();
-    if (parsed.error) throw new Error("Parse error: " + parsed.error);
-
-    const editable = parsed.editable || [];
-    const locked = parsed.locked || [];
-    const convention = parsed.filenameConvention || null;
-    log(`Parsed: ${editable.length} editable + ${locked.length} locked fields`, "ok");
-    if (convention) {
-      log(`Filename convention: ${convention.pattern} (date: ${convention.dateFormat || "none"}, padding: ${convention.numberPadding || 0})`, "info");
-    }
-
-    // Display fields
-    const fieldList = document.getElementById("fieldList");
-    fieldList.innerHTML = "";
-    document.getElementById("fieldsCard").style.display = "block";
-    editable.forEach(f => {
-      const type = f.autoFill === "date" ? "auto" : f.autoFill === "increment" ? "auto" : "edit";
-      const label = f.autoFill ? `auto-${f.autoFill}` : "editable";
-      fieldList.innerHTML += `<div class="field-item"><span>${f.name}</span><span class="badge ${type}">${label}</span></div>`;
-    });
-    locked.forEach(f => {
-      fieldList.innerHTML += `<div class="field-item"><span>${f.name}</span><span class="badge lock">locked</span></div>`;
-    });
-
-    // Step 4: Upload template file to storage
+    log("Uploading file to storage...", "info");
     const storagePath = `${userId}/saved-templates/${Date.now()}_${file.name}`;
-    log(`Uploading to storage: ${storagePath}`, "info");
-
     const contentType = ext === "pdf" ? "application/pdf" : "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+
     let upResp = await fetch(`${SB_URL}/storage/v1/object/report-source-docs/${storagePath}`, {
       method: "POST",
-      headers: {
-        apikey: SB_KEY,
-        Authorization: `Bearer ${sk}`,
-        "Content-Type": contentType
-      },
+      headers: { apikey: SB_KEY, Authorization: `Bearer ${sk}`, "Content-Type": contentType },
       body: new Blob([u8], { type: contentType })
     });
-    // If POST fails (object exists), try PUT
     if (!upResp.ok) {
       upResp = await fetch(`${SB_URL}/storage/v1/object/report-source-docs/${storagePath}`, {
         method: "PUT",
-        headers: {
-          apikey: SB_KEY,
-          Authorization: `Bearer ${sk}`,
-          "Content-Type": contentType
-        },
+        headers: { apikey: SB_KEY, Authorization: `Bearer ${sk}`, "Content-Type": contentType },
         body: new Blob([u8], { type: contentType })
       });
     }
-    if (!upResp.ok) {
-      const errText = await upResp.text();
-      throw new Error(`Storage upload failed (${upResp.status}): ${errText}`);
-    }
-    log("File uploaded to storage", "ok");
+    if (!upResp.ok) throw new Error(`Storage upload failed (${upResp.status}): ${await upResp.text()}`);
+    log("File uploaded", "ok");
 
-    // Step 5: Build field_config as flat array (same format the app uses internally)
-    // Each field has: name, value, mode, page, x, y, w, h, fontSize, multiline, voiceEnabled
-    const NOTES_KW = ["notes", "observations", "comments"];
-    const isNotes = (n) => NOTES_KW.some(k => (n || "").toLowerCase().includes(k));
-    const seenNames = new Set();
-    let notesAdded = false;
-    const flatFields = [];
-    const addField = (f, mode) => {
-      const key = (f.name || "").toLowerCase().trim();
-      if (seenNames.has(key)) return;
-      if (isNotes(f.name)) { if (notesAdded) return; notesAdded = true; }
-      seenNames.add(key);
-      flatFields.push({
-        name: f.name, value: f.value || "", mode,
-        page: f.page, x: f.x, y: f.y, w: f.w, h: f.h,
-        fontSize: f.fontSize, multiline: f.multiline || false,
-        voiceEnabled: f.voiceEnabled || false
-      });
-    };
-    editable.forEach(f => {
-      let mode = "edit";
-      if (f.autoFill === "date") mode = "auto-date";
-      else if (f.autoFill === "increment") mode = "auto-num";
-      addField(f, mode);
-    });
-    locked.forEach(f => addField(f, "lock"));
-
-    // Store as object with fields array + convention (matches app's saved template format)
-    const fieldConfig = flatFields;
-    // Attach convention separately so app can extract it
-    const savedConvention = convention || null;
-
-    // Step 6: Insert into saved_templates
-    log("Saving to saved_templates...", "info");
-    // Attach convention metadata at the end of the fields array as a special entry
-    // The app will extract it when loading the saved template
-    if (savedConvention) {
-      flatFields.push({ _type: "filenameConvention", ...savedConvention });
-    }
-
-    const savedData = {
-      user_id: userId,
-      name: templateName,
-      original_filename: file.name,
-      file_type: ext,
-      field_config: flatFields,
-      storage_path: storagePath
-    };
-
+    log("Inserting into saved_templates...", "info");
     const saveResp = await fetch(`${SB_URL}/rest/v1/saved_templates`, {
       method: "POST",
       headers: serviceHeaders(),
-      body: JSON.stringify(savedData)
+      body: JSON.stringify({
+        user_id: userId,
+        name: templateName,
+        original_filename: file.name,
+        file_type: ext,
+        field_config: parsedFields,
+        storage_path: storagePath
+      })
     });
 
-    if (!saveResp.ok) {
-      const errBody = await saveResp.text();
-      throw new Error(`saved_templates insert failed (${saveResp.status}): ${errBody}`);
-    }
-
-    const savedResult = await saveResp.json();
-    const savedId = savedResult?.[0]?.id || "unknown";
-    log(`\nSaved template "${templateName}" (ID: ${savedId})`, "ok");
-    log(`User can now select this template when creating a new job.`, "ok");
+    if (!saveResp.ok) throw new Error(`Insert failed (${saveResp.status}): ${await saveResp.text()}`);
+    const result = await saveResp.json();
+    const savedId = result?.[0]?.id || "unknown";
+    log(`\nTemplate "${templateName}" dropped into user account (ID: ${savedId})`, "ok");
+    log("User can now select it when creating a new job.", "ok");
     log("\nDone!", "ok");
 
   } catch (e) {
     log("\nERROR: " + e.message, "err");
   } finally {
     btn.disabled = false;
-    btn.textContent = "Parse & Save to User Account";
+    btn.textContent = "Looks Good — Drop Template into User Account";
   }
 }
 </script>
