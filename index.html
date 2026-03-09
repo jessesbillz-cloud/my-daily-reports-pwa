@@ -2890,9 +2890,9 @@ function Dashboard({user, onLogout}){
       <div style={{textAlign:"center",padding:"24px 20px 32px",color:C.mut,fontSize:12}}>
         <a href="#" onClick={e=>{e.preventDefault();setShowFairUse(true);}} style={{color:C.mut,textDecoration:"none"}}>Fair Use Agreement</a>
         <br/><br/>
-        <span style={{color:C.mut,opacity:0.5,cursor:"default"}}>Terms of Service</span>
+        <a href="#" onClick={e=>{e.preventDefault();alert("Terms of Service coming soon");}} style={{color:C.mut,textDecoration:"none"}}>Terms of Service</a>
         <span style={{margin:"0 8px"}}>•</span>
-        <span style={{color:C.mut,opacity:0.5,cursor:"default"}}>Privacy Policy</span>
+        <a href="#" onClick={e=>{e.preventDefault();alert("Privacy Policy coming soon");}} style={{color:C.mut,textDecoration:"none"}}>Privacy Policy</a>
       </div>
     </div>
   );
