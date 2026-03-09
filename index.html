@@ -604,16 +604,21 @@ function CreateJob({user, onBack, onCreated}){
     trackParseAttempt(fileName);
     try{
       // Step 1: Extract real text positions client-side with pdf.js
+      console.log("[parseFields] Step 1: extracting text from PDF...");
       const textItems=await extractPdfTextStructure(new Uint8Array(buf));
+      console.log("[parseFields] Extracted",textItems.length,"text items");
       // Step 2: Send text items (not base64 PDF) to edge function for semantic mapping
       const payload={text_items:textItems,file_name:fileName};
+      console.log("[parseFields] Step 2: calling edge function, payload size:",JSON.stringify(payload).length);
       const resp=await fetch(`${SB_URL}/functions/v1/parse-template`,{
         method:"POST",
         headers:{"Content-Type":"application/json","Authorization":"Bearer "+SB_KEY,"apikey":SB_KEY},
         body:JSON.stringify(payload)
       });
-      if(!resp.ok){const errText=await resp.text();throw new Error("Parse API "+resp.status+": "+errText);}
+      console.log("[parseFields] Edge function responded:",resp.status);
+      if(!resp.ok){const errText=await resp.text();console.error("[parseFields] Error body:",errText);throw new Error("Parse API "+resp.status+": "+errText);}
       const parsed=await resp.json();
+      console.log("[parseFields] Parsed result keys:",Object.keys(parsed));
       if(parsed.error)throw new Error(parsed.error);
       // Merge editable + locked into one unified list (preserve coords for PDF fill)
       const all=[];const seenNames=new Set();
