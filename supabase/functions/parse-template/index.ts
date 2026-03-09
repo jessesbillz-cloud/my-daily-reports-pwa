@@ -152,7 +152,7 @@ For each field label found, return:
 - "name": Clean field name (e.g. "Date", "Signature Date", "Project Name", "IOR Notes")
 - "category": "editable" or "locked"
 - "layout": "inline" (value is in the adjacent cell or after the label on same line) or "below" (value area is below the label)
-- "autoFill": "date" for ALL date fields (including signature dates), "increment" for report number fields, null otherwise
+- "autoFill": "date" for ALL date fields (including signature dates), "increment" for report number fields, "name" for prepared-by/inspector/superintendent name fields that should auto-fill with the user's name, null otherwise
 - "voiceEnabled": true for notes/observations/comments/activities fields, false otherwise
 - "multiline": true for notes/observations/comments/activities fields, false otherwise
 - "valueText": If you can identify the current value text near this label, include the exact str. Otherwise empty string.

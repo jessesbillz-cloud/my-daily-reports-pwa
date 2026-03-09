@@ -274,6 +274,33 @@ const db = {
     const r=await fetch(`${SB_URL}/rest/v1/saved_templates?id=eq.${id}`,{method:"DELETE",headers:this._h()});
     if(!r.ok)throw new Error("Delete failed");return true;
   },
+  // Company lookup — search by name (case-insensitive via ilike)
+  async searchCompanies(query){
+    if(!query||query.trim().length<2)return[];
+    const enc=encodeURIComponent(query.trim());
+    const r=await fetch(`${SB_URL}/rest/v1/companies?name=ilike.*${enc}*&select=id,name,created_by&limit=5`,{headers:this._h()});
+    if(!r.ok)return[];return await r.json();
+  },
+  // Create a new company
+  async createCompany(name,createdBy){
+    const r=await fetch(`${SB_URL}/rest/v1/companies`,{method:"POST",headers:this._h(),body:JSON.stringify({name:name.trim(),created_by:createdBy})});
+    if(!r.ok){const e=await r.json().catch(()=>({}));throw new Error(e.message||"Company creation failed");}
+    const txt=await r.text();try{return JSON.parse(txt)[0];}catch(_){return null;}
+  },
+  // Get company templates
+  async getCompanyTemplates(companyId){
+    const r=await fetch(`${SB_URL}/rest/v1/company_templates?company_id=eq.${companyId}&select=*`,{headers:this._h()});
+    if(!r.ok)return[];return await r.json();
+  },
+  // Copy company templates into user's saved_templates
+  async copyCompanyTemplatesToUser(companyTemplates,userId){
+    const results=[];
+    for(const ct of companyTemplates){
+      const d={user_id:userId,template_name:ct.template_name,file_name:ct.file_name,file_type:ct.file_type,storage_path:ct.storage_path,field_config:ct.field_config,mode:ct.mode||"template"};
+      try{const saved=await this.saveParsedTemplate(d);results.push(saved);}catch(e){console.error("Copy template failed:",e);}
+    }
+    return results;
+  },
 };
 
 /* ── Account Settings Page ── */
@@ -1113,6 +1140,7 @@ function ReportEditor({job, user, onBack, reportDate}){
     initEdit.forEach(f=>{
       if(f.autoFill==="date")v[f.name]=formatAutoDate(f.originalValue||f.value);
       else if(f.autoFill==="increment")v[f.name]="";
+      else if(f.autoFill==="name")v[f.name]=window._mdrUserName||f.value||"";
       else v[f.name]=f.value||"";
     });
     return v;
@@ -1138,7 +1166,7 @@ function ReportEditor({job, user, onBack, reportDate}){
             if(c.vals){
               // Merge saved values but re-apply today's date for auto-date fields (matching original format)
               const merged={...c.vals};
-              initEdit.forEach(f=>{if(f.autoFill==="date")merged[f.name]=formatAutoDate(f.originalValue||f.value);});
+              initEdit.forEach(f=>{if(f.autoFill==="date")merged[f.name]=formatAutoDate(f.originalValue||f.value);if(f.autoFill==="name"&&window._mdrUserName)merged[f.name]=window._mdrUserName;});
               setVals(p=>({...p,...merged}));
             }
             if(c.lockVals)setLockVals(p=>({...p,...c.lockVals}));
@@ -2030,7 +2058,7 @@ function ReportEditor({job, user, onBack, reportDate}){
           <div style={{marginBottom:20}}>
             <div style={{fontSize:12,fontWeight:700,color:C.org,textTransform:"uppercase",letterSpacing:1,marginBottom:10}}>Fill In Today</div>
             {editFields.map(f=>{
-              const isAuto=f.autoFill==="date"||f.autoFill==="increment";
+              const isAuto=f.autoFill==="date"||f.autoFill==="increment"||f.autoFill==="name";
               return(
                 <div key={f.name} style={{marginBottom:14}}>
                   <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:6}}>
@@ -2038,6 +2066,7 @@ function ReportEditor({job, user, onBack, reportDate}){
                     <div style={{display:"flex",gap:4,alignItems:"center"}}>
                       {f.autoFill==="date"&&<span style={{fontSize:10,fontWeight:700,color:C.blu,background:C.blu+"22",padding:"2px 8px",borderRadius:4}}>AUTO-DATE</span>}
                       {f.autoFill==="increment"&&<span style={{fontSize:10,fontWeight:700,color:C.blu,background:C.blu+"22",padding:"2px 8px",borderRadius:4}}>AUTO-#</span>}
+                      {f.autoFill==="name"&&<span style={{fontSize:10,fontWeight:700,color:C.blu,background:C.blu+"22",padding:"2px 8px",borderRadius:4}}>AUTO-NAME</span>}
                       {f.voiceEnabled&&<span style={{fontSize:10,fontWeight:700,color:C.org,background:C.org+"22",padding:"2px 8px",borderRadius:4}}>VOICE</span>}
                       {f.wasUnlocked&&(
                         <button onClick={()=>relockField(f.name)} title="Re-lock this field" style={{padding:"2px 8px",fontSize:10,fontWeight:700,borderRadius:4,border:`1px solid ${C.brd}`,background:"transparent",color:C.mut,cursor:"pointer"}}>🔒 Lock</button>
@@ -3291,8 +3320,40 @@ function SetupWizard({user, onComplete}){
   const [slug,setSlug]=useState(()=>(user?.user_metadata?.full_name||"").toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/(^-|-$)/g,""));
   const [readSections,setReadSections]=useState({});
   const [openSections,setOpenSections]=useState({});
+  // Company detection state
+  const [companyMatches,setCompanyMatches]=useState([]);
+  const [selectedCompany,setSelectedCompany]=useState(null); // {id,name} if user chose to join
+  const [companySearching,setCompanySearching]=useState(false);
+  const companyDebounce=useRef(null);
   const SECTION_ORDER=["parsing","cleanDoc","notes","photos","bestPractices"];
   const toggleSection=(key)=>{setReadSections(p=>({...p,[key]:true}));setOpenSections(p=>{const wasOpen=p[key];if(wasOpen){const idx=SECTION_ORDER.indexOf(key);const nextKey=idx>=0&&idx<SECTION_ORDER.length-1?SECTION_ORDER[idx+1]:null;const next={};if(nextKey)next[nextKey]=true;return next;}return{[key]:true};});};
+
+  // Company name search — debounced lookup as user types
+  const handleCompanyNameChange=(val)=>{
+    setCompanyName(val);
+    setSelectedCompany(null); // reset selection when typing
+    if(companyDebounce.current)clearTimeout(companyDebounce.current);
+    if(val.trim().length<2){setCompanyMatches([]);return;}
+    companyDebounce.current=setTimeout(async()=>{
+      setCompanySearching(true);
+      try{
+        const matches=await db.searchCompanies(val.trim());
+        // Don't show the user's own company (shouldn't exist yet for new signup, but safety)
+        setCompanyMatches(matches.filter(m=>m.created_by!==user?.id));
+      }catch(e){setCompanyMatches([]);}
+      finally{setCompanySearching(false);}
+    },400);
+  };
+
+  const joinCompany=(company)=>{
+    setSelectedCompany(company);
+    setCompanyName(company.name); // set the input to the exact company name
+    setCompanyMatches([]); // close dropdown
+  };
+
+  const clearCompanySelection=()=>{
+    setSelectedCompany(null);
+  };
 
   const TZ_OPTIONS=["America/New_York","America/Chicago","America/Denver","America/Phoenix","America/Los_Angeles","America/Anchorage","Pacific/Honolulu"];
   const TZ_LABELS={"America/New_York":"Eastern (ET)","America/Chicago":"Central (CT)","America/Denver":"Mountain (MT)","America/Phoenix":"Arizona (MST)","America/Los_Angeles":"Pacific (PT)","America/Anchorage":"Alaska (AKT)","Pacific/Honolulu":"Hawaii (HT)"};
@@ -3325,10 +3386,34 @@ function SetupWizard({user, onComplete}){
       let baseSlug=slug.trim()||fullName.trim().toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/(^-|-$)/g,"");
       let slugVal=baseSlug;
       let attempt=0;
+
+      // Handle company: join existing or create new
+      let companyId=null;
+      if(selectedCompany){
+        // User chose to join an existing company
+        companyId=selectedCompany.id;
+      }else if(companyName.trim()){
+        // Create a new company for this user
+        try{
+          const newCo=await db.createCompany(companyName.trim(),user.id);
+          if(newCo?.id)companyId=newCo.id;
+        }catch(e){
+          // If duplicate name error, company already exists — try to find and join it
+          if((e.message||"").toLowerCase().includes("unique")||(e.message||"").toLowerCase().includes("duplicate")){
+            try{
+              const existing=await db.searchCompanies(companyName.trim());
+              const exact=existing.find(c=>c.name.toLowerCase()===companyName.trim().toLowerCase());
+              if(exact)companyId=exact.id;
+            }catch(_){}
+          }
+          // If still no companyId, just continue without — company is optional
+        }
+      }
+
       // Try saving — if slug conflict, append -2, -3, etc.
       while(true){
         try{
-          await db.upsertProfile({id:user.id,full_name:fullName.trim(),company_name:companyName.trim()||null,timezone,slug:slugVal});
+          await db.upsertProfile({id:user.id,full_name:fullName.trim(),company_name:companyName.trim()||null,company_id:companyId,timezone,slug:slugVal});
           break;
         }catch(e){
           const msg=(e.message||"").toLowerCase();
@@ -3342,6 +3427,17 @@ function SetupWizard({user, onComplete}){
         }
       }
       setSlug(slugVal);
+
+      // If joining an existing company, copy their templates to user's saved_templates
+      if(selectedCompany&&companyId){
+        try{
+          const companyTpls=await db.getCompanyTemplates(companyId);
+          if(companyTpls.length>0){
+            await db.copyCompanyTemplatesToUser(companyTpls,user.id);
+          }
+        }catch(e){console.error("Copy company templates:",e);}
+      }
+
       try{await db.upsertProfile({id:user.id,setup_complete:true,wizard_completed_at:new Date().toISOString()});}catch(_){}
       onComplete();
     }catch(e){alert("Error saving profile: "+e.message);}
@@ -3394,11 +3490,41 @@ function SetupWizard({user, onComplete}){
                 <input type="text" value={fullName} onChange={e=>setFullName(e.target.value)} placeholder="Jesse Saltzman" style={fs}/>
                 <div style={{fontSize:11,color:C.mut,marginTop:4}}>Appears on reports and your scheduling page.</div>
               </div>
-              <div style={{marginBottom:18}}>
+              <div style={{marginBottom:18,position:"relative"}}>
                 <label style={ls}>Company Name</label>
-                <input type="text" value={companyName} onChange={e=>setCompanyName(e.target.value)} placeholder="Saltzman Inspections" style={fs}/>
-                <div style={{fontSize:11,color:C.mut,marginTop:4}}>Emails will appear as: <strong style={{color:C.txt}}>{companyName||"Your Company"} &lt;reports@mydailyreports.org&gt;</strong></div>
-                <div style={{fontSize:11,color:C.mut,marginTop:2}}>Set this once — it's how your name shows in your recipients' inbox.</div>
+                <input type="text" value={companyName} onChange={e=>handleCompanyNameChange(e.target.value)} placeholder="Saltzman Inspections" style={fs}/>
+                {/* Company match dropdown */}
+                {companyMatches.length>0&&!selectedCompany&&(
+                  <div style={{position:"absolute",left:0,right:0,top:"100%",zIndex:50,background:C.card,border:`1px solid ${C.brd}`,borderRadius:10,marginTop:4,overflow:"hidden",boxShadow:"0 8px 24px rgba(0,0,0,0.15)"}}>
+                    <div style={{padding:"10px 14px",borderBottom:`1px solid ${C.brd}`,fontSize:12,color:C.mut,fontWeight:600}}>Existing company found — want to join?</div>
+                    {companyMatches.map(m=>(
+                      <button key={m.id} onClick={()=>joinCompany(m)} style={{display:"flex",alignItems:"center",gap:10,width:"100%",padding:"12px 14px",background:"transparent",border:"none",borderBottom:`1px solid ${C.brd}`,cursor:"pointer",textAlign:"left"}}>
+                        <span style={{fontSize:18}}>🏢</span>
+                        <div style={{flex:1}}>
+                          <div style={{fontSize:14,fontWeight:600,color:C.txt}}>{m.name}</div>
+                          <div style={{fontSize:11,color:C.mut}}>Tap to join and access their templates</div>
+                        </div>
+                        <span style={{color:C.org,fontSize:13,fontWeight:600}}>Join</span>
+                      </button>
+                    ))}
+                    <button onClick={()=>setCompanyMatches([])} style={{width:"100%",padding:"10px 14px",background:"transparent",border:"none",cursor:"pointer",fontSize:12,color:C.mut,textAlign:"center"}}>
+                      No, create a new company with this name
+                    </button>
+                  </div>
+                )}
+                {/* Selected company badge */}
+                {selectedCompany&&(
+                  <div style={{display:"flex",alignItems:"center",gap:8,marginTop:6,padding:"8px 12px",background:"rgba(232,116,42,0.08)",border:`1px solid rgba(232,116,42,0.25)`,borderRadius:8}}>
+                    <span style={{fontSize:14}}>🏢</span>
+                    <div style={{flex:1}}>
+                      <div style={{fontSize:13,fontWeight:600,color:C.txt}}>Joining {selectedCompany.name}</div>
+                      <div style={{fontSize:11,color:C.mut}}>You'll get access to their report templates</div>
+                    </div>
+                    <button onClick={clearCompanySelection} style={{background:"none",border:"none",color:C.mut,cursor:"pointer",fontSize:16,padding:"0 4px"}}>✕</button>
+                  </div>
+                )}
+                {!selectedCompany&&<div style={{fontSize:11,color:C.mut,marginTop:4}}>Emails will appear as: <strong style={{color:C.txt}}>{companyName||"Your Company"} &lt;reports@mydailyreports.org&gt;</strong></div>}
+                {!selectedCompany&&<div style={{fontSize:11,color:C.mut,marginTop:2}}>Set this once — it's how your name shows in your recipients' inbox.</div>}
               </div>
               <div style={{marginBottom:18}}>
                 <label style={ls}>Email Address</label>
@@ -3786,6 +3912,7 @@ function App(){
         try{
           const p=await db.getProfile(u.id);
           setSetupDone(p?.setup_complete===true);
+          if(p?.full_name)window._mdrUserName=p.full_name;
         }catch(e){
           setSetupDone(false);
         }
@@ -3797,9 +3924,11 @@ function App(){
   // Called after successful login/signup
   const handleAuth=async(u)=>{
     setUser(u);
+    if(u?.user_metadata?.full_name)window._mdrUserName=u.user_metadata.full_name;
     try{
       const p=await db.getProfile(u.id);
       setSetupDone(p?.setup_complete===true);
+      if(p?.full_name)window._mdrUserName=p.full_name;
     }catch(e){
       setSetupDone(false);
     }
