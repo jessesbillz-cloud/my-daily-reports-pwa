@@ -2701,7 +2701,7 @@ function ReportEditor({job, user, onBack, reportDate}){
         {reportStatus==="submitted"&&<span style={{padding:"4px 10px",fontSize:11,fontWeight:700,borderRadius:6,background:C.ok+"22",color:C.ok}}>Submitted</span>}
       </div>
 
-      <div style={{maxWidth:600,margin:"0 auto",padding:"20px"}}>
+      <div style={{maxWidth:600,margin:"0 auto",padding:"20px 20px 140px"}}>
         <div style={{fontSize:14,color:C.mut,marginBottom:6,textAlign:"center"}}>{todayDisplay}</div>
         <div style={{fontSize:11,color:C.mut,textAlign:"center",marginBottom:20}}>Editable anytime • {tz.split("/").pop().replace(/_/g," ")}</div>
 
@@ -2818,19 +2818,22 @@ function ReportEditor({job, user, onBack, reportDate}){
           <div style={{fontSize:11,color:C.mut,marginTop:8}}>Photos will display as {layouts.find(l=>l.k===photoLayout)?.l} in the final PDF</div>
         </div>
 
-        {/* ── Action buttons ── */}
-        <div style={{display:"flex",flexDirection:"column",gap:10,marginBottom:20}}>
+      </div>
+
+      {/* Fixed bottom bar */}
+      <div style={{position:"fixed",bottom:0,left:0,right:0,padding:"12px 20px",borderTop:`1px solid ${C.brd}`,background:C.card,zIndex:100}}>
+        <div style={{maxWidth:600,margin:"0 auto",display:"flex",flexDirection:"column",gap:8}}>
           <div style={{display:"flex",gap:10}}>
             {reportStatus!=="submitted"&&(
-              <button onClick={saveWorking} disabled={saving||submitting||viewLoading} className="btn-o" style={{flex:1,padding:"14px 0",background:C.blu,border:"none",borderRadius:10,color:"#fff",fontSize:15,fontWeight:700,cursor:saving?"default":"pointer",opacity:saving?0.6:1}}>
-                {saving?"Saving...":"Save Working Copy"}
+              <button onClick={saveWorking} disabled={saving||submitting||viewLoading} style={{flex:1,padding:"12px 0",background:C.blu,border:"none",borderRadius:10,color:"#fff",fontSize:14,fontWeight:700,cursor:saving?"default":"pointer",opacity:saving?0.6:1}}>
+                {saving?"Saving...":"Save Draft"}
               </button>
             )}
-            <button onClick={viewReport} disabled={viewLoading||submitting} style={{flex:1,padding:"14px 0",background:"transparent",border:`1px solid ${C.brd}`,borderRadius:10,color:C.lt,fontSize:15,fontWeight:700,cursor:viewLoading?"default":"pointer",opacity:viewLoading?0.6:1}}>
+            <button onClick={viewReport} disabled={viewLoading||submitting} style={{flex:1,padding:"12px 0",background:"transparent",border:`1px solid ${C.brd}`,borderRadius:10,color:C.lt,fontSize:14,fontWeight:700,cursor:viewLoading?"default":"pointer",opacity:viewLoading?0.6:1}}>
               {viewLoading?"Loading...":"View Report"}
             </button>
           </div>
-          <button onClick={submitReport} disabled={submitting||viewLoading} className="btn-o" style={{width:"100%",padding:"14px 0",background:C.org,border:"none",borderRadius:10,color:"#fff",fontSize:15,fontWeight:700,cursor:submitting?"default":"pointer",opacity:submitting?0.6:1}}>
+          <button onClick={submitReport} disabled={submitting||viewLoading} className="btn-o" style={{width:"100%",padding:"12px 0",background:C.org,border:"none",borderRadius:10,color:"#fff",fontSize:15,fontWeight:700,cursor:submitting?"default":"pointer",opacity:submitting?0.6:1}}>
             {submitting?"Submitting...":reportStatus==="submitted"?"Update & Resubmit":"Submit Report"}
           </button>
         </div>
