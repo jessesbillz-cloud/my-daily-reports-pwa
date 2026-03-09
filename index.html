@@ -1250,11 +1250,289 @@ function WorkLogEditor({job, user, onBack, reportDate}){
     }));
   };
 
+  const [submitSuccess,setSubmitSuccess]=useState(null); // {pdfBlob,pdfFilename,pdfBase64,emailHtml,...}
+  const [emailing,setEmailing]=useState(false);
+  const [toast,setToast]=useState("");
+  const showToast=(m)=>{setToast(m);setTimeout(()=>setToast(""),3000);};
+
   const buildContent=()=>({
     contractors,generalNotes,safetyNotes,
     weatherEnabled,weatherAM,weatherMid,weatherPM,
     reportType:"worklog"
   });
+
+  // ── Generate Work Log PDF with pdf-lib ──
+  const generateWorkLogPdf=async()=>{
+    const {PDFDocument,rgb,StandardFonts}=PDFLib;
+    const doc=await PDFDocument.create();
+    const font=await doc.embedFont(StandardFonts.Helvetica);
+    const fontB=await doc.embedFont(StandardFonts.HelveticaBold);
+    const W=612,H=792; // letter size
+    const M=40; // margin
+    const CW=W-2*M; // content width
+
+    const todayDisplay2=new Date(todayISO+"T12:00:00").toLocaleDateString("en-US",{weekday:"long",month:"long",day:"numeric",year:"numeric",timeZone:tz});
+    const userName=window._mdrUserName||user?.user_metadata?.full_name||"";
+
+    let page=doc.addPage([W,H]);
+    let y=H-M;
+    let pageNum=1;
+    const totalPagesRef={val:1}; // will update after building
+
+    const ensureSpace=(needed)=>{
+      if(y-needed<M+30){
+        page=doc.addPage([W,H]);y=H-M;pageNum++;totalPagesRef.val=pageNum;
+        drawFooter(page);
+      }
+    };
+
+    const drawFooter=(pg)=>{
+      pg.drawText(job.name||"Work Log",{x:M,y:20,size:8,font,color:rgb(.5,.5,.5)});
+    };
+
+    // ── Header bar (dark gray) ──
+    page.drawRectangle({x:0,y:H-80,width:W,height:80,color:rgb(.3,.3,.3)});
+    page.drawText(job.name||"Daily Work Log",{x:M,y:H-40,size:22,font:fontB,color:rgb(1,1,1)});
+    if(job.site_address)page.drawText(job.site_address,{x:M,y:H-58,size:10,font,color:rgb(.85,.85,.85)});
+    y=H-90;
+
+    // ── Info row ──
+    page.drawRectangle({x:M,y:y-28,width:CW,height:28,color:rgb(.92,.57,.17)});
+    const infoPairs=[["Date",todayDisplay2],["Prepared By",userName]];
+    let ix=M+8;
+    infoPairs.forEach(([lbl,val])=>{
+      page.drawText(lbl+":",{x:ix,y:y-12,size:9,font:fontB,color:rgb(1,1,1)});
+      const lw=fontB.widthOfTextAtSize(lbl+":",9);
+      page.drawText(val||"—",{x:ix+lw+6,y:y-12,size:9,font,color:rgb(1,1,1)});
+      ix+=lw+6+font.widthOfTextAtSize(val||"—",9)+30;
+    });
+    y-=38;
+
+    // ── Weather section ──
+    if(weatherEnabled&&(weatherAM||weatherMid||weatherPM)){
+      page.drawRectangle({x:M,y:y-24,width:CW,height:24,color:rgb(.3,.3,.3)});
+      page.drawText("WEATHER",{x:M+8,y:y-16,size:11,font:fontB,color:rgb(1,1,1)});
+      y-=30;
+
+      const wxSlots=[{label:"Morning (7 AM)",val:weatherAM},{label:"Midday (12 PM)",val:weatherMid},{label:"Afternoon (4 PM)",val:weatherPM}];
+      const slotW=CW/3;
+      wxSlots.forEach((wx,i)=>{
+        const sx=M+i*slotW;
+        page.drawRectangle({x:sx,y:y-50,width:slotW,height:50,color:rgb(.97,.97,.97),borderColor:rgb(.85,.85,.85),borderWidth:.5});
+        page.drawText(wx.label,{x:sx+6,y:y-14,size:8,font:fontB,color:rgb(.4,.4,.4)});
+        // Wrap weather text
+        const val=wx.val||"—";
+        const lines=[];let cur="";
+        val.split(",").forEach((part,pi)=>{
+          const test=cur?(cur+","+part):part;
+          if(font.widthOfTextAtSize(test.trim(),8)>slotW-14&&cur){lines.push(cur.trim());cur=part;}
+          else cur=test;
+        });
+        if(cur)lines.push(cur.trim());
+        lines.slice(0,3).forEach((ln,li)=>{page.drawText(ln,{x:sx+6,y:y-28-li*10,size:8,font,color:rgb(.2,.2,.2)});});
+      });
+      y-=58;
+    }
+
+    // ── Work Logs Table ──
+    page.drawRectangle({x:M,y:y-24,width:CW,height:24,color:rgb(.3,.3,.3)});
+    page.drawText("WORK LOGS",{x:M+8,y:y-16,size:11,font:fontB,color:rgb(1,1,1)});
+    y-=28;
+
+    // Table header
+    const cols=[{label:"Name",w:120},{label:"Description",w:CW-120-60-70},{label:"Qty",w:60},{label:"Hours",w:70}];
+    let cx=M;
+    page.drawRectangle({x:M,y:y-20,width:CW,height:20,color:rgb(.95,.95,.95)});
+    cols.forEach(c=>{page.drawText(c.label,{x:cx+4,y:y-14,size:9,font:fontB,color:rgb(.3,.3,.3)});cx+=c.w;});
+    y-=22;
+
+    let totalHrs=0;
+    contractors.forEach((c,ri)=>{
+      const hrs=parseFloat(c.hours)||0;
+      const qty=parseInt(c.quantity)||1;
+      totalHrs+=hrs*qty;
+
+      // Wrap description text
+      const descLines=[];
+      if(c.description){
+        const words=c.description.split(" ");
+        let line="";
+        const maxW=cols[1].w-10;
+        words.forEach(w=>{
+          const test=line?line+" "+w:w;
+          if(font.widthOfTextAtSize(test,9)>maxW&&line){descLines.push(line);line=w;}
+          else line=test;
+        });
+        if(line)descLines.push(line);
+      }
+      if(descLines.length===0)descLines.push("—");
+
+      const rowH=Math.max(18,descLines.length*12+6);
+      ensureSpace(rowH);
+
+      // Alternating row background
+      if(ri%2===0)page.drawRectangle({x:M,y:y-rowH,width:CW,height:rowH,color:rgb(.98,.98,.98)});
+      // Bottom border
+      page.drawLine({start:{x:M,y:y-rowH},end:{x:M+CW,y:y-rowH},thickness:.5,color:rgb(.88,.88,.88)});
+
+      let rx=M;
+      page.drawText(c.name||"—",{x:rx+4,y:y-13,size:9,font:fontB,color:rgb(.2,.2,.2)});
+      rx+=cols[0].w;
+      descLines.forEach((ln,li)=>{page.drawText(ln,{x:rx+4,y:y-13-li*12,size:9,font,color:rgb(.3,.3,.3)});});
+      rx+=cols[1].w;
+      page.drawText(String(qty),{x:rx+4,y:y-13,size:9,font,color:rgb(.3,.3,.3)});
+      rx+=cols[2].w;
+      page.drawText(hrs?String(hrs):"—",{x:rx+4,y:y-13,size:9,font,color:rgb(.3,.3,.3)});
+
+      y-=rowH;
+    });
+
+    // Totals row
+    ensureSpace(22);
+    page.drawRectangle({x:M,y:y-22,width:CW,height:22,color:rgb(.92,.92,.92)});
+    page.drawText("TOTAL",{x:M+4,y:y-15,size:9,font:fontB,color:rgb(.2,.2,.2)});
+    page.drawText(String(contractors.length)+" contractor"+(contractors.length!==1?"s":""),{x:M+cols[0].w+4,y:y-15,size:9,font,color:rgb(.4,.4,.4)});
+    page.drawText(String(totalHrs),{x:M+cols[0].w+cols[1].w+cols[2].w+4,y:y-15,size:9,font:fontB,color:rgb(.2,.2,.2)});
+    y-=30;
+
+    // ── General Notes ──
+    if(generalNotes){
+      ensureSpace(60);
+      page.drawRectangle({x:M,y:y-24,width:CW,height:24,color:rgb(.3,.3,.3)});
+      page.drawText("GENERAL NOTES",{x:M+8,y:y-16,size:11,font:fontB,color:rgb(1,1,1)});
+      y-=30;
+      const noteLines=[];const noteWords=generalNotes.split(" ");let nl="";
+      noteWords.forEach(w=>{const t=nl?nl+" "+w:w;if(font.widthOfTextAtSize(t,10)>CW-20&&nl){noteLines.push(nl);nl=w;}else nl=t;});
+      if(nl)noteLines.push(nl);
+      noteLines.forEach(ln=>{ensureSpace(14);page.drawText(ln,{x:M+8,y:y-12,size:10,font,color:rgb(.2,.2,.2)});y-=14;});
+      y-=10;
+    }
+
+    // ── Safety Notes ──
+    if(safetyNotes){
+      ensureSpace(60);
+      page.drawRectangle({x:M,y:y-24,width:CW,height:24,color:rgb(.3,.3,.3)});
+      page.drawText("SITE SAFETY OBSERVATIONS",{x:M+8,y:y-16,size:11,font:fontB,color:rgb(1,1,1)});
+      y-=30;
+      const safeLines=[];const safeWords=safetyNotes.split(" ");let sl="";
+      safeWords.forEach(w=>{const t=sl?sl+" "+w:w;if(font.widthOfTextAtSize(t,10)>CW-20&&sl){safeLines.push(sl);sl=w;}else sl=t;});
+      if(sl)safeLines.push(sl);
+      safeLines.forEach(ln=>{ensureSpace(14);page.drawText(ln,{x:M+8,y:y-12,size:10,font,color:rgb(.2,.2,.2)});y-=14;});
+      y-=10;
+    }
+
+    // ── Photo Pages (grouped by contractor) ──
+    const contractorsWithPhotos=contractors.filter(c=>(c.photos||[]).length>0);
+    for(const c of contractorsWithPhotos){
+      for(const ph of c.photos){
+        try{
+          const imgBytes=Uint8Array.from(atob(ph.data.split(",")[1]||""),c=>c.charCodeAt(0));
+          let img;
+          if(ph.data.includes("image/png"))img=await doc.embedPng(imgBytes);
+          else img=await doc.embedJpg(imgBytes);
+          const photoPage=doc.addPage([W,H]);pageNum++;totalPagesRef.val=pageNum;
+          // Header
+          photoPage.drawRectangle({x:0,y:H-50,width:W,height:50,color:rgb(.3,.3,.3)});
+          photoPage.drawText(job.name||"Work Log",{x:M,y:H-30,size:14,font:fontB,color:rgb(1,1,1)});
+          photoPage.drawText("Photo — "+c.name,{x:M,y:H-44,size:10,font,color:rgb(.8,.8,.8)});
+          // Scale photo to fit
+          const maxW2=W-2*M,maxH2=H-120;
+          const scale2=Math.min(maxW2/img.width,maxH2/img.height,1);
+          const pw=img.width*scale2,ph2=img.height*scale2;
+          photoPage.drawImage(img,{x:(W-pw)/2,y:H-60-ph2,width:pw,height:ph2});
+          drawFooter(photoPage);
+        }catch(e){console.error("Photo embed error:",e);}
+      }
+    }
+
+    // Add footers to all pages
+    const pages=doc.getPages();
+    pages.forEach((pg,i)=>{
+      pg.drawText(`${i+1} of ${pages.length}`,{x:W-M-40,y:20,size:8,font,color:rgb(.5,.5,.5)});
+    });
+
+    return await doc.save();
+  };
+
+  // ── Submit: generate PDF, upload, save ──
+  const submitWorkLog=async()=>{
+    setSubmitting(true);
+    try{
+      const submitDate=reportDate||new Date().toLocaleDateString("en-CA",{timeZone:tz});
+      showToast("Generating PDF...");
+      const pdfBytes=await generateWorkLogPdf();
+      const pdfBlob=new Blob([pdfBytes],{type:"application/pdf"});
+      const pdfFilename=`${(job.name||"WorkLog").replace(/[^a-zA-Z0-9_ -]/g,"")}_${submitDate}.pdf`;
+
+      // Upload PDF to storage
+      const storagePath=`${user.id}/${job.id}/submitted/${submitDate}_worklog.pdf`;
+      let upR=await fetch(`${SB_URL}/storage/v1/object/report-source-docs/${storagePath}`,{
+        method:"POST",headers:{apikey:SB_KEY,Authorization:`Bearer ${AUTH_TOKEN||SB_KEY}`,"Content-Type":"application/pdf"},body:pdfBlob
+      });
+      if(!upR.ok){upR=await fetch(`${SB_URL}/storage/v1/object/report-source-docs/${storagePath}`,{
+        method:"PUT",headers:{apikey:SB_KEY,Authorization:`Bearer ${AUTH_TOKEN||SB_KEY}`,"Content-Type":"application/pdf"},body:pdfBlob
+      });}
+
+      // Convert to base64 for email
+      const reader=new FileReader();
+      const pdfBase64=await new Promise((resolve)=>{reader.onload=()=>resolve(reader.result.split(",")[1]);reader.readAsDataURL(pdfBlob);});
+
+      // Save report data
+      await db.saveReport({
+        job_id:job.id,user_id:user.id,report_date:submitDate,status:"submitted",
+        content:buildContent()
+      });
+
+      // Build email
+      const todayDisp=new Date(todayISO+"T12:00:00").toLocaleDateString("en-US",{weekday:"long",month:"long",day:"numeric",year:"numeric",timeZone:tz});
+      const uName=window._mdrUserName||user?.user_metadata?.full_name||user.email?.split("@")[0]||"";
+      const contractorSummary=contractors.map(c=>`<tr><td style="padding:3px 12px 3px 0;color:#888;font-size:13px;">${c.name}</td><td style="padding:3px 0;color:#333;font-size:13px;">${c.hours||0} hrs × ${c.quantity||1}</td></tr>`).join("");
+      const emailHtml=`<div style="font-family:-apple-system,sans-serif;max-width:600px;margin:0 auto;"><div style="background:#e8742a;padding:20px 24px;border-radius:8px 8px 0 0;"><h1 style="color:#fff;margin:0;font-size:20px;">My Daily Reports</h1></div><div style="background:#f9f9f9;padding:24px;border:1px solid #e0e0e0;border-top:none;border-radius:0 0 8px 8px;"><p style="color:#333;font-size:16px;margin:0 0 8px;">Hi,</p><p style="color:#333;font-size:15px;line-height:1.6;margin:0 0 16px;">${uName} has submitted the daily work log for <strong>${job.name}</strong> on ${todayDisp}.</p><p style="color:#555;font-size:14px;margin:0 0 8px;"><strong>${contractors.length}</strong> contractor${contractors.length!==1?"s":""} — <strong>${totalHours}</strong> total hours</p>${contractorSummary?`<table style="margin:8px 0 16px;border-collapse:collapse;">${contractorSummary}</table>`:""}<p style="color:#555;font-size:14px;margin:16px 0 0;">The full PDF report is attached to this email.</p></div><p style="color:#999;font-size:11px;text-align:center;margin-top:16px;">Sent via My Daily Reports</p></div>`;
+
+      const rawTeam=job.team_emails||[];
+      const teamEmails=rawTeam.map(m=>typeof m==="string"?m:m.email).filter(Boolean);
+      setSubmitSuccess({pdfBlob,pdfFilename,pdfBase64,emailHtml,teamEmails,jobName:job.name,todayDisplay:todayDisp,userName:uName});
+      showToast("Report submitted!");
+    }catch(e){
+      console.error("Submit error:",e);
+      showToast("Submit failed: "+e.message);
+    }finally{setSubmitting(false);}
+  };
+
+  // Download PDF
+  const downloadPdf=async()=>{
+    if(!submitSuccess)return;
+    const file=new File([submitSuccess.pdfBlob],submitSuccess.pdfFilename,{type:"application/pdf"});
+    if(navigator.canShare&&navigator.canShare({files:[file]})){
+      try{await navigator.share({files:[file],title:submitSuccess.pdfFilename});showToast("PDF shared!");return;}catch(e){if(e.name==="AbortError")return;}
+    }
+    const url=URL.createObjectURL(submitSuccess.pdfBlob);
+    const a=document.createElement("a");a.href=url;a.download=submitSuccess.pdfFilename;
+    document.body.appendChild(a);a.click();document.body.removeChild(a);
+    URL.revokeObjectURL(url);showToast("PDF saved!");
+  };
+
+  // Email to team
+  const emailToTeam=async()=>{
+    if(!submitSuccess)return;
+    setEmailing(true);
+    try{
+      const userEmail=user.email;
+      const recipients=[...new Set([userEmail,...submitSuccess.teamEmails])].filter(Boolean);
+      if(recipients.length===0){showToast("No team emails configured. Add them in Job Settings.");setEmailing(false);return;}
+      let senderName="My Daily Reports";
+      try{const prof=await db.getProfile(user.id);if(prof?.company_name)senderName=prof.company_name;}catch(e){}
+      const r=await fetch(`${SB_URL}/functions/v1/send-report`,{
+        method:"POST",headers:{"Content-Type":"application/json",Authorization:`Bearer ${AUTH_TOKEN||SB_KEY}`,apikey:SB_KEY},
+        body:JSON.stringify({to:recipients,subject:`${submitSuccess.jobName} — Daily Work Log ${submitSuccess.todayDisplay}`,html_body:submitSuccess.emailHtml,pdf_base64:submitSuccess.pdfBase64,pdf_filename:submitSuccess.pdfFilename,sender_name:senderName})
+      });
+      if(!r.ok){const errBody=await r.json().catch(()=>({}));throw new Error(errBody.error||`Email send failed (${r.status})`);}
+      showToast("Report emailed to "+recipients.length+" recipient"+(recipients.length>1?"s":"")+"!");
+    }catch(e){
+      console.error("Email error:",e);
+      showToast("Email failed: "+e.message);
+    }finally{setEmailing(false);}
+  };
 
   const saveWorking=async()=>{
     setSaving(true);
@@ -1454,24 +1732,38 @@ function WorkLogEditor({job, user, onBack, reportDate}){
       {/* Hidden photo input */}
       <input ref={photoRef} type="file" accept="image/*" capture="environment" style={{display:"none"}} onChange={handlePhotoUpload}/>
 
+      {/* Toast */}
+      {toast&&<div style={{position:"fixed",top:60,left:"50%",transform:"translateX(-50%)",background:C.card,border:`1px solid ${C.ok}`,borderRadius:10,padding:"10px 20px",fontSize:14,fontWeight:600,color:C.ok,zIndex:9999}}>{toast}</div>}
+
+      {/* Post-submit overlay */}
+      {submitSuccess&&(
+        <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.85)",zIndex:200,display:"flex",alignItems:"center",justifyContent:"center",padding:20}}>
+          <div style={{background:C.card,border:`1px solid ${C.brd}`,borderRadius:16,padding:24,maxWidth:400,width:"100%",textAlign:"center"}}>
+            <div style={{fontSize:48,marginBottom:12}}>✅</div>
+            <div style={{fontSize:18,fontWeight:700,color:C.txt,marginBottom:6}}>Report Submitted</div>
+            <div style={{fontSize:13,color:C.mut,marginBottom:20}}>{submitSuccess.pdfFilename}</div>
+            <div style={{display:"flex",flexDirection:"column",gap:10}}>
+              <button onClick={downloadPdf} style={{width:"100%",padding:"14px 0",background:C.blu,border:"none",borderRadius:10,color:"#fff",fontSize:15,fontWeight:700,cursor:"pointer"}}>
+                Download / Share PDF
+              </button>
+              <button onClick={emailToTeam} disabled={emailing} style={{width:"100%",padding:"14px 0",background:C.org,border:"none",borderRadius:10,color:"#fff",fontSize:15,fontWeight:700,cursor:emailing?"default":"pointer",opacity:emailing?0.7:1}}>
+                {emailing?"Sending...":"Email to Project Team"}
+              </button>
+              <button onClick={()=>{setSubmitSuccess(null);onBack();}} style={{width:"100%",padding:"12px 0",background:"transparent",border:`1px solid ${C.brd}`,borderRadius:10,color:C.mut,fontSize:14,fontWeight:600,cursor:"pointer"}}>
+                Done
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Bottom bar */}
       <div style={{position:"fixed",bottom:0,left:0,right:0,padding:"14px 20px",borderTop:`1px solid ${C.brd}`,background:C.card,zIndex:100,display:"flex",gap:10}}>
         <button onClick={()=>{saveWorking();onBack();}} style={{flex:1,padding:"14px 0",background:C.inp,border:`1px solid ${C.brd}`,borderRadius:10,color:C.txt,fontSize:15,fontWeight:700,cursor:"pointer"}}>
           Save & Close
         </button>
-        <button onClick={async()=>{
-          setSubmitting(true);
-          try{
-            const submitDate=reportDate||new Date().toLocaleDateString("en-CA",{timeZone:tz});
-            await db.saveReport({
-              job_id:job.id,user_id:user.id,report_date:submitDate,status:"submitted",
-              content:buildContent()
-            });
-            onBack();
-          }catch(e){alert("Submit failed: "+e.message);}
-          finally{setSubmitting(false);}
-        }} disabled={submitting||contractors.length===0} style={{flex:1,padding:"14px 0",background:contractors.length>0?C.org:C.brd,border:"none",borderRadius:10,color:"#fff",fontSize:15,fontWeight:700,cursor:contractors.length>0&&!submitting?"pointer":"default",opacity:submitting?0.7:1}}>
-          {submitting?"Submitting...":"Submit Report"}
+        <button onClick={submitWorkLog} disabled={submitting||contractors.length===0} style={{flex:1,padding:"14px 0",background:contractors.length>0?C.org:C.brd,border:"none",borderRadius:10,color:"#fff",fontSize:15,fontWeight:700,cursor:contractors.length>0&&!submitting?"pointer":"default",opacity:submitting?0.7:1}}>
+          {submitting?"Generating PDF...":"Submit Report"}
         </button>
       </div>
     </div>
