@@ -1,4 +1,4 @@
-const CACHE_NAME = 'mdr-v2';
+const CACHE_NAME = 'mdr-v3';
 const CACHE_URLS = [
   '/icon-192.png',
   '/icon-512.png',
@@ -6,7 +6,8 @@ const CACHE_URLS = [
   'https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js',
   'https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.9/babel.min.js',
   'https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js',
-  'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js'
+  'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js',
+  'https://cdn.jsdelivr.net/npm/mammoth@1.6.0/mammoth.browser.min.js'
 ];
 
 // Install — pre-cache CDN libraries (they never change)

@@ -27,6 +27,7 @@
 <!-- pdf-lib for PDF generation, pdf.js for text extraction -->
 <script src="https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/mammoth@1.6.0/mammoth.browser.min.js"></script>
 <script>if(window.pdfjsLib){window.pdfjsLib.GlobalWorkerOptions.workerSrc="";window.pdfjsLib.GlobalWorkerOptions.workerPort=null;window.pdfjsLib.disableWorker=true;}</script>
 <script type="text/babel">
 const { useState, useEffect, useRef, useCallback } = React;
@@ -1205,6 +1206,7 @@ function ReportEditor({job, user, onBack, reportDate}){
   const [submitting,setSubmitting]=useState(false);
   const [viewLoading,setViewLoading]=useState(false);
   const [viewingReport,setViewingReport]=useState(null); // array of page image data URLs
+  const [viewDocxHtml,setViewDocxHtml]=useState(null); // HTML string for DOCX preview
   const [submitSuccess,setSubmitSuccess]=useState(null); // {pdfBlob, pdfFilename, teamEmails} after submit
   const [toast,setToast]=useState("");
 
@@ -1251,24 +1253,46 @@ function ReportEditor({job, user, onBack, reportDate}){
     setViewLoading(true);
     try{
       const tplRecord=await db.getTemplate(job.id);
-      // No template or non-PDF — show a text-based field preview
-      if(!tplRecord||!tplRecord.storage_path||
-        (tplRecord.file_type&&tplRecord.file_type!=="pdf")){
+      // No template at all — show error
+      if(!tplRecord||!tplRecord.storage_path){
+        throw new Error("No template found. Upload a template in Job Settings first.");
+      }
+      // DOCX template — call generate-docx to fill it, then render with mammoth
+      const isDocx=tplRecord.file_type&&tplRecord.file_type!=="pdf";
+      if(isDocx){
         const allFields=buildEditableFields();
-        const cvs=document.createElement("canvas");cvs.width=612*2;cvs.height=792*2;
-        const ctx=cvs.getContext("2d");ctx.fillStyle="#ffffff";ctx.fillRect(0,0,cvs.width,cvs.height);
-        ctx.fillStyle="#333";ctx.font="bold 28px Helvetica, Arial, sans-serif";
-        ctx.fillText(job.name,72,80);
-        ctx.font="20px Helvetica, Arial, sans-serif";
-        let ty=130;
-        allFields.forEach(f=>{
-          if(ty>1500)return;
-          ctx.fillStyle="#888";ctx.fillText(f.name+":",72,ty);
-          ctx.fillStyle="#333";ctx.fillText(f.val||"—",300,ty);
-          ty+=36;
+        const fieldValues={};
+        allFields.forEach(f=>{if(f.val)fieldValues[f.name]=f.val;});
+        // Download template
+        let dlResp=await fetch(`${SB_URL}/storage/v1/object/report-source-docs/${tplRecord.storage_path}`,{
+          headers:{apikey:SB_KEY,Authorization:`Bearer ${AUTH_TOKEN||SB_KEY}`}
         });
-        setViewingReport([cvs.toDataURL("image/jpeg",0.92)]);
-        cvs.width=0;cvs.height=0;
+        if(dlResp.status===401||dlResp.status===403){
+          const refreshed=await authGetSession();
+          if(refreshed){dlResp=await fetch(`${SB_URL}/storage/v1/object/report-source-docs/${tplRecord.storage_path}`,{headers:{apikey:SB_KEY,Authorization:`Bearer ${AUTH_TOKEN||SB_KEY}`}});}
+        }
+        if(!dlResp.ok)throw new Error("Could not download template ("+dlResp.status+").");
+        const tplBytes=new Uint8Array(await dlResp.arrayBuffer());
+        const tplChunks=[];for(let i=0;i<tplBytes.length;i+=8192)tplChunks.push(String.fromCharCode.apply(null,tplBytes.subarray(i,i+8192)));
+        const tplB64=btoa(tplChunks.join(""));
+        // Call generate-docx to fill template with field values
+        const genResp=await fetch(`${SB_URL}/functions/v1/generate-docx`,{
+          method:"POST",
+          headers:{"Content-Type":"application/json","Authorization":"Bearer "+SB_KEY,"apikey":SB_KEY},
+          body:JSON.stringify({docx_base64:tplB64,field_values:fieldValues})
+        });
+        if(!genResp.ok)throw new Error("Generate preview failed: "+(await genResp.text()));
+        const genData=await genResp.json();
+        if(genData.error)throw new Error(genData.error);
+        // Decode filled DOCX and render with mammoth
+        const filledBytes=Uint8Array.from(atob(genData.docx_base64),c=>c.charCodeAt(0));
+        if(window.mammoth){
+          const result=await window.mammoth.convertToHtml({arrayBuffer:filledBytes.buffer});
+          setViewDocxHtml(result.value);
+          setViewingReport(["__docx_html__"]);
+        }else{
+          throw new Error("Document preview library not loaded. Please reload the app.");
+        }
         setViewLoading(false);
         return;
       }
@@ -1691,10 +1715,11 @@ function ReportEditor({job, user, onBack, reportDate}){
 
   // ── View Report Screen (canvas-rendered preview of template + field values) ──
   if(viewingReport){
+    const isDocxPreview=viewingReport[0]==="__docx_html__"&&viewDocxHtml;
     return(
       <div style={{minHeight:"100vh",background:C.bg,color:C.txt,display:"flex",flexDirection:"column"}}>
         <div style={{display:"flex",alignItems:"center",gap:10,padding:"12px 16px",borderBottom:`1px solid ${C.brd}`,background:C.card}}>
-          <button onClick={()=>setViewingReport(null)} style={{background:"none",border:"none",color:C.blu,fontSize:28,cursor:"pointer",padding:"8px 12px",lineHeight:1,borderRadius:8,minWidth:48,minHeight:48,display:"flex",alignItems:"center",justifyContent:"center"}}>←</button>
+          <button onClick={()=>{setViewingReport(null);setViewDocxHtml(null);}} style={{background:"none",border:"none",color:C.blu,fontSize:28,cursor:"pointer",padding:"8px 12px",lineHeight:1,borderRadius:8,minWidth:48,minHeight:48,display:"flex",alignItems:"center",justifyContent:"center"}}>←</button>
           <MDRLogo size={28}/>
           <div style={{flex:1}}>
             <div style={{fontWeight:700,fontSize:17}}>Report Preview</div>
@@ -1702,14 +1727,18 @@ function ReportEditor({job, user, onBack, reportDate}){
           </div>
         </div>
         <div style={{flex:1,overflow:"auto",WebkitOverflowScrolling:"touch",padding:"12px 16px"}}>
-          {viewingReport.map((dataUrl,i)=>(
-            <div key={i} style={{marginBottom:12,borderRadius:4,overflow:"hidden",boxShadow:"0 1px 6px rgba(0,0,0,0.4)"}}>
-              <img src={dataUrl} style={{width:"100%",display:"block"}} alt={"Page "+(i+1)}/>
-            </div>
-          ))}
+          {isDocxPreview?(
+            <div style={{background:"#fff",borderRadius:4,padding:"24px 20px",boxShadow:"0 1px 6px rgba(0,0,0,0.4)",color:"#222",fontSize:14,lineHeight:1.6}} dangerouslySetInnerHTML={{__html:viewDocxHtml}}/>
+          ):(
+            viewingReport.map((dataUrl,i)=>(
+              <div key={i} style={{marginBottom:12,borderRadius:4,overflow:"hidden",boxShadow:"0 1px 6px rgba(0,0,0,0.4)"}}>
+                <img src={dataUrl} style={{width:"100%",display:"block"}} alt={"Page "+(i+1)}/>
+              </div>
+            ))
+          )}
         </div>
         <div style={{position:"fixed",bottom:0,left:0,right:0,padding:"14px 20px",borderTop:`1px solid ${C.brd}`,background:C.card,zIndex:100}}>
-          <button onClick={()=>setViewingReport(null)} style={{width:"100%",padding:"14px 0",background:C.blu,border:"none",borderRadius:10,color:"#fff",fontSize:15,fontWeight:700,cursor:"pointer"}}>
+          <button onClick={()=>{setViewingReport(null);setViewDocxHtml(null);}} style={{width:"100%",padding:"14px 0",background:C.blu,border:"none",borderRadius:10,color:"#fff",fontSize:15,fontWeight:700,cursor:"pointer"}}>
             Back to Editing
           </button>
         </div>
