@@ -683,10 +683,14 @@ function CreateJob({user, onBack, onCreated}){
   // Use a saved template — loads fields without re-parsing, but still needs the actual file uploaded
   // Job-specific locked fields become editable so user can enter new values for the new job
   const JOB_SPECIFIC_FIELDS=["project name","project no","project number","owner","client","district","dsa file","dsa file #","dsa app","dsa app #","contractor","architect","engineer","inspector","ior","project inspector","project manager","address","location","jurisdiction"];
-  const useSavedTemplate=(tpl)=>{
+  const useSavedTemplate=async(tpl)=>{
     const raw=tpl.field_config||[];
+    // Extract filename convention if embedded (from admin provisioning)
+    const convEntry=raw.find(f=>f._type==="filenameConvention");
+    const fieldEntries=raw.filter(f=>!f._type);
+    if(convEntry){const{_type,...conv}=convEntry;setFnConvention(conv);}
     // Convert job-specific locked fields to editable with cleared values
-    const adjusted=raw.map(f=>{
+    const adjusted=fieldEntries.map(f=>{
       if(f.mode==="lock"){
         const nameLC=(f.name||"").toLowerCase().trim();
         const isJobSpecific=JOB_SPECIFIC_FIELDS.some(js=>nameLC===js||nameLC.includes(js));
@@ -700,7 +704,22 @@ function CreateJob({user, onBack, onCreated}){
     setTplSaved(true);
     setShowSaved(false);
     setErr("");
-    // Don't set tf — user still needs to upload the actual file, but parsing is skipped
+    // If admin-provisioned template has a storage_path, auto-download the file
+    if(tpl.storage_path){
+      try{
+        const resp=await fetch(`${SB_URL}/storage/v1/object/report-source-docs/${tpl.storage_path}`,{headers:{apikey:SB_KEY,Authorization:`Bearer ${AUTH_TOKEN||SB_KEY}`}});
+        if(resp.ok){
+          const blob=await resp.blob();
+          const ext=tpl.file_type||tpl.original_filename?.split(".").pop().toLowerCase()||"pdf";
+          const file=new File([blob],tpl.original_filename||`template.${ext}`,{type:blob.type});
+          setTf(file);
+          // Store as base64
+          const u8=new Uint8Array(await blob.arrayBuffer());
+          const chunks=[];for(let i=0;i<u8.length;i+=8192)chunks.push(String.fromCharCode.apply(null,u8.subarray(i,i+8192)));
+          setTfB64(btoa(chunks.join("")));
+        }
+      }catch(dlErr){console.error("Auto-download template:",dlErr);/* User can still upload manually */}
+    }
   };
 
   // When file is uploaded after selecting a saved template, skip parsing
