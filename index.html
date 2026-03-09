@@ -911,6 +911,34 @@ function CreateJob({user, onBack, onCreated}){
           </div>
         </div>
 
+        {/* Work Log Template — optional branded PDF as background */}
+        {jobType==="worklog"&&(
+          <div style={{marginBottom:20}}>
+            <label style={ls}>Report Template (Optional)</label>
+            <div style={{fontSize:11,color:C.mut,marginBottom:8,lineHeight:1.4}}>Upload a branded PDF to use as the background for your work log reports. The first page will be used as a header with your logo and styling.</div>
+            {!tf?(
+              <div onClick={()=>document.getElementById("fi").click()}
+                style={{border:`2px dashed ${C.brd}`,borderRadius:12,padding:"24px 20px",textAlign:"center",cursor:"pointer",background:C.inp}}>
+                <div style={{fontSize:28,marginBottom:6}}>📄</div>
+                <p style={{color:C.lt,fontSize:13,fontWeight:600,marginBottom:4}}>Tap to upload a branded template</p>
+                <p style={{color:C.mut,fontSize:11}}>PDF only • Used as report background</p>
+                <input id="fi" type="file" accept=".pdf" style={{display:"none"}} onChange={e=>{if(!e.target.files[0])return;const f=e.target.files[0];setTf(f);const r=new FileReader();r.onload=()=>setTfB64(r.result.split(",")[1]);r.readAsDataURL(f);}}/>
+              </div>
+            ):(
+              <div style={{background:C.inp,border:`1px solid ${C.brd}`,borderRadius:12,padding:"14px 16px"}}>
+                <div style={{display:"flex",alignItems:"center",gap:12}}>
+                  <div style={{fontSize:24}}>📄</div>
+                  <div style={{flex:1}}>
+                    <div style={{fontSize:14,fontWeight:600,color:C.txt}}>{tf.name}</div>
+                    <div style={{fontSize:12,color:C.ok}}>Template uploaded — will be used as report background</div>
+                  </div>
+                  <button onClick={()=>{setTf(null);setTfB64(null);}} style={{background:"none",border:"none",color:"#ef4444",cursor:"pointer",fontSize:18}}>✕</button>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
         {/* Template Section — only for template jobs */}
         {jobType==="template"&&(<>
         <div style={{marginBottom:20}}>
@@ -1281,10 +1309,67 @@ function WorkLogEditor({job, user, onBack, reportDate}){
     const todayDisplay2=new Date(todayISO+"T12:00:00").toLocaleDateString("en-US",{weekday:"long",month:"long",day:"numeric",year:"numeric",timeZone:tz});
     const userName=window._mdrUserName||user?.user_metadata?.full_name||"";
 
-    let page=doc.addPage([W,H]);
+    let page;
     let y=H-M;
     let pageNum=1;
     const totalPagesRef={val:1}; // will update after building
+    let hasTemplate=false;
+
+    // ── Check for uploaded template to use as background ──
+    try{
+      const tpl=await db.getTemplate(job.id);
+      if(tpl&&tpl.storage_path){
+        let tplResp=await fetch(`${SB_URL}/storage/v1/object/report-source-docs/${tpl.storage_path}`,{
+          headers:{apikey:SB_KEY,Authorization:`Bearer ${AUTH_TOKEN||SB_KEY}`}
+        });
+        if(tplResp.ok){
+          const tplBytes=await tplResp.arrayBuffer();
+          const tplDoc=await PDFDocument.load(tplBytes);
+          const [copiedPage]=await doc.copyPages(tplDoc,[0]);
+          doc.addPage(copiedPage);
+          page=doc.getPages()[0];
+          hasTemplate=true;
+          // Start content below the template — leave top portion for branding
+          // Use extractPdfTextStructure to find where the template content ends
+          try{
+            const textItems=await extractPdfTextStructure(new Uint8Array(tplBytes));
+            if(textItems.length>0){
+              // Find the lowest text item (highest y in top-left coords = lowest on page)
+              const maxY=Math.max(...textItems.map(t=>t.y+t.h));
+              y=H-maxY-30; // start 30pt below the last text
+            }else{
+              y=H-200; // default: start at 200pt from top if no text found
+            }
+          }catch(e){
+            y=H-200; // fallback
+          }
+          // Overlay date on the template — draw in top-right area
+          page.drawText(todayDisplay2,{x:W-M-font.widthOfTextAtSize(todayDisplay2,10),y:H-30,size:10,font:fontB,color:rgb(.2,.2,.2)});
+          page.drawText("Prepared By: "+(userName||"—"),{x:W-M-font.widthOfTextAtSize("Prepared By: "+(userName||"—"),9),y:H-44,size:9,font,color:rgb(.4,.4,.4)});
+        }
+      }
+    }catch(e){console.log("No template found, using default header");}
+
+    // ── Default header (only if no template uploaded) ──
+    if(!hasTemplate){
+      page=doc.addPage([W,H]);
+      // Header bar (dark gray)
+      page.drawRectangle({x:0,y:H-80,width:W,height:80,color:rgb(.3,.3,.3)});
+      page.drawText(job.name||"Daily Work Log",{x:M,y:H-40,size:22,font:fontB,color:rgb(1,1,1)});
+      if(job.site_address)page.drawText(job.site_address,{x:M,y:H-58,size:10,font,color:rgb(.85,.85,.85)});
+      y=H-90;
+      // Info row
+      page.drawRectangle({x:M,y:y-28,width:CW,height:28,color:rgb(.92,.57,.17)});
+      const infoPairs=[["Date",todayDisplay2],["Prepared By",userName]];
+      let ix=M+8;
+      infoPairs.forEach(([lbl,val])=>{
+        page.drawText(lbl+":",{x:ix,y:y-12,size:9,font:fontB,color:rgb(1,1,1)});
+        const lw=fontB.widthOfTextAtSize(lbl+":",9);
+        page.drawText(val||"—",{x:ix+lw+6,y:y-12,size:9,font,color:rgb(1,1,1)});
+        ix+=lw+6+font.widthOfTextAtSize(val||"—",9)+30;
+      });
+      y-=38;
+    }
 
     const ensureSpace=(needed)=>{
       if(y-needed<M+30){
@@ -1296,24 +1381,6 @@ function WorkLogEditor({job, user, onBack, reportDate}){
     const drawFooter=(pg)=>{
       pg.drawText(job.name||"Work Log",{x:M,y:20,size:8,font,color:rgb(.5,.5,.5)});
     };
-
-    // ── Header bar (dark gray) ──
-    page.drawRectangle({x:0,y:H-80,width:W,height:80,color:rgb(.3,.3,.3)});
-    page.drawText(job.name||"Daily Work Log",{x:M,y:H-40,size:22,font:fontB,color:rgb(1,1,1)});
-    if(job.site_address)page.drawText(job.site_address,{x:M,y:H-58,size:10,font,color:rgb(.85,.85,.85)});
-    y=H-90;
-
-    // ── Info row ──
-    page.drawRectangle({x:M,y:y-28,width:CW,height:28,color:rgb(.92,.57,.17)});
-    const infoPairs=[["Date",todayDisplay2],["Prepared By",userName]];
-    let ix=M+8;
-    infoPairs.forEach(([lbl,val])=>{
-      page.drawText(lbl+":",{x:ix,y:y-12,size:9,font:fontB,color:rgb(1,1,1)});
-      const lw=fontB.widthOfTextAtSize(lbl+":",9);
-      page.drawText(val||"—",{x:ix+lw+6,y:y-12,size:9,font,color:rgb(1,1,1)});
-      ix+=lw+6+font.widthOfTextAtSize(val||"—",9)+30;
-    });
-    y-=38;
 
     // ── Weather section ──
     if(weatherEnabled&&(weatherAM||weatherMid||weatherPM)){
