@@ -1,5 +1,5 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { BlobReader, BlobWriter, ZipReader, ZipWriter, TextWriter } from "https://deno.land/x/zipjs@v2.7.32/index.js";
+import { unzipSync, zipSync } from "https://esm.sh/fflate@0.8.2";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -28,35 +28,16 @@ serve(async (req) => {
       });
     }
 
-    // Decode the DOCX
+    // Decode the DOCX and unzip with fflate
     const raw = Uint8Array.from(atob(docx_base64), c => c.charCodeAt(0));
-    const blob = new Blob([raw]);
-    const reader = new ZipReader(new BlobReader(blob));
-    const entries = await reader.getEntries();
+    const unzipped = unzipSync(raw);
 
     // Read document.xml
-    let documentXml = "";
-    const otherEntries: { filename: string; data: Uint8Array }[] = [];
-
-    for (const entry of entries) {
-      if (entry.filename === "word/document.xml") {
-        const writer = new TextWriter();
-        documentXml = await entry.getData!(writer);
-      } else {
-        const blobWriter = new BlobWriter();
-        const entryBlob = await entry.getData!(blobWriter);
-        const arrBuf = await entryBlob.arrayBuffer();
-        otherEntries.push({
-          filename: entry.filename,
-          data: new Uint8Array(arrBuf),
-        });
-      }
-    }
-    await reader.close();
-
-    if (!documentXml) {
+    const docEntry = unzipped["word/document.xml"];
+    if (!docEntry) {
       throw new Error("No document.xml found in DOCX");
     }
+    let documentXml = new TextDecoder().decode(docEntry);
 
     // ── Helper: extract all visible text from an XML chunk ──
     const extractText = (xml: string): string => {
@@ -94,12 +75,6 @@ serve(async (req) => {
       return result;
     };
 
-    // ── Build structured table data for reliable field matching ──
-    // Extract all tables with their rows and cells
-    const tableRegex = /<w:tbl\b[^>]*>[\s\S]*?<\/w:tbl>/g;
-    const rowRegex = /<w:tr\b[^>]*>[\s\S]*?<\/w:tr>/g;
-    const cellRegex = /<w:tc\b[^>]*>[\s\S]*?<\/w:tc>/g;
-
     // Normalize a label for matching: lowercase, trim, remove trailing colon/spaces
     const normalizeLabel = (s: string): string =>
       s.toLowerCase().replace(/[\s:]+$/g, "").replace(/\s+/g, " ").trim();
@@ -113,24 +88,13 @@ serve(async (req) => {
       let matched = false;
 
       // ── Strategy 1: Table cell replacement ──
-      // Walk through every table → row → cell looking for the label
-      // When found, replace content in the ADJACENT cell (next cell in same row)
-      // or in the SAME cell after the label text
-
-      // We need to work on the full document XML and do replacements in-place
-      // Use a function that finds and replaces within specific table structures
-
-      // Extract all table blocks
       let tableMatch;
       const tblRe = /<w:tbl\b[^>]*>[\s\S]*?<\/w:tbl>/g;
-
-      // Reset regex
       tblRe.lastIndex = 0;
+
       while (!matched && (tableMatch = tblRe.exec(documentXml)) !== null) {
         const tableXml = tableMatch[0];
-        const tableStart = tableMatch.index;
 
-        // Extract rows from this table
         let rowMatch;
         const rRe = /<w:tr\b[^>]*>[\s\S]*?<\/w:tr>/g;
         rRe.lastIndex = 0;
@@ -138,7 +102,6 @@ serve(async (req) => {
         while (!matched && (rowMatch = rRe.exec(tableXml)) !== null) {
           const rowXml = rowMatch[0];
 
-          // Extract cells from this row
           const cells: { xml: string; text: string; start: number }[] = [];
           let cellMatch;
           const cRe = /<w:tc\b[^>]*>[\s\S]*?<\/w:tc>/g;
@@ -152,11 +115,9 @@ serve(async (req) => {
             });
           }
 
-          // Look for label cell
           for (let i = 0; i < cells.length; i++) {
             const cellText = normalizeLabel(cells[i].text);
 
-            // Check if this cell contains our field label
             if (cellText === normalizedField ||
                 cellText === normalizedField + ":" ||
                 cellText.endsWith(normalizedField) ||
@@ -166,23 +127,15 @@ serve(async (req) => {
               if (i + 1 < cells.length) {
                 const oldValueCell = cells[i + 1].xml;
                 const newValueCell = setCellValue(oldValueCell, val);
-
-                // Replace in the row
                 const newRowXml = rowXml.replace(oldValueCell, newValueCell);
-                // Replace the row in the table
                 const newTableXml = tableXml.replace(rowXml, newRowXml);
-                // Replace the table in the document
                 documentXml = documentXml.replace(tableXml, newTableXml);
                 matched = true;
                 break;
               }
 
-              // ── Same cell: label and value in one cell (e.g. "Date: Jan 31, 2026") ──
-              // The label is part of the cell text; we need to keep the label but replace the value
-              // Find the label text runs and the value text runs
+              // ── Same cell: label and value in one cell ──
               const cellXml = cells[i].xml;
-
-              // Find all <w:r> runs in this cell
               const runs: { xml: string; text: string }[] = [];
               let runMatch;
               const runRe = /<w:r\b[^>]*>[\s\S]*?<\/w:r>/g;
@@ -191,7 +144,6 @@ serve(async (req) => {
                 runs.push({ xml: runMatch[0], text: extractText(runMatch[0]) });
               }
 
-              // Find where the label ends and value begins
               let accText = "";
               let labelEndIdx = -1;
               for (let r = 0; r < runs.length; r++) {
@@ -204,11 +156,9 @@ serve(async (req) => {
               }
 
               if (labelEndIdx >= 0 && labelEndIdx < runs.length - 1) {
-                // Clear all runs after the label, put value in the first one after label
                 let newCellXml = cellXml;
                 for (let r = labelEndIdx + 1; r < runs.length; r++) {
                   if (r === labelEndIdx + 1) {
-                    // First value run: set to new value
                     const cleaned = clearAllText(runs[r].xml);
                     const withValue = cleaned.replace(
                       /<w:t([^>]*)><\/w:t>/,
@@ -216,7 +166,6 @@ serve(async (req) => {
                     );
                     newCellXml = newCellXml.replace(runs[r].xml, withValue);
                   } else {
-                    // Subsequent value runs: clear them
                     newCellXml = newCellXml.replace(runs[r].xml, clearAllText(runs[r].xml));
                   }
                 }
@@ -232,9 +181,7 @@ serve(async (req) => {
       }
 
       // ── Strategy 2: Standalone paragraphs (outside tables) ──
-      // Look for paragraphs with label text followed by value text
       if (!matched) {
-        // Try to find the label in standalone paragraphs
         const labelVariants = [
           fieldName + ":",
           fieldName,
@@ -243,8 +190,6 @@ serve(async (req) => {
 
         for (const label of labelVariants) {
           const escaped = label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-
-          // Find a paragraph containing this label, then replace text in next run
           const paraWithLabel = new RegExp(
             `(<w:p\\b[^>]*>(?:(?!<\\/w:p>)[\\s\\S])*?<w:t[^>]*>[^<]*${escaped}[^<]*<\\/w:t>)` +
             `((?:(?!<\\/w:p>)[\\s\\S])*?)(<\\/w:p>)`,
@@ -253,7 +198,6 @@ serve(async (req) => {
 
           if (paraWithLabel.test(documentXml)) {
             documentXml = documentXml.replace(paraWithLabel, (fullMatch, beforeLabel, afterLabel, closeP) => {
-              // Clear all <w:t> in the after-label portion and set first one to value
               let cleared = clearAllText(afterLabel);
               let set = false;
               cleared = cleared.replace(/<w:t([^>]*)><\/w:t>/, (m: string, attrs: string) => {
@@ -261,7 +205,6 @@ serve(async (req) => {
                 set = true;
                 return `<w:t xml:space="preserve"> ${escapeXml(val)}</w:t>`;
               });
-              // If no <w:t> existed in after portion, append a run
               if (!set) {
                 cleared += `<w:r><w:t xml:space="preserve"> ${escapeXml(val)}</w:t></w:r>`;
               }
@@ -274,10 +217,7 @@ serve(async (req) => {
       }
 
       // ── Strategy 3: Fallback — broad text replacement ──
-      // If structured approaches failed, try a simple find-and-replace of the old value
-      // This handles edge cases where the label isn't in a standard position
       if (!matched) {
-        // Try to find the field label anywhere and replace the next <w:t> content
         const escaped = fieldName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
         const broadRegex = new RegExp(
           `(${escaped}[:\\s]*<\\/w:t>(?:[\\s\\S]*?)<w:t[^>]*>)([^<]*)(<\\/w:t>)`,
@@ -289,24 +229,19 @@ serve(async (req) => {
       }
     }
 
-    // ── Repack the DOCX ──
-    const outBlobWriter = new BlobWriter("application/vnd.openxmlformats-officedocument.wordprocessingml.document");
-    const zipWriter = new ZipWriter(outBlobWriter);
+    // ── Repack the DOCX with fflate ──
+    const zipData: Record<string, Uint8Array> = {};
 
     // Add modified document.xml
-    const docBlob = new Blob([documentXml], { type: "text/xml" });
-    await zipWriter.add("word/document.xml", new BlobReader(docBlob));
+    zipData["word/document.xml"] = new TextEncoder().encode(documentXml);
 
     // Add all other files unchanged
-    for (const entry of otherEntries) {
-      const entryBlob = new Blob([entry.data]);
-      await zipWriter.add(entry.filename, new BlobReader(entryBlob));
+    for (const [filename, data] of Object.entries(unzipped)) {
+      if (filename === "word/document.xml") continue;
+      zipData[filename] = data as Uint8Array;
     }
 
-    await zipWriter.close();
-    const outBlob = await outBlobWriter.getData();
-    const outBuf = await outBlob.arrayBuffer();
-    const outBytes = new Uint8Array(outBuf);
+    const outBytes = zipSync(zipData);
 
     // Convert to base64
     let binary = "";
