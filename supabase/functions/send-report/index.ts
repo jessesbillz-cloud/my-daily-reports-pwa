@@ -11,7 +11,7 @@ serve(async (req) => {
   }
 
   try {
-    const { to, subject, body, html_body, pdf_base64, pdf_filename } = await req.json();
+    const { to, subject, body, html_body, pdf_base64, pdf_filename, sender_name } = await req.json();
 
     if (!to || !to.length) {
       return new Response(JSON.stringify({ error: "No recipients" }), {
@@ -56,7 +56,7 @@ serve(async (req) => {
         Authorization: `Bearer ${RESEND_API_KEY}`,
       },
       body: JSON.stringify({
-        from: `My Daily Reports <${FROM_EMAIL}>`,
+        from: `${sender_name || "My Daily Reports"} <${FROM_EMAIL}>`,
         to: to,
         subject: subject,
         html: emailHtml,

@@ -286,6 +286,7 @@ function AccountSettings({user, onBack, onLogout}){
 
   // Form state
   const [fullName,setFullName]=useState(user?.user_metadata?.full_name||"");
+  const [companyName,setCompanyName]=useState("");
   const [email,setEmail]=useState(user?.email||"");
   const [timezone,setTimezone]=useState(Intl.DateTimeFormat().resolvedOptions().timeZone);
   const [slug,setSlug]=useState("");
@@ -310,6 +311,7 @@ function AccountSettings({user, onBack, onLogout}){
         if(p){
           setProfile(p);
           if(p.full_name)setFullName(p.full_name);
+          if(p.company_name)setCompanyName(p.company_name);
           if(p.timezone)setTimezone(p.timezone);
           if(p.slug)setSlug(p.slug);
         }
@@ -327,6 +329,7 @@ function AccountSettings({user, onBack, onLogout}){
       const data={
         id:user.id,
         full_name:fullName.trim(),
+        company_name:companyName.trim()||null,
         timezone,
         slug:slugVal,
       };
@@ -391,6 +394,13 @@ function AccountSettings({user, onBack, onLogout}){
                   <label style={ls}>Full Name</label>
                   <input type="text" value={fullName} readOnly style={{...fs,opacity:0.6,cursor:"default"}}/>
                   <div style={{fontSize:11,color:C.mut,marginTop:4}}>Set during sign up</div>
+                </div>
+
+                <div style={{marginBottom:16}}>
+                  <label style={ls}>Company Name</label>
+                  <input type="text" value={companyName} onChange={e=>setCompanyName(e.target.value)} placeholder="Saltzman Inspections" style={fs}/>
+                  <div style={{fontSize:11,color:C.mut,marginTop:4}}>Emails will appear as: <strong style={{color:C.txt}}>{companyName||"Your Company"} &lt;reports@mydailyreports.org&gt;</strong></div>
+                  <div style={{fontSize:11,color:C.mut,marginTop:2}}>Set this once — it's how your name shows in your recipients' inbox.</div>
                 </div>
 
                 <div style={{marginBottom:16}}>
@@ -1701,9 +1711,12 @@ function ReportEditor({job, user, onBack, reportDate}){
       const userEmail=user.email;
       const recipients=[...new Set([userEmail,...submitSuccess.teamEmails])].filter(Boolean);
       if(recipients.length===0){showToast("No team emails configured. Add them in Job Settings.");setEmailing(false);return;}
+      // Get company name for dynamic sender
+      let senderName="My Daily Reports";
+      try{const prof=await db.getProfile(user.id);if(prof?.company_name)senderName=prof.company_name;}catch(e){}
       const r=await fetch(`${SB_URL}/functions/v1/send-report`,{
         method:"POST",headers:{"Content-Type":"application/json",Authorization:`Bearer ${AUTH_TOKEN||SB_KEY}`,apikey:SB_KEY},
-        body:JSON.stringify({to:recipients,subject:`${submitSuccess.jobName} — Daily Report ${submitSuccess.todayDisplay}`,html_body:submitSuccess.emailHtml,pdf_base64:submitSuccess.pdfBase64,pdf_filename:submitSuccess.pdfFilename})
+        body:JSON.stringify({to:recipients,subject:`${submitSuccess.jobName} — Daily Report ${submitSuccess.todayDisplay}`,html_body:submitSuccess.emailHtml,pdf_base64:submitSuccess.pdfBase64,pdf_filename:submitSuccess.pdfFilename,sender_name:senderName})
       });
       if(!r.ok){const errBody=await r.json().catch(()=>({}));throw new Error(errBody.error||`Email send failed (${r.status})`);}
       showToast("Report emailed to "+recipients.length+" recipient"+(recipients.length>1?"s":"")+"!");
@@ -3038,9 +3051,12 @@ function Dashboard({user, onLogout}){
                               if(rq.requester_email){
                                 const reqDate=new Date(rq.requested_date+"T12:00:00").toLocaleDateString("en-US",{weekday:"long",month:"long",day:"numeric",year:"numeric"});
                                 const inspectorName=user?.user_metadata?.full_name||user?.email||"Your inspector";
+                                // Get company name for dynamic sender
+                                const prof=await db.getProfile(user.id).catch(()=>null);
+                                const confirmSender=prof?.company_name||"My Daily Reports";
                                 fetch(`${SB_URL}/functions/v1/send-report`,{
                                   method:"POST",headers:{"Content-Type":"application/json",Authorization:`Bearer ${SB_KEY}`,apikey:SB_KEY},
-                                  body:JSON.stringify({to:[rq.requester_email],subject:`Visit Confirmed — ${rq.jobs?.name||"Job"} on ${reqDate}`,
+                                  body:JSON.stringify({to:[rq.requester_email],sender_name:confirmSender,subject:`Visit Confirmed — ${rq.jobs?.name||"Job"} on ${reqDate}`,
                                     html_body:`<div style="font-family:-apple-system,sans-serif;max-width:600px;margin:0 auto;"><div style="background:#22c55e;padding:20px 24px;border-radius:8px 8px 0 0;"><h1 style="color:#fff;margin:0;font-size:20px;">Visit Confirmed</h1></div><div style="background:#f9f9f9;padding:24px;border:1px solid #e0e0e0;border-top:none;border-radius:0 0 8px 8px;"><p style="color:#333;font-size:16px;line-height:1.6;margin:0 0 8px;">Hi ${rq.requester_name||"there"},</p><p style="color:#333;font-size:15px;line-height:1.6;margin:0 0 16px;">Your scheduling request for <strong>${rq.jobs?.name||"the job"}</strong> has been confirmed by ${inspectorName} for <strong>${reqDate}</strong>.</p><p style="color:#555;font-size:14px;margin:0;">Type: ${rq.inspection_type||"General Visit"}</p></div><p style="color:#999;font-size:11px;text-align:center;margin-top:16px;">Sent via My Daily Reports &bull; mydailyreports.com</p></div>`
                                   })
                                 }).catch(emailErr=>console.error("Confirmation email error:",emailErr));
@@ -3113,6 +3129,7 @@ function SetupWizard({user, onComplete}){
   const [step,setStep]=useState(0);
   const [saving,setSaving]=useState(false);
   const [fullName,setFullName]=useState(user?.user_metadata?.full_name||"");
+  const [companyName,setCompanyName]=useState("");
   const [email,setEmail]=useState(user?.email||"");
   const [timezone,setTimezone]=useState(Intl.DateTimeFormat().resolvedOptions().timeZone);
   const [slug,setSlug]=useState(()=>(user?.user_metadata?.full_name||"").toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/(^-|-$)/g,""));
@@ -3155,7 +3172,7 @@ function SetupWizard({user, onComplete}){
       // Try saving — if slug conflict, append -2, -3, etc.
       while(true){
         try{
-          await db.upsertProfile({id:user.id,full_name:fullName.trim(),timezone,slug:slugVal});
+          await db.upsertProfile({id:user.id,full_name:fullName.trim(),company_name:companyName.trim()||null,timezone,slug:slugVal});
           break;
         }catch(e){
           const msg=(e.message||"").toLowerCase();
@@ -3220,6 +3237,12 @@ function SetupWizard({user, onComplete}){
                 <label style={ls}>Full Name</label>
                 <input type="text" value={fullName} onChange={e=>setFullName(e.target.value)} placeholder="Jesse Saltzman" style={fs}/>
                 <div style={{fontSize:11,color:C.mut,marginTop:4}}>Appears on reports and your scheduling page.</div>
+              </div>
+              <div style={{marginBottom:18}}>
+                <label style={ls}>Company Name</label>
+                <input type="text" value={companyName} onChange={e=>setCompanyName(e.target.value)} placeholder="Saltzman Inspections" style={fs}/>
+                <div style={{fontSize:11,color:C.mut,marginTop:4}}>Emails will appear as: <strong style={{color:C.txt}}>{companyName||"Your Company"} &lt;reports@mydailyreports.org&gt;</strong></div>
+                <div style={{fontSize:11,color:C.mut,marginTop:2}}>Set this once — it's how your name shows in your recipients' inbox.</div>
               </div>
               <div style={{marginBottom:18}}>
                 <label style={ls}>Email Address</label>
