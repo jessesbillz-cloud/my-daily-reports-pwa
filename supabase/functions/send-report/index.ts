@@ -31,7 +31,7 @@ serve(async (req) => {
       );
     }
 
-    const FROM_EMAIL = Deno.env.get("FROM_EMAIL") || "reports@mydailyreports.com";
+    const FROM_EMAIL = Deno.env.get("FROM_EMAIL") || "reports@mydailyreports.org";
 
     // Use custom HTML body if provided, fallback to plain body text
     const emailHtml = html_body || `

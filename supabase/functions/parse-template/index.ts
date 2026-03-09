@@ -394,6 +394,39 @@ serve(async (req) => {
     const locked: any[] = [];
     const NOTES_KEYWORDS = ["notes", "observations", "comments"];
 
+    // Detect table column boundaries for smarter inline field positioning
+    // Groups items by y-position (rows), finds where value columns typically start
+    const columnCache = new Map<number, number[]>();
+    const getColumnStarts = (pg: number): number[] => {
+      if (columnCache.has(pg)) return columnCache.get(pg)!;
+      const pgItems = itemsByPage.get(pg) || [];
+      const rows = new Map<number, any[]>();
+      for (const item of pgItems) {
+        const yKey = Math.round(item.y / 14) * 14;
+        if (!rows.has(yKey)) rows.set(yKey, []);
+        rows.get(yKey)!.push(item);
+      }
+      const valXs: number[] = [];
+      for (const [, rItems] of rows) {
+        const sorted = [...rItems].sort((a: any, b: any) => a.x - b.x);
+        if (sorted.length >= 2) valXs.push(sorted[1].x);
+        if (sorted.length >= 4) valXs.push(sorted[3].x);
+      }
+      valXs.sort((a, b) => a - b);
+      const clusters: { sum: number; count: number; avg: number }[] = [];
+      for (const xv of valXs) {
+        const last = clusters[clusters.length - 1];
+        if (last && Math.abs(xv - last.avg) < 25) {
+          last.sum += xv; last.count++; last.avg = last.sum / last.count;
+        } else {
+          clusters.push({ sum: xv, count: 1, avg: xv });
+        }
+      }
+      const cols = clusters.filter(c => c.count >= 2).map(c => Math.round(c.avg));
+      columnCache.set(pg, cols);
+      return cols;
+    };
+
     for (const mapping of fieldMappings) {
       const labelItem = findLabelItem(mapping.label, mapping.page);
       if (!labelItem) continue; // Could not match label to any text item
@@ -411,9 +444,30 @@ serve(async (req) => {
         const nextBelow = findNextItemBelow(labelItem);
         h = nextBelow ? Math.max(nextBelow.y - y - PADDING, 40) : 100;
       } else {
-        // Inline: value starts right after label
-        x = labelItem.x + (labelItem.w || 0) + PADDING;
+        // Inline: value area to the right of the label
+        const labelEnd = labelItem.x + (labelItem.w || 0);
+        x = labelEnd + PADDING;
         y = labelItem.y;
+
+        // Try to find actual value text item for better positioning
+        if (mapping.valueText) {
+          const valVariants = [mapping.valueText, mapping.valueText.trim()];
+          for (const vt of valVariants) {
+            const valMatches = itemsByStr.get(vt);
+            if (valMatches) {
+              const samePage = valMatches.find((v: any) => (v.page || 1) === page && v.x > labelEnd);
+              if (samePage) { x = samePage.x; break; }
+            }
+          }
+        }
+
+        // If x is still right after the label, snap to detected column boundary
+        if (x < labelEnd + 20) {
+          const cols = getColumnStarts(page);
+          const snapCol = cols.find((cx: number) => cx > labelEnd + 10 && cx < labelEnd + 250);
+          if (snapCol) x = snapCol;
+        }
+
         // Width: distance to next item on the right, or to page margin
         const nextRight = findNextItemRight(labelItem);
         if (nextRight && nextRight.x > x) {
