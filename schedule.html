@@ -65,14 +65,33 @@ details[open] .collapsible-summary::after { content: '−'; }
 .submit-btn{width:100%;padding:14px;font-size:15px;font-weight:bold;color:#fff;background:#e8742a;border:none;border-radius:8px;cursor:pointer;margin-top:20px;}
 .success-view{display:none;text-align:center;padding:60px 20px;color:#fff;}
 .reset-btn{margin-top:16px;padding:10px 20px;font-size:14px;font-weight:bold;color:#5a8fc0;background:none;border:2px solid #5a8fc0;border-radius:8px;cursor:pointer;}
+/* ADD PERSON INLINE */
+.add-person-row{display:flex;align-items:center;gap:8px;padding:10px 0;border-bottom:1px solid #333;}
+.add-person-row .person-icon{width:32px;height:32px;border-radius:8px;background:#222;border:1px solid #444;display:flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0;}
+.add-person-row .person-info{flex:1;min-width:0;}
+.add-person-row .person-name{font-size:14px;font-weight:600;color:#ccc;}
+.add-person-row .person-detail{font-size:12px;color:#888;word-break:break-all;}
+.add-person-row .remove-person{background:none;border:none;color:#c44;cursor:pointer;font-size:16px;padding:0 4px;}
 </style>
 </head>
 <body>
-<div style="text-align:center;padding:8px 0;margin-bottom:8px;">
+<!-- BRANDING + SHARE BUTTON AT TOP -->
+<div style="display:flex;align-items:center;justify-content:space-between;padding:12px 0;margin-bottom:8px;">
+    <div style="display:flex;align-items:center;gap:10px;">
+        <img src="logo.jpg" alt="Logo" style="width:45px;height:45px;border-radius:8px;">
+        <div>
+            <div style="font-size:18px;font-weight:bold;color:#5a8fc0;">My Daily Reports</div>
+            <button style="padding:4px 12px;font-size:11px;font-weight:600;color:#fff;background:#e8742a;border:none;border-radius:4px;cursor:pointer;margin-top:2px;" onclick="window.open('https://mydailyreports.org','_blank')">Learn More</button>
+        </div>
+    </div>
+    <button onclick="document.getElementById('shareCalSection').style.display=document.getElementById('shareCalSection').style.display==='none'?'block':'none';" style="padding:8px 14px;font-size:12px;font-weight:700;color:#fff;background:#5a8fc0;border:none;border-radius:20px;cursor:pointer;white-space:nowrap;">Share Calendar</button>
+</div>
+
+<div style="text-align:center;padding:4px 0;margin-bottom:8px;">
 <a href="hub.html" style="color:#5a8fc0;text-decoration:none;font-size:13px;font-weight:600;border:1px solid #5a8fc0;padding:6px 14px;border-radius:20px;background:rgba(90,143,192,0.08);">&larr; Back to Project List</a>
 </div>
 <div class="header">
-    <img src="image0-5.jpeg" alt="Logo">
+    <img src="logo.jpg" alt="Logo" style="width:45px;height:45px;border-radius:6px;">
     <div>
         <h2>Scheduling Request</h2>
         <p id="projectSubtitle">Loading...</p>
@@ -98,28 +117,22 @@ details[open] .collapsible-summary::after { content: '−'; }
 <div id="dayDetailList"></div>
 </div>
 </div>
-<div class="card">
-<div style="padding:20px;text-align:center;">
-<img src="image0-5.jpeg" alt="Logo" style="width:70px;height:70px;margin-bottom:8px;">
-<div style="font-size:22px;font-weight:bold;color:#5a8fc0;">My Daily Reports</div>
-<button style="padding:8px 16px;font-size:13px;font-weight:600;color:#fff;background:#e8742a;border:none;border-radius:6px;cursor:pointer;margin-top:10px;" onclick="window.open('https://mydailyreports.org','_blank')">Learn More</button>
-</div>
-</div>
-<div class="card">
+<!-- SUBSCRIBE TO CALENDAR (below the calendar, initially hidden — toggled by Share Calendar button) -->
+<div id="shareCalSection" class="card" style="display:none;">
 <div style="padding:16px;">
 <div style="text-align:center;margin-bottom:12px;">
-<div style="color:#5a8fc0;font-weight:600;font-size:14px;">📅 Subscribe to Calendar</div>
+<div style="color:#5a8fc0;font-weight:600;font-size:14px;">Subscribe to Calendar</div>
 <div style="color:#888;font-size:12px;margin-top:4px;">Sync this schedule to your phone or computer</div>
 </div>
 <div style="background:#222;border:2px solid #5a8fc0;border-radius:8px;padding:12px;margin-bottom:12px;text-align:center;">
 <div style="color:#5a8fc0;font-size:0.85rem;margin-bottom:6px;font-weight:600;">CALENDAR URL:</div>
-<div id="copyBtn" style="color:#e8742a;font-size:0.9rem;cursor:pointer;" onclick="copyCalendarURL()">📋 Tap to Copy Calendar URL</div>
+<div id="copyBtn" style="color:#e8742a;font-size:0.9rem;cursor:pointer;" onclick="copyCalendarURL()">Tap to Copy Calendar URL</div>
 </div>
-<details class="collapsible-section" style="border-top:none;"><summary class="collapsible-summary">iPhone Setup</summary><div style="padding:10px;font-size:14px;color:#ccc;line-height:1.5;">1. Settings → Calendar → Accounts<br>2. "Add Account" → "Other"<br>3. "Add Subscribed Calendar"<br>4. Paste the URL above<br>5. Done!</div></details>
+<details class="collapsible-section" style="border-top:none;"><summary class="collapsible-summary">iPhone Setup</summary><div style="padding:10px;font-size:14px;color:#ccc;line-height:1.5;">1. Settings &rarr; Calendar &rarr; Accounts<br>2. "Add Account" &rarr; "Other"<br>3. "Add Subscribed Calendar"<br>4. Paste the URL above<br>5. Done!</div></details>
 <details class="collapsible-section"><summary class="collapsible-summary">Android / Google Calendar</summary><div style="padding:10px;font-size:14px;color:#ccc;line-height:1.5;">1. Open Google Calendar on desktop<br>2. Next to "Other calendars," click (+)<br>3. Select "From URL"<br>4. Paste the URL above</div></details>
-<details class="collapsible-section"><summary class="collapsible-summary">Outlook Desktop</summary><div style="padding:10px;font-size:14px;color:#ccc;line-height:1.5;">1. Open Outlook → Calendar view<br>2. Click "Add Calendar" → "From Internet"<br>3. Paste the URL above<br>4. Click "OK" and name the calendar</div></details>
-<details class="collapsible-section"><summary class="collapsible-summary">Outlook Mobile</summary><div style="padding:10px;font-size:14px;color:#ccc;line-height:1.5;">1. Open Outlook app → tap the calendar icon<br>2. Tap the gear icon (Settings)<br>3. Tap your account → "Add Shared Calendar"<br>4. Select "Add from link" or "Subscribe"<br>5. Paste the URL above and save</div></details>
-<details class="collapsible-section"><summary class="collapsible-summary">Outlook Web (outlook.com)</summary><div style="padding:10px;font-size:14px;color:#ccc;line-height:1.5;">1. Go to outlook.com → Calendar<br>2. Click "Add calendar" in the left sidebar<br>3. Select "Subscribe from web"<br>4. Paste the URL above<br>5. Name it and click "Import"</div></details>
+<details class="collapsible-section"><summary class="collapsible-summary">Outlook Desktop</summary><div style="padding:10px;font-size:14px;color:#ccc;line-height:1.5;">1. Open Outlook &rarr; Calendar view<br>2. Click "Add Calendar" &rarr; "From Internet"<br>3. Paste the URL above<br>4. Click "OK" and name the calendar</div></details>
+<details class="collapsible-section"><summary class="collapsible-summary">Outlook Mobile</summary><div style="padding:10px;font-size:14px;color:#ccc;line-height:1.5;">1. Open Outlook app &rarr; tap the calendar icon<br>2. Tap the gear icon (Settings)<br>3. Tap your account &rarr; "Add Shared Calendar"<br>4. Select "Add from link" or "Subscribe"<br>5. Paste the URL above and save</div></details>
+<details class="collapsible-section"><summary class="collapsible-summary">Outlook Web (outlook.com)</summary><div style="padding:10px;font-size:14px;color:#ccc;line-height:1.5;">1. Go to outlook.com &rarr; Calendar<br>2. Click "Add calendar" in the left sidebar<br>3. Select "Subscribe from web"<br>4. Paste the URL above<br>5. Name it and click "Import"</div></details>
 </div>
 </div>
 </div>
@@ -179,8 +192,25 @@ details[open] .collapsible-summary::after { content: '−'; }
 <label class="field-label">Submitted By *</label>
 <select id="iName" class="field-input">
 <option value="">Select your name</option>
-<option value="other">-- Add name below --</option>
 </select>
+
+<!-- ADD PERSON SECTION — matches job settings pattern -->
+<div style="background:#1a1a1a;border:1px solid #333;border-radius:8px;padding:14px;margin-bottom:14px;">
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
+        <span style="font-size:14px;">👤</span>
+        <span style="font-size:13px;font-weight:600;color:#5a8fc0;">Project Team</span>
+    </div>
+    <div id="teamListContainer"></div>
+    <div style="display:flex;flex-direction:column;gap:8px;margin-top:10px;">
+        <input type="text" id="iNewName" class="field-input" placeholder="Name" style="margin-bottom:0;">
+        <div style="display:flex;gap:8px;">
+            <input type="email" id="iNewEmail" class="field-input" placeholder="Email" style="margin-bottom:0;flex:1;" onkeydown="if(event.key==='Enter')addPersonToTeam();">
+            <button onclick="addPersonToTeam()" style="padding:10px 16px;background:#5a8fc0;border:none;border-radius:6px;color:#fff;font-size:13px;font-weight:700;cursor:pointer;white-space:nowrap;">Add</button>
+        </div>
+        <input type="text" id="iNewCompany" class="field-input" placeholder="Company/Role (optional)" style="margin-bottom:0;">
+    </div>
+</div>
+
 <label class="field-label">Notes</label>
 <textarea id="iNotes" class="field-input" rows="3" placeholder="Optional details"></textarea>
 <label class="field-label">Send a copy to:</label>
@@ -190,24 +220,6 @@ details[open] .collapsible-summary::after { content: '−'; }
     <summary class="collapsible-summary">Additional Email Recipients</summary>
     <div style="padding-bottom:10px;">
         <input type="text" id="additionalEmailsList" class="field-input" placeholder="Emails separated by commas">
-        <label style="display:flex;align-items:center;gap:8px;margin-bottom:10px;font-size:13px;color:#ccc;cursor:pointer;">
-            <input type="checkbox" id="saveEmailsCheck"> Save these emails
-        </label>
-    </div>
-</details>
-<details class="collapsible-section">
-    <summary class="collapsible-summary">Add a New Person to Dropdown</summary>
-    <div style="padding:16px;background:#2a2a2a;border-radius:8px;border-left:4px solid #5a8fc0;">
-        <div style="color:#5a8fc0;font-weight:600;margin-bottom:8px;">Don't see your name? Add it below:</div>
-        <label class="field-label">Your Name</label>
-        <input type="text" id="iNewName" class="field-input">
-        <label class="field-label">Your Email</label>
-        <input type="email" id="iNewEmail" class="field-input">
-        <label class="field-label">Company/Role</label>
-        <input type="text" id="iNewCompany" class="field-input" placeholder="e.g., (Lusardi), (Testing Lab)">
-        <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:#ccc;cursor:pointer;">
-            <input type="checkbox" id="saveNewPersonCheck"> Save for future use
-        </label>
     </div>
 </details>
 <button onclick="submitIR()" id="submitBtn" class="submit-btn">Submit Scheduling Request</button>
@@ -273,7 +285,7 @@ function showDay(d){
             if(e.project!==PROJ) html+=' <span style="color:#888;font-size:11px;">('+e.project+')</span>';
             if(e.inspection_identifier) html+='<div style="color:#e8742a;font-weight:700;font-size:13px;margin:4px 0;">'+e.inspection_identifier+'</div>';
             html+='<div style="font-size:11px;color:#888;margin-top:4px;">By: '+e.submitted_by+'</div>';
-            if(e.status==='scheduled') html+='<div style="color:#4a4;font-size:12px;font-weight:700;margin-top:4px;">✅ Scheduled</div>';
+            if(e.status==='scheduled') html+='<div style="color:#4a4;font-size:12px;font-weight:700;margin-top:4px;">Scheduled</div>';
             if(e.project===PROJ){
                 html+='<div class="evt-actions">';
                 html+='<button class="btn-edit" onclick="editInsp(\''+e.id+'\',\''+e.inspection_date+'\',\''+e.inspection_time.substring(0,5)+'\')">Edit</button>';
@@ -326,7 +338,7 @@ fetch(SB+'/functions/v1/update-inspection',{method:'POST',headers:{'Authorizatio
 };
 }
 var calFeedURL=SB+'/functions/v1/calendar-feed?project='+encodeURIComponent(PROJ);
-function copyCalendarURL(){ navigator.clipboard.writeText(calFeedURL); document.getElementById('copyBtn').textContent='✅ URL Copied!'; }
+function copyCalendarURL(){ navigator.clipboard.writeText(calFeedURL); document.getElementById('copyBtn').textContent='URL Copied!'; }
 function switchTab(t){
 document.querySelectorAll('.tab')[0].classList.toggle('active',t==='calendar');
 document.querySelectorAll('.tab')[1].classList.toggle('active',t==='request');
@@ -375,16 +387,75 @@ function scheduleInsp(id){
 fetch(SB+'/rest/v1/inspection_requests?id=eq.'+id,{method:'PATCH',headers:{'apikey':AK,'Authorization':'Bearer '+AK,'Content-Type':'application/json'},body:JSON.stringify({status:'scheduled'})})
 .then(function(r){if(r.ok){alert('Marked as Scheduled.'); loadMD();} else {alert('Error updating status.');}});
 }
+// ── ADD PERSON TO TEAM (like job settings pattern) ──
+function addPersonToTeam(){
+    var name=document.getElementById('iNewName').value.trim();
+    var email=document.getElementById('iNewEmail').value.trim();
+    var company=document.getElementById('iNewCompany').value.trim();
+    if(!name){alert('Name is required.');return;}
+    // Add to local list immediately
+    var newContact={name:name,email:email,company:company,project:PROJ};
+    savedContacts.push(newContact);
+    renderTeamList();
+    refreshDropdownAndEmails();
+    // Clear inputs
+    document.getElementById('iNewName').value='';
+    document.getElementById('iNewEmail').value='';
+    document.getElementById('iNewCompany').value='';
+    // Save to Supabase in background
+    fetch(SB+'/rest/v1/contacts',{method:'POST',headers:{'apikey':AK,'Authorization':'Bearer '+AK,'Content-Type':'application/json','Prefer':'resolution=merge-duplicates'},body:JSON.stringify({name:name,email:email||null,company:company||null,project:PROJ})}).catch(function(){});
+}
+function removePersonFromTeam(index){
+    savedContacts.splice(index,1);
+    renderTeamList();
+    refreshDropdownAndEmails();
+}
+function renderTeamList(){
+    var container=document.getElementById('teamListContainer');
+    container.innerHTML='';
+    savedContacts.forEach(function(c,i){
+        var row=document.createElement('div');
+        row.className='add-person-row';
+        row.innerHTML='<div class="person-icon">👤</div>'
+            +'<div class="person-info">'
+            +'<div class="person-name">'+c.name+(c.company?' ('+c.company+')':'')+'</div>'
+            +(c.email?'<div class="person-detail">'+c.email+'</div>':'')
+            +'</div>'
+            +'<button class="remove-person" onclick="removePersonFromTeam('+i+')">✕</button>';
+        container.appendChild(row);
+    });
+}
+function refreshDropdownAndEmails(){
+    // Update Submitted By dropdown
+    var sel=document.getElementById('iName');
+    var currentVal=sel.value;
+    sel.innerHTML='<option value="">Select your name</option>';
+    savedContacts.forEach(function(c){
+        var o=document.createElement('option');
+        o.value=c.name;
+        o.textContent=c.name+(c.company?' ('+c.company+')':'');
+        sel.appendChild(o);
+    });
+    // Restore selection if still valid
+    if(currentVal){
+        for(var i=0;i<sel.options.length;i++){
+            if(sel.options[i].value===currentVal){sel.selectedIndex=i;break;}
+        }
+    }
+    // Update email checkboxes
+    var emailContainer=document.getElementById('emailListContainer');
+    emailContainer.innerHTML='';
+    savedContacts.forEach(function(c){
+        if(!c.email)return;
+        var lbl=document.createElement('label');
+        lbl.className='email-row';
+        lbl.innerHTML='<input type="checkbox" value="'+c.email+'" class="emailCheck">'+c.name+(c.company?' ('+c.company+')':'');
+        emailContainer.appendChild(lbl);
+    });
+}
 function submitIR(){
     var d=document.getElementById('iDate').value, t=document.getElementById('iTime').value, nm=document.getElementById('iName').value;
-    var newName=document.getElementById('iNewName').value.trim();
-    if((!nm||nm==='other')&&newName){ nm=newName; }
     if(!nm||allFiles.length===0||!d||!t||!inspType||!inspDur){alert('Missing required fields.'); return;}
-    if(newName && document.getElementById('saveNewPersonCheck').checked){
-        var newEmail=document.getElementById('iNewEmail').value.trim();
-        var newCompany=document.getElementById('iNewCompany').value.trim();
-        fetch(SB+'/rest/v1/contacts',{method:'POST',headers:{'apikey':AK,'Authorization':'Bearer '+AK,'Content-Type':'application/json','Prefer':'resolution=merge-duplicates'},body:JSON.stringify({name:newName,email:newEmail,company:newCompany,project:PROJ})}).catch(function(){});
-    }
     var emails=[];
     document.querySelectorAll('.emailCheck:checked').forEach(function(cb){emails.push(cb.value);});
     var addl=document.getElementById('additionalEmailsList').value.trim();
@@ -411,25 +482,8 @@ function loadContacts(){
     fetch(SB+'/rest/v1/contacts?project=eq.'+encodeURIComponent(PROJ)+'&order=name.asc',{headers:{'apikey':AK,'Authorization':'Bearer '+AK}})
     .then(function(r){return r.json();}).then(function(rows){
         savedContacts=rows||[];
-        var sel=document.getElementById('iName');
-        var first=sel.options[0].outerHTML;
-        var second=sel.options[1].outerHTML;
-        sel.innerHTML=first+second;
-        savedContacts.forEach(function(c){
-            var o=document.createElement('option');
-            o.value=c.name;
-            o.textContent=c.name+(c.company?' ('+c.company+')':'');
-            sel.appendChild(o);
-        });
-        var container=document.getElementById('emailListContainer');
-        container.innerHTML='';
-        savedContacts.forEach(function(c){
-            if(!c.email)return;
-            var lbl=document.createElement('label');
-            lbl.className='email-row';
-            lbl.innerHTML='<input type="checkbox" value="'+c.email+'" class="emailCheck">'+c.name+(c.company?' ('+c.company+')':'');
-            container.appendChild(lbl);
-        });
+        renderTeamList();
+        refreshDropdownAndEmails();
     }).catch(function(){});
 }
 function resetForm(){ location.reload(); }
