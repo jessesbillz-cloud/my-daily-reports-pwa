@@ -24,7 +24,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.9/babel.min.js"></script>
-<!-- JSZip removed — PDF-only uploads, no docx parsing needed -->
+<!-- pdf-lib for PDF generation, pdf.js for text extraction -->
 <script src="https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <script>if(window.pdfjsLib){window.pdfjsLib.GlobalWorkerOptions.workerSrc="";window.pdfjsLib.GlobalWorkerOptions.workerPort=null;window.pdfjsLib.disableWorker=true;}</script>
@@ -61,38 +61,6 @@ async function extractPdfTextStructure(pdfData){
     });
   }
   return allItems;
-}
-
-// Auth helper — sign in with email/password
-async function authSignIn(email,password){
-  const r=await fetch(`${SB_URL}/auth/v1/token?grant_type=password`,{
-    method:"POST",headers:{"Content-Type":"application/json",apikey:SB_KEY},
-    body:JSON.stringify({email,password})
-  });
-  const d=await r.json();
-  if(d.access_token){
-    AUTH_TOKEN=d.access_token;
-    return {id:d.user.id,email:d.user.email,user_metadata:d.user.user_metadata||{}};
-  }
-  throw new Error(d.error_description||d.msg||d.error||"Invalid email or password");
-}
-
-// Auth helper — sign up with email/password
-async function authSignUp(email,password,fullName){
-  const r=await fetch(`${SB_URL}/auth/v1/signup`,{
-    method:"POST",headers:{"Content-Type":"application/json",apikey:SB_KEY},
-    body:JSON.stringify({email,password,data:{full_name:fullName}})
-  });
-  const d=await r.json();
-  if(d.access_token){
-    AUTH_TOKEN=d.access_token;
-    return {id:d.user.id,email:d.user.email,user_metadata:d.user.user_metadata||{full_name:fullName}};
-  }
-  // Supabase returns user object without access_token when email confirmation is required
-  if(d.id&&!d.access_token){
-    throw new Error("CHECK_EMAIL");
-  }
-  throw new Error(d.error_description||d.msg||d.error||"Signup failed");
 }
 
 // Auth helper — check for existing session (refresh token in Supabase cookie/localStorage)
@@ -173,7 +141,7 @@ const db = {
   async jobs(userId){const r=await fetch(`${SB_URL}/rest/v1/jobs?user_id=eq.${userId}&select=*&order=created_at.asc`,{headers:this._h()});if(!r.ok)throw new Error("Failed");return await r.json();},
   async todayRpts(ids){if(!ids.length)return[];const t=new Date().toISOString().split("T")[0];const q=ids.map(i=>`"${i}"`).join(",");const r=await fetch(`${SB_URL}/rest/v1/reports?select=id,job_id,status,report_date&report_date=eq.${t}&job_id=in.(${q})`,{headers:this._h()});if(!r.ok)return[];return await r.json();},
   async mkJob(d){const r=await fetch(`${SB_URL}/rest/v1/jobs`,{method:"POST",headers:this._h(),body:JSON.stringify(d)});if(!r.ok){const e=await r.json();throw new Error(e.message||"Failed");}return(await r.json())[0];},
-  async ulTpl(uid,jid,blob,ext){const p=`${uid}/${jid}/template.${ext||"pdf"}`;const ct=blob.type||"application/octet-stream";let r=await fetch(`${SB_URL}/storage/v1/object/report-source-docs/${p}`,{method:"POST",headers:{apikey:SB_KEY,Authorization:`Bearer ${AUTH_TOKEN||SB_KEY}`,"Content-Type":ct},body:blob});if(!r.ok){r=await fetch(`${SB_URL}/storage/v1/object/report-source-docs/${p}`,{method:"PUT",headers:{apikey:SB_KEY,Authorization:`Bearer ${AUTH_TOKEN||SB_KEY}`,"Content-Type":ct},body:blob});if(!r.ok)throw new Error("Upload failed");}return p;},
+  async ulTpl(uid,jid,blob,ext){const p=`${uid}/${jid}/template.${ext||"pdf"}`;const ct=blob.type||"application/octet-stream";let r=await fetch(`${SB_URL}/storage/v1/object/report-source-docs/${p}`,{method:"POST",headers:{apikey:SB_KEY,Authorization:`Bearer ${AUTH_TOKEN||SB_KEY}`,"Content-Type":ct},body:blob});if(!r.ok){r=await fetch(`${SB_URL}/storage/v1/object/report-source-docs/${p}`,{method:"PUT",headers:{apikey:SB_KEY,Authorization:`Bearer ${AUTH_TOKEN||SB_KEY}`,"Content-Type":ct},body:blob});if(!r.ok){const errBody=await r.text().catch(()=>"");throw new Error("Template upload failed"+(r.status===401?" — session expired, please sign out and back in":r.status===413?" — file too large":": "+r.status+" "+(errBody||"")));}}return p;},
   async mkTpl(d){
     const r=await fetch(`${SB_URL}/rest/v1/templates`,{method:"POST",headers:this._h(),body:JSON.stringify(d)});
     if(r.ok){const txt=await r.text();try{return JSON.parse(txt)[0];}catch(_){return null;}}
@@ -226,10 +194,10 @@ const db = {
       if(!r.ok){const e=await r.json();throw new Error(e.message||"Save failed");}
       return(await r.json())[0];
     }else{
-      // Get next report number for this job (max existing + 1)
+      // Get next report number for this job (max existing + 1, fallback to count)
       const cntR=await fetch(`${SB_URL}/rest/v1/reports?select=report_number&job_id=eq.${d.job_id}&order=report_number.desc&limit=1`,{headers:this._h()});
       const topRpt=cntR.ok?await cntR.json():[];
-      d.report_number=(topRpt[0]?.report_number||0)+1;
+      if(topRpt[0]?.report_number){d.report_number=topRpt[0].report_number+1;}else{const countR=await fetch(`${SB_URL}/rest/v1/reports?select=id&job_id=eq.${d.job_id}&limit=0`,{headers:{...this._h(),Prefer:"count=exact"}});const total=parseInt(countR.headers.get("content-range")?.split("/")[1]||"0");d.report_number=total+1;}
       // Create new report
       const r=await fetch(`${SB_URL}/rest/v1/reports`,{method:"POST",headers:this._h(),body:JSON.stringify(d)});
       if(!r.ok){const e=await r.json();throw new Error(e.message||"Save failed");}
@@ -555,7 +523,7 @@ function CreateJob({user, onBack, onCreated}){
   const [jn,setJn]=useState("");
   const [addr,setAddr]=useState("");
   const [tf,setTf]=useState(null);
-  const [tfBuf,setTfBuf]=useState(null); // cached ArrayBuffer of template file
+  const [tfB64,setTfB64]=useState(null); // cached base64 string of template file (survives iOS Safari GC)
   const [freqOn,setFreqOn]=useState(false);
   const [sched,setSched]=useState("");
   const [days,setDays]=useState([]);
@@ -576,6 +544,13 @@ function CreateJob({user, onBack, onCreated}){
   const [fnConvention,setFnConvention]=useState(null); // AI-detected: {pattern, dateFormat, numberPadding}
   const [savingTpl,setSavingTpl]=useState(false);
   const [tplSaved,setTplSaved]=useState(false); // whether current parse was saved
+  const [showCleanupTips,setShowCleanupTips]=useState(false);
+  const trackParseAttempt=(fileName)=>{
+    const key="mdr_parse_"+fileName.toLowerCase().replace(/\.[^.]+$/,"").replace(/\s+/g,"_");
+    const count=parseInt(localStorage.getItem(key)||"0")+1;
+    localStorage.setItem(key,String(count));
+    if(count>=3)setShowCleanupTips(true);
+  };
 
   // Load saved templates on mount
   useEffect(()=>{
@@ -593,6 +568,7 @@ function CreateJob({user, onBack, onCreated}){
 
   const parseFields=async(buf,fileName)=>{
     setParsing(true);setErr("");setFields([]);
+    trackParseAttempt(fileName);
     try{
       // Step 1: Extract real text positions client-side with pdf.js
       const textItems=await extractPdfTextStructure(new Uint8Array(buf));
@@ -627,12 +603,8 @@ function CreateJob({user, onBack, onCreated}){
       });
       (parsed.locked||[]).forEach(f=>{addUnique(f,"lock");});
       setFields(all);
-      // Store AI-detected filename convention
-      if(parsed.filenameConvention){
-        setFnConvention(parsed.filenameConvention);
-        // Update the editable report title to use the detected pattern (shows tokens to user)
-        if(parsed.filenameConvention.pattern)setReportTitle(parsed.filenameConvention.pattern);
-      }
+      // Store AI-detected filename convention (dateFormat, numberPadding) for auto-numbering
+      if(parsed.filenameConvention)setFnConvention(parsed.filenameConvention);
     }catch(e){
       console.error("Parse error:",e);
       setErr("Could not parse template fields. You can still create the job and configure fields later.");
@@ -642,6 +614,7 @@ function CreateJob({user, onBack, onCreated}){
   // Parse DOCX template — sends raw file to edge function for XML extraction + AI analysis
   const parseDocxFields=async(buf,fileName)=>{
     setParsing(true);setErr("");setFields([]);
+    trackParseAttempt(fileName);
     try{
       // Convert ArrayBuffer to base64
       const bytes=new Uint8Array(buf);
@@ -675,10 +648,7 @@ function CreateJob({user, onBack, onCreated}){
       });
       (parsed.locked||[]).forEach(f=>{addUnique(f,"lock");});
       setFields(all);
-      if(parsed.filenameConvention){
-        setFnConvention(parsed.filenameConvention);
-        if(parsed.filenameConvention.pattern)setReportTitle(parsed.filenameConvention.pattern);
-      }
+      if(parsed.filenameConvention)setFnConvention(parsed.filenameConvention);
     }catch(e){
       console.error("DOCX parse error:",e);
       setErr("Could not parse DOCX fields: "+e.message);
@@ -691,17 +661,18 @@ function CreateJob({user, onBack, onCreated}){
     if(!ALLOWED_EXTS.includes(e)){setErr("Accepted formats: PDF, DOCX, JPG, PNG");return;}
     setTf(f);setErr("");setUsedSavedId(null);setReportTitle(f.name.replace(/\.[^.]+$/,""));setFnConvention(null);setTplSaved(false);
     try{
-      const buf=await f.arrayBuffer();const copy=buf.slice(0);setTfBuf(copy);
+      const buf=await f.arrayBuffer();
+      // Store as base64 string — immune to iOS Safari releasing the file buffer
+      const u8=new Uint8Array(buf);const chunks=[];for(let i=0;i<u8.length;i+=8192)chunks.push(String.fromCharCode.apply(null,u8.subarray(i,i+8192)));
+      setTfB64(btoa(chunks.join("")));
       if(e==="pdf"){
-        parseFields(copy.slice(0),f.name);
+        parseFields(buf.slice(0),f.name);
       }else if(e==="docx"||e==="doc"){
-        // Send docx as base64 to edge function for XML parsing
-        parseDocxFields(copy.slice(0),f.name);
+        parseDocxFields(buf.slice(0),f.name);
       }else{
-        // Image template — no field parsing, just store as-is
         setFields([]);setParsing(false);
       }
-    }catch(bufErr){console.error("File buffer read:",bufErr);}
+    }catch(bufErr){console.error("File buffer read:",bufErr);setErr("Could not read file. Try again.");}
   };
 
   // Use a saved template — loads fields without re-parsing, but still needs the actual file uploaded
@@ -732,7 +703,7 @@ function CreateJob({user, onBack, onCreated}){
     const e=f.name.split(".").pop().toLowerCase();
     if(!ALLOWED_EXTS.includes(e)){setErr("Accepted formats: PDF, DOCX, JPG, PNG");return;}
     setTf(f);setErr("");
-    try{const buf=await f.arrayBuffer();setTfBuf(buf);}catch(bufErr){console.error("File buffer read:",bufErr);}
+    try{const buf=await f.arrayBuffer();const u8=new Uint8Array(buf);const chunks=[];for(let i=0;i<u8.length;i+=8192)chunks.push(String.fromCharCode.apply(null,u8.subarray(i,i+8192)));setTfB64(btoa(chunks.join("")));}catch(bufErr){console.error("File buffer read:",bufErr);setErr("Could not read file. Try again.");}
     // Fields already loaded from saved template — no parsing needed
   };
 
@@ -778,7 +749,7 @@ function CreateJob({user, onBack, onCreated}){
   const ok=jn.trim();
 
   const create=async()=>{
-    if(!ok)return;setSaving(true);setErr("");
+    if(!ok){setErr("Job name is required.");return;}setSaving(true);setErr("");
     try{
       const es=effSch();
       // Use edited report title as the pattern — user can tweak what AI detected
@@ -787,44 +758,49 @@ function CreateJob({user, onBack, onCreated}){
       const convention=fnConvention?{pattern:filePattern,dateFormat:fnConvention.dateFormat||"",numberPadding:fnConvention.numberPadding||0}:{pattern:filePattern,dateFormat:"",numberPadding:0};
       const coords=(f)=>({page:f.page,x:f.x,y:f.y,w:f.w,h:f.h,fontSize:f.fontSize,multiline:f.multiline});
       // Fields marked lockAfterCreate (from saved template reuse) go back to locked with the user's new values
-      const editFields=fields.filter(f=>f.mode==="edit"&&!f.lockAfterCreate).map(f=>({name:f.name,value:f.value,originalValue:f.value||"",voiceEnabled:true,...coords(f)}));
+      const editFields=fields.filter(f=>f.mode==="edit"&&!f.lockAfterCreate).map(f=>({name:f.name,value:"",originalValue:f.value||"",voiceEnabled:true,...coords(f)}));
       const lockFields=[...fields.filter(f=>f.mode==="lock"),...fields.filter(f=>f.mode==="edit"&&f.lockAfterCreate)].map(f=>({name:f.name,value:f.value,...coords(f)}));
       const autoFields=fields.filter(f=>f.mode==="auto-date"||f.mode==="auto-num").map(f=>({name:f.name,value:f.value,originalValue:f.value||"",autoFill:f.mode==="auto-date"?"date":"increment",...coords(f)}));
       const fc={editable:[...editFields,...autoFields],locked:lockFields,filenameConvention:convention};
       const job=await db.mkJob({user_id:user.id,name:jn.trim(),site_address:addr.trim()||null,report_filename_pattern:filePattern,schedule:es,schedule_days:es==="custom"?days:[],reminder_enabled:remOn,reminder_time:remOn?remT:null,reminder_hours_before:remOn?remH:null,scheduling_enabled:schedOn,field_config:fc});
       if(tf&&job?.id){
-        const ext=tf.name.split(".").pop().toLowerCase();
-        // Use cached buffer (read once when file was selected) — prevents Safari file-release issues
-        // Always use a fresh slice to avoid detached buffer issues
-        let fileBuf;
-        try{fileBuf=tfBuf?tfBuf.slice(0):await tf.arrayBuffer();}catch(e){console.error("Buffer read fallback:",e);}
-        if(!fileBuf){console.error("No file buffer available");throw new Error("Could not read template file. Please try uploading again.");}
-        const fileBlob=new Blob([fileBuf.slice(0)],{type:tf.type||"application/octet-stream"});
-        const sp=await db.ulTpl(user.id,job.id,fileBlob,ext);
-        let pagePaths=[];
-        // Render PDF pages to images for preview cache (non-blocking)
-        if(ext==="pdf"&&window.pdfjsLib){
-          try{
-            const renderBuf=fileBuf.slice(0);
-            const pjDoc=await window.pdfjsLib.getDocument({data:renderBuf}).promise;
-            const imgs=[];
-            for(let i=1;i<=pjDoc.numPages;i++){
-              const pg=await pjDoc.getPage(i);
-              const vp=pg.getViewport({scale:1.5});
-              const cvs=document.createElement("canvas");cvs.width=vp.width;cvs.height=vp.height;
-              await pg.render({canvasContext:cvs.getContext("2d"),viewport:vp}).promise;
-              imgs.push(cvs.toDataURL("image/jpeg",0.85));
-              cvs.width=0;cvs.height=0;
-            }
-            pagePaths=await db.saveTemplatePages(user.id,job.id,imgs);
-          }catch(pgErr){console.error("Template page render:",pgErr);}
+        try{
+          const ext=tf.name.split(".").pop().toLowerCase();
+          // Convert from base64 string back to Blob for upload
+          if(!tfB64)throw new Error("Template file data was lost. Please go back and re-upload the file.");
+          const raw=atob(tfB64);const u8=new Uint8Array(raw.length);for(let i=0;i<raw.length;i++)u8[i]=raw.charCodeAt(i);
+          const fileBuf=u8.buffer;
+          const fileBlob=new Blob([u8],{type:tf.type||"application/octet-stream"});
+          const sp=await db.ulTpl(user.id,job.id,fileBlob,ext);
+          let pagePaths=[];
+          // Render PDF pages to images for preview cache (non-blocking)
+          if(ext==="pdf"&&window.pdfjsLib){
+            try{
+              const renderBuf=fileBuf.slice(0);
+              const pjDoc=await window.pdfjsLib.getDocument({data:renderBuf}).promise;
+              const imgs=[];
+              for(let i=1;i<=pjDoc.numPages;i++){
+                const pg=await pjDoc.getPage(i);
+                const vp=pg.getViewport({scale:1.5});
+                const cvs=document.createElement("canvas");cvs.width=vp.width;cvs.height=vp.height;
+                await pg.render({canvasContext:cvs.getContext("2d"),viewport:vp}).promise;
+                imgs.push(cvs.toDataURL("image/jpeg",0.85));
+                cvs.width=0;cvs.height=0;
+              }
+              pagePaths=await db.saveTemplatePages(user.id,job.id,imgs);
+            }catch(pgErr){console.error("Template page render:",pgErr);}
+          }
+          const tplData={user_id:user.id,job_id:job.id,name:tf.name,original_filename:tf.name,file_type:ext,storage_path:sp,field_config:fields.length?fields:[]};
+          if(pagePaths.length>0)tplData.structure_map={page_images:pagePaths};
+          await db.mkTpl(tplData);
+        }catch(tplErr){
+          // Template upload failed — clean up the orphan job so no ghost card appears
+          try{await db.deleteJob(job.id);}catch(delErr){console.error("Cleanup failed:",delErr);}
+          throw tplErr;
         }
-        const tplData={user_id:user.id,job_id:job.id,name:tf.name,original_filename:tf.name,file_type:ext,storage_path:sp,field_config:fields.length?fields:[]};
-        if(pagePaths.length>0)tplData.structure_map={page_images:pagePaths};
-        await db.mkTpl(tplData);
       }
       onCreated();
-    }catch(e){setErr(e.message);}finally{setSaving(false);}
+    }catch(e){setErr(e.message||"Something went wrong. Please try again.");}finally{setSaving(false);}
   };
 
   // Toggle box component
@@ -857,10 +833,10 @@ function CreateJob({user, onBack, onCreated}){
         {err&&<div style={{background:"#2d1214",border:"1px solid #5c2023",borderRadius:8,padding:"10px 14px",marginBottom:16,color:C.err,fontSize:13}}>{err}</div>}
 
         {/* Job Name — required */}
-        <div style={{marginBottom:20}}><label style={ls}>Job Name *</label><input type="text" placeholder="Oceanside District Office" value={jn} onChange={e=>setJn(e.target.value)} style={fs}/></div>
+        <div style={{marginBottom:20}}><label style={ls}>Job Name *</label><input type="text" value={jn} onChange={e=>setJn(e.target.value)} style={fs}/></div>
 
         {/* Site Address — optional */}
-        <div style={{marginBottom:20}}><label style={ls}>Site Address</label><input type="text" placeholder="2111 Mission Ave, Oceanside CA 92058" value={addr} onChange={e=>setAddr(e.target.value)} style={fs}/></div>
+        <div style={{marginBottom:20}}><label style={ls}>Site Address</label><input type="text" value={addr} onChange={e=>setAddr(e.target.value)} style={fs}/></div>
 
         {/* Template Section */}
         <div style={{marginBottom:20}}>
@@ -912,18 +888,18 @@ function CreateJob({user, onBack, onCreated}){
                   <div style={{fontSize:14,fontWeight:600,color:C.txt}}>{tf.name}</div>
                   <div style={{fontSize:12,color:C.mut}}>{usedSavedId?"Using saved template — no parsing needed":"New upload"}</div>
                 </div>
-                <button onClick={()=>{setTf(null);setTfBuf(null);setFields([]);setUsedSavedId(null);setReportTitle("");setFnConvention(null);setTplSaved(false);}} style={{background:"none",border:"none",color:"#ef4444",cursor:"pointer",fontSize:18}}>✕</button>
+                <button onClick={()=>{setTf(null);setTfB64(null);setFields([]);setUsedSavedId(null);setReportTitle("");setFnConvention(null);setTplSaved(false);}} style={{background:"none",border:"none",color:"#ef4444",cursor:"pointer",fontSize:18}}>✕</button>
               </div>
             </div>
           )}
         </div>
 
-        {/* Report Title — editable, populated from AI-detected pattern or saved template */}
+        {/* Report Naming Convention — uses the uploaded filename directly */}
         {reportTitle&&(
           <div style={{marginBottom:20}}>
             <label style={ls}>Report Naming Convention</label>
-            <input type="text" value={reportTitle} onChange={e=>{setReportTitle(e.target.value);setFnConvention(prev=>prev?{...prev,pattern:e.target.value}:prev);}} style={fs} placeholder="e.g. Daily Report {report_number} Woodland Park {date}"/>
-            <p style={{color:C.mut,fontSize:11,marginTop:4}}>{"{report_number}"} = auto-incremented report # · {"{date}"} = today's date{fnConvention?.dateFormat?` (${fnConvention.dateFormat})`:""} · {"{year}"} = current year</p>
+            <input type="text" value={reportTitle} onChange={e=>{setReportTitle(e.target.value);setFnConvention(prev=>prev?{...prev,pattern:e.target.value}:prev);}} style={fs}/>
+            <p style={{color:C.mut,fontSize:11,marginTop:4}}>This will be your naming convention going forward. The report number and date will auto-populate sequentially.</p>
           </div>
         )}
 
@@ -934,6 +910,25 @@ function CreateJob({user, onBack, onCreated}){
             <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
             <p style={{color:C.lt,fontSize:14,fontWeight:600,margin:"0 0 4px"}}>Analyzing template fields...</p>
             <p style={{color:C.mut,fontSize:12,margin:0}}>AI is detecting fillable fields in your document. This may take 10-20 seconds.</p>
+          </div>
+        )}
+
+        {/* ── Template Cleanup Tips (shows after 3+ parse attempts on same file) ── */}
+        {showCleanupTips&&!parsing&&(
+          <div style={{background:"rgba(232,116,42,0.08)",border:`1px solid ${C.org}`,borderRadius:12,padding:"16px 20px",marginBottom:20}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
+              <div style={{fontWeight:700,fontSize:14,color:C.org,marginBottom:8}}>Template Cleanup Tips</div>
+              <button onClick={()=>setShowCleanupTips(false)} style={{background:"none",border:"none",color:C.mut,fontSize:18,cursor:"pointer",padding:0,lineHeight:1}}>&times;</button>
+            </div>
+            <p style={{color:C.lt,fontSize:13,margin:"0 0 10px",lineHeight:1.5}}>Looks like this template needs some cleanup. Hidden formatting, extra blank pages, or embedded form fields can interfere with field detection.</p>
+            <p style={{color:C.lt,fontSize:13,margin:"0 0 8px",lineHeight:1.5,fontWeight:600}}>Quick fix — paste this into Copilot or Gemini with your file:</p>
+            <div style={{background:C.inp,border:`1px solid ${C.brd}`,borderRadius:8,padding:"10px 12px",fontSize:12,color:C.mut,lineHeight:1.5,marginBottom:10,userSelect:"all",cursor:"text"}}>
+              Analyze this PDF template and create a clean version. Remove: hidden text layers, embedded form fields, blank continuation pages with little content. Keep the exact same visual layout, tables, headers, logos, and colors. Output as a new clean PDF.
+            </div>
+            <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+              <a href="https://copilot.microsoft.com" target="_blank" rel="noopener" style={{display:"inline-block",padding:"8px 16px",background:C.blu,color:"#fff",borderRadius:8,fontSize:13,fontWeight:600,textDecoration:"none"}}>Open Copilot</a>
+              <a href="https://gemini.google.com" target="_blank" rel="noopener" style={{display:"inline-block",padding:"8px 16px",background:C.blu,color:"#fff",borderRadius:8,fontSize:13,fontWeight:600,textDecoration:"none"}}>Open Gemini</a>
+            </div>
           </div>
         )}
 
@@ -1281,9 +1276,9 @@ function ReportEditor({job, user, onBack, reportDate}){
     setViewLoading(true);
     try{
       const tplRecord=await db.getTemplate(job.id);
-      if(!tplRecord||!tplRecord.storage_path)throw new Error("No template found.");
-      // For non-PDF templates, show a simple text preview
-      if(tplRecord.file_type&&tplRecord.file_type!=="pdf"){
+      // No template or non-PDF — show a text-based field preview
+      if(!tplRecord||!tplRecord.storage_path||
+        (tplRecord.file_type&&tplRecord.file_type!=="pdf")){
         const allFields=buildEditableFields();
         const cvs=document.createElement("canvas");cvs.width=612*2;cvs.height=792*2;
         const ctx=cvs.getContext("2d");ctx.fillStyle="#ffffff";ctx.fillRect(0,0,cvs.width,cvs.height);
@@ -1302,10 +1297,15 @@ function ReportEditor({job, user, onBack, reportDate}){
         setViewLoading(false);
         return;
       }
-      const tplResp=await fetch(`${SB_URL}/storage/v1/object/report-source-docs/${tplRecord.storage_path}`,{
+      let tplResp=await fetch(`${SB_URL}/storage/v1/object/report-source-docs/${tplRecord.storage_path}`,{
         headers:{apikey:SB_KEY,Authorization:`Bearer ${AUTH_TOKEN||SB_KEY}`}
       });
-      if(!tplResp.ok)throw new Error("Could not download template.");
+      // If auth fails, try refreshing the session and retry once
+      if(tplResp.status===401||tplResp.status===403){
+        const refreshed=await authGetSession();
+        if(refreshed){tplResp=await fetch(`${SB_URL}/storage/v1/object/report-source-docs/${tplRecord.storage_path}`,{headers:{apikey:SB_KEY,Authorization:`Bearer ${AUTH_TOKEN||SB_KEY}`}});}
+      }
+      if(!tplResp.ok)throw new Error("Could not download template ("+tplResp.status+"). Try signing out and back in.");
       const tplBytes=await tplResp.arrayBuffer();
       // Validate PDF magic bytes
       const header=new Uint8Array(tplBytes.slice(0,5));
@@ -1395,10 +1395,14 @@ function ReportEditor({job, user, onBack, reportDate}){
       // ── 1. Look up template ──
       const tplRecord=await db.getTemplate(job.id);
       if(!tplRecord||!tplRecord.storage_path)throw new Error("No template found. Upload a template in Job Settings first.");
-      const tplResp=await fetch(`${SB_URL}/storage/v1/object/report-source-docs/${tplRecord.storage_path}`,{
+      let tplResp=await fetch(`${SB_URL}/storage/v1/object/report-source-docs/${tplRecord.storage_path}`,{
         headers:{apikey:SB_KEY,Authorization:`Bearer ${AUTH_TOKEN||SB_KEY}`}
       });
-      if(!tplResp.ok)throw new Error("Could not download template file.");
+      if(tplResp.status===401||tplResp.status===403){
+        const refreshed=await authGetSession();
+        if(refreshed){tplResp=await fetch(`${SB_URL}/storage/v1/object/report-source-docs/${tplRecord.storage_path}`,{headers:{apikey:SB_KEY,Authorization:`Bearer ${AUTH_TOKEN||SB_KEY}`}});}
+      }
+      if(!tplResp.ok)throw new Error("Could not download template ("+tplResp.status+"). Try signing out and back in.");
       const tplBytes=await tplResp.arrayBuffer();
       const isPdfTemplate=tplRecord.file_type==="pdf";
       const isDocxTemplate=tplRecord.file_type==="docx"||tplRecord.file_type==="doc";
@@ -1410,8 +1414,8 @@ function ReportEditor({job, user, onBack, reportDate}){
         allFields.forEach(f=>{if(f.val)fieldValues[f.name]=f.val;});
         // Convert template to base64
         const tplUint8=new Uint8Array(tplBytes);
-        let tplBin="";for(let i=0;i<tplUint8.length;i++)tplBin+=String.fromCharCode(tplUint8[i]);
-        const tplB64=btoa(tplBin);
+        const tplChunks=[];for(let i=0;i<tplUint8.length;i+=8192)tplChunks.push(String.fromCharCode.apply(null,tplUint8.subarray(i,i+8192)));
+        const tplB64=btoa(tplChunks.join(""));
         // Call generate-docx edge function
         const genResp=await fetch(`${SB_URL}/functions/v1/generate-docx`,{
           method:"POST",
@@ -1423,12 +1427,12 @@ function ReportEditor({job, user, onBack, reportDate}){
         if(genData.error)throw new Error(genData.error);
         // Decode the returned filled DOCX
         const filledBytes=Uint8Array.from(atob(genData.docx_base64),c=>c.charCodeAt(0));
-        const pdfBlob=new Blob([filledBytes],{type:"application/vnd.openxmlformats-officedocument.wordprocessingml.document"});
-        let binary="";for(let i=0;i<filledBytes.length;i++)binary+=String.fromCharCode(filledBytes[i]);
-        const pdfBase64=btoa(binary);
+        const docxBlob=new Blob([filledBytes],{type:"application/vnd.openxmlformats-officedocument.wordprocessingml.document"});
+        const chunks=[];for(let i=0;i<filledBytes.length;i+=8192)chunks.push(String.fromCharCode.apply(null,filledBytes.subarray(i,i+8192)));
+        const docxBase64=btoa(chunks.join(""));
         // Build filename (same logic as PDF path)
         let rptNumber=1;
-        try{const cntR=await fetch(`${SB_URL}/rest/v1/reports?select=report_number&job_id=eq.${job.id}&order=report_number.desc&limit=1`,{headers:db._h()});const topR=cntR.ok?await cntR.json():[];rptNumber=(topR[0]?.report_number||0)+1;}catch(e){}
+        try{const cntR=await fetch(`${SB_URL}/rest/v1/reports?select=report_number&job_id=eq.${job.id}&order=report_number.desc&limit=1`,{headers:db._h()});const topR=cntR.ok?await cntR.json():[];if(topR[0]?.report_number){rptNumber=topR[0].report_number+1;}else{const countR=await fetch(`${SB_URL}/rest/v1/reports?select=id&job_id=eq.${job.id}&limit=0`,{headers:{...db._h(),Prefer:"count=exact"}});const total=parseInt(countR.headers.get("content-range")?.split("/")[1]||"0");rptNumber=total+1;}}catch(e){}
         if(draftId){try{const exR=await fetch(`${SB_URL}/rest/v1/reports?select=report_number&id=eq.${draftId}`,{headers:db._h()});const exD=exR.ok?await exR.json():[];if(exD[0]?.report_number)rptNumber=exD[0].report_number;}catch(e){}}
         const conv=job.field_config?.filenameConvention||{};
         const padding=conv.numberPadding||0;
@@ -1446,23 +1450,24 @@ function ReportEditor({job, user, onBack, reportDate}){
         baseName=baseName.replace(/\{report_number\}/g,rptNum);
         baseName=baseName.replace(/\{date\}/g,formatDate(conv.dateFormat));
         baseName=baseName.replace(/\{year\}/g,fmtYYYY);
-        const pdfFilename=baseName+".docx";
+        const docxFilename=baseName+".docx";
         // Save report
         const vals={};const lockVals={};
         allFields.forEach(f=>{if(f.autoFill||f.mode==="edit")vals[f.name]=f.val;else lockVals[f.name]=f.val;});
         const reportContent={vals,lockVals,photos:[],photoLayout:"1",lockFields:[],editFields:allFields};
         await db.saveReport({job_id:job.id,user_id:user.id,report_date:todayISO,status:"submitted",content:JSON.stringify(reportContent),updated_at:new Date().toISOString()});
-        const storagePath=`${user.id}/${job.id}/reports/${pdfFilename}`;
+        const storagePath=`${user.id}/${job.id}/reports/${docxFilename}`;
         let upR=await fetch(`${SB_URL}/storage/v1/object/report-source-docs/${storagePath}`,{
-          method:"POST",headers:{apikey:SB_KEY,Authorization:`Bearer ${AUTH_TOKEN||SB_KEY}`,"Content-Type":"application/octet-stream"},body:pdfBlob
+          method:"POST",headers:{apikey:SB_KEY,Authorization:`Bearer ${AUTH_TOKEN||SB_KEY}`,"Content-Type":"application/octet-stream"},body:docxBlob
         });
         if(!upR.ok){await fetch(`${SB_URL}/storage/v1/object/report-source-docs/${storagePath}`,{
-          method:"PUT",headers:{apikey:SB_KEY,Authorization:`Bearer ${AUTH_TOKEN||SB_KEY}`,"Content-Type":"application/octet-stream"},body:pdfBlob
+          method:"PUT",headers:{apikey:SB_KEY,Authorization:`Bearer ${AUTH_TOKEN||SB_KEY}`,"Content-Type":"application/octet-stream"},body:docxBlob
         });}
         const userName=user.user_metadata?.full_name||user.email?.split("@")[0]||"Inspector";
         const emailHtml=`<div style="font-family:-apple-system,sans-serif;max-width:600px;"><div style="background:#e8742a;padding:20px 24px;border-radius:8px 8px 0 0;"><h1 style="color:#fff;margin:0;font-size:20px;">My Daily Reports</h1></div><div style="background:#f9f9f9;padding:24px;border:1px solid #e0e0e0;border-top:none;border-radius:0 0 8px 8px;"><p style="color:#333;font-size:16px;">${userName} has submitted the daily report for <strong>${job.name}</strong> on ${todayDisplay}.</p><p style="color:#555;font-size:14px;">The filled DOCX report is attached.</p></div></div>`;
-        const teamEmails=job.team_emails||[];
-        setSubmitSuccess({pdfBlob,pdfFilename,pdfBase64,emailHtml,teamEmails,jobName:job.name,todayDisplay,userName});
+        const rawTeam=job.team_emails||[];
+        const teamEmails=rawTeam.map(m=>typeof m==="string"?m:m.email).filter(Boolean);
+        setSubmitSuccess({pdfBlob:docxBlob,pdfFilename:docxFilename,pdfBase64:docxBase64,emailHtml,teamEmails,jobName:job.name,todayDisplay,userName});
         setSubmitting(false);
         return;
       }
@@ -1516,7 +1521,13 @@ function ReportEditor({job, user, onBack, reportDate}){
         }
       });
 
-      // ── 5. Photos on new pages — embed header/footer clips from template onto blank pages ──
+      // ── 5. Remove empty trailing pages (no fields reference them) before adding photos ──
+      if(photos.length>0&&srcDoc&&pdfDoc.getPageCount()>1){
+        const maxFieldPage=Math.max(...allFields.map(f=>f.page||1),1);
+        for(let p=pdfDoc.getPageCount();p>maxFieldPage;p--){pdfDoc.removePage(p-1);}
+      }
+
+      // ── 6. Photos on new pages — embed header/footer clips from template onto blank pages ──
       // photoLayout: "1"=1 per page, "2"=2 per page (1 col, 2 rows), "4"=4 per page (2 cols, 2 rows)
       if(photos.length>0){
         const pageW=pages.length>0?pages[0].getWidth():612;
@@ -1591,12 +1602,12 @@ function ReportEditor({job, user, onBack, reportDate}){
       const filledPdfBytes=await pdfDoc.save();
       const pdfBlob=new Blob([filledPdfBytes],{type:"application/pdf"});
       const uint8=new Uint8Array(filledPdfBytes);
-      let binary="";for(let i=0;i<uint8.length;i++)binary+=String.fromCharCode(uint8[i]);
-      const pdfBase64=btoa(binary);
+      const chunks=[];for(let i=0;i<uint8.length;i+=8192)chunks.push(String.fromCharCode.apply(null,uint8.subarray(i,i+8192)));
+      const pdfBase64=btoa(chunks.join(""));
 
       // ── 7. Build filename using AI-detected convention ──
       let rptNumber=1;
-      try{const cntR=await fetch(`${SB_URL}/rest/v1/reports?select=report_number&job_id=eq.${job.id}&order=report_number.desc&limit=1`,{headers:db._h()});const topR=cntR.ok?await cntR.json():[];rptNumber=(topR[0]?.report_number||0)+1;}catch(e){}
+      try{const cntR=await fetch(`${SB_URL}/rest/v1/reports?select=report_number&job_id=eq.${job.id}&order=report_number.desc&limit=1`,{headers:db._h()});const topR=cntR.ok?await cntR.json():[];if(topR[0]?.report_number){rptNumber=topR[0].report_number+1;}else{const countR=await fetch(`${SB_URL}/rest/v1/reports?select=id&job_id=eq.${job.id}&limit=0`,{headers:{...db._h(),Prefer:"count=exact"}});const total=parseInt(countR.headers.get("content-range")?.split("/")[1]||"0");rptNumber=total+1;}}catch(e){}
       if(draftId){try{const exR=await fetch(`${SB_URL}/rest/v1/reports?select=report_number&id=eq.${draftId}`,{headers:db._h()});const exD=exR.ok?await exR.json():[];if(exD[0]?.report_number)rptNumber=exD[0].report_number;}catch(e){}}
       const conv=job.field_config?.filenameConvention||{};
       const padding=conv.numberPadding||0;
@@ -1683,14 +1694,18 @@ function ReportEditor({job, user, onBack, reportDate}){
       const recipients=[...new Set([userEmail,...submitSuccess.teamEmails])].filter(Boolean);
       if(recipients.length===0){showToast("No team emails configured. Add them in Job Settings.");setEmailing(false);return;}
       const r=await fetch(`${SB_URL}/functions/v1/send-report`,{
-        method:"POST",headers:{"Content-Type":"application/json",Authorization:`Bearer ${SB_KEY}`,apikey:SB_KEY},
+        method:"POST",headers:{"Content-Type":"application/json",Authorization:`Bearer ${AUTH_TOKEN||SB_KEY}`,apikey:SB_KEY},
         body:JSON.stringify({to:recipients,subject:`${submitSuccess.jobName} — Daily Report ${submitSuccess.todayDisplay}`,html_body:submitSuccess.emailHtml,pdf_base64:submitSuccess.pdfBase64,pdf_filename:submitSuccess.pdfFilename})
       });
-      if(!r.ok)throw new Error("Email send failed");
+      if(!r.ok){const errBody=await r.json().catch(()=>({}));throw new Error(errBody.error||`Email send failed (${r.status})`);}
       showToast("Report emailed to "+recipients.length+" recipient"+(recipients.length>1?"s":"")+"!");
     }catch(e){
       console.error("Email error:",e);
-      showToast("Email failed: "+e.message);
+      const msg=e.message||"Unknown error";
+      if(msg.includes("RESEND_API_KEY"))showToast("Email not configured: Set RESEND_API_KEY in Supabase Edge Function secrets.");
+      else if(msg.includes("404")||msg.includes("FunctionNotFound"))showToast("Email function not deployed. Run: npx supabase functions deploy send-report");
+      else if(msg.includes("validation_error")||msg.includes("not verified"))showToast("Email domain not verified in Resend. Verify your sending domain at resend.com.");
+      else showToast("Email failed: "+msg);
     }finally{setEmailing(false);}
   };
 
@@ -1937,6 +1952,8 @@ function ReportEditor({job, user, onBack, reportDate}){
 
 /* ── Job Detail (Job Dashboard) ── */
 function JobDetail({job, user, onBack, onDeleted}){
+  const [jdToast,setJdToast]=useState("");
+  const showToast=(msg)=>{setJdToast(msg);setTimeout(()=>setJdToast(""),3000);};
   const [showDel,setShowDel]=useState(false);
   const [deleting,setDeleting]=useState(false);
   const [showJobSet,setShowJobSet]=useState(false);
@@ -1956,17 +1973,13 @@ function JobDetail({job, user, onBack, onDeleted}){
       const parsed=await resp.json();
       if(parsed.error)throw new Error(parsed.error);
       const coords=(f)=>({page:f.page,x:f.x,y:f.y,w:f.w,h:f.h,fontSize:f.fontSize,multiline:f.multiline});
-      const editFields=(parsed.editable||[]).map(f=>({name:f.name,value:f.value||"",originalValue:f.value||"",voiceEnabled:f.voiceEnabled||false,autoFill:f.autoFill||null,...coords(f)}));
-      const lockFields=(parsed.locked||[]).map(f=>({name:f.name,value:f.value||"",...coords(f)}));
-      await db.updateFieldConfig(job.id,{editable:editFields,locked:lockFields});
-      // Update local state
-      const fc={editable:editFields,locked:lockFields};
-      job.field_config=fc;
-      const initE=(fc.editable||[]).filter(f=>!f.autoFill);
-      const initL=fc.locked||[];
-      const initA=(fc.editable||[]).filter(f=>f.autoFill);
-      setEditFields([...initE,...initA]);setLockFields(initL);
-      showToast("Template re-parsed with updated field positions!");
+      const editF=(parsed.editable||[]).map(f=>({name:f.name,value:f.value||"",originalValue:f.value||"",voiceEnabled:f.voiceEnabled||false,autoFill:f.autoFill||null,...coords(f)}));
+      const lockF=(parsed.locked||[]).map(f=>({name:f.name,value:f.value||"",...coords(f)}));
+      const newConfig={editable:editF,locked:lockF};
+      await db.updateJobFieldConfig(job.id,newConfig);
+      // Update the job object directly so next ReportEditor open picks up new fields
+      job.field_config=newConfig;
+      showToast("Template re-parsed with updated field positions! Open a report to see the changes.");
     }catch(e){console.error("Reparse error:",e);showToast("Re-parse failed: "+e.message);}
     finally{setReparsing(false);}
   };
@@ -2080,12 +2093,13 @@ function JobDetail({job, user, onBack, onDeleted}){
     </div>
   );
 
-  if(showReport)return<ReportEditor job={job} user={user} onBack={closeReport} reportDate={editDate}/>;
+  if(showReport)return<ReportEditor key={job.id+"-"+(editDate||"")} job={job} user={user} onBack={closeReport} reportDate={editDate}/>;
 
   if(loading)return(<div style={{minHeight:"100vh",background:C.bg,display:"flex",alignItems:"center",justifyContent:"center"}}><p style={{color:C.mut}}>Loading...</p></div>);
 
   return(
     <div style={{minHeight:"100vh",background:C.bg,color:C.txt}}>
+      {jdToast&&<div style={{position:"fixed",top:60,left:"50%",transform:"translateX(-50%)",background:C.card,border:`1px solid ${C.ok}`,borderRadius:10,padding:"10px 20px",fontSize:14,fontWeight:600,color:C.ok,zIndex:9999}}>{jdToast}</div>}
       {/* Header */}
       <div style={{display:"flex",alignItems:"center",gap:12,padding:"16px 20px",borderBottom:`1px solid ${C.brd}`,background:C.card}}>
         <button onClick={onBack} style={{background:"none",border:"none",color:C.blu,fontSize:28,cursor:"pointer",padding:"8px 12px",lineHeight:1,borderRadius:8,minWidth:48,minHeight:48,display:"flex",alignItems:"center",justifyContent:"center"}}>←</button>
@@ -2248,7 +2262,23 @@ function JobDetail({job, user, onBack, onDeleted}){
               </button>
             </div>
             {schedEnabled&&(
-              <div style={{fontSize:12,color:C.ok,lineHeight:1.5,marginBottom:12}}>This job will appear on your shared calendar. Anyone with your calendar link can request visits for this job.</div>
+              <div>
+                <div style={{fontSize:12,color:C.ok,lineHeight:1.5,marginBottom:12}}>This job will appear on your shared calendar. Anyone with your calendar link can request visits for this job.</div>
+                <div style={{background:C.inp,border:`1px solid ${C.brd}`,borderRadius:8,padding:12,marginBottom:12}}>
+                  <div style={{fontSize:12,fontWeight:700,color:C.blu,marginBottom:6}}>Your Calendar Link</div>
+                  <div style={{fontSize:11,color:C.org,wordBreak:"break-all",marginBottom:8,fontWeight:600}}>{`${window.location.origin}${window.location.pathname.replace(/index\.html$/,"").replace(/\/$/,"")}/schedule.html#${slug}`}</div>
+                  <button onClick={async()=>{const url=`${window.location.origin}${window.location.pathname.replace(/index\.html$/,"").replace(/\/$/,"")}/schedule.html#${slug}`;try{await navigator.clipboard.writeText(url);alert("Calendar link copied!");}catch(e){alert(url);}}} style={{width:"100%",padding:"8px 0",fontSize:12,fontWeight:700,borderRadius:6,background:C.blu,border:"none",color:"#fff",cursor:"pointer",marginBottom:10}}>Copy Calendar Link</button>
+                  <details style={{borderTop:`1px solid ${C.brd}`,paddingTop:8}}>
+                    <summary style={{fontSize:12,color:C.blu,fontWeight:600,cursor:"pointer",listStyle:"none",display:"flex",justifyContent:"space-between",alignItems:"center"}}>Subscribe to Your Own Calendar<span style={{fontSize:14}}>+</span></summary>
+                    <div style={{paddingTop:8,fontSize:12,color:C.lt,lineHeight:1.6}}>
+                      <div style={{marginBottom:8}}><strong style={{color:C.txt}}>iPhone:</strong> Settings → Calendar → Accounts → Add Account → Other → Add Subscribed Calendar → paste the URL above</div>
+                      <div style={{marginBottom:8}}><strong style={{color:C.txt}}>Android / Google:</strong> Open Google Calendar on desktop → click + next to "Other calendars" → From URL → paste the URL above</div>
+                      <div style={{marginBottom:8}}><strong style={{color:C.txt}}>Outlook Desktop:</strong> Calendar view → Add Calendar → From Internet → paste the URL above</div>
+                      <div><strong style={{color:C.txt}}>Outlook Mobile:</strong> Calendar → Settings → Add Shared Calendar → Add from link → paste the URL above</div>
+                    </div>
+                  </details>
+                </div>
+              </div>
             )}
             <button onClick={async()=>{setSchedSaving(true);try{await fetch(`${SB_URL}/rest/v1/jobs?id=eq.${job.id}`,{method:"PATCH",headers:db._h(),body:JSON.stringify({scheduling_enabled:schedEnabled})});job.scheduling_enabled=schedEnabled;setShowSchedSet(false);}catch(e){alert("Save failed: "+e.message);}finally{setSchedSaving(false);}}} disabled={schedSaving} style={{width:"100%",padding:"12px 0",background:C.org,border:"none",borderRadius:8,color:"#fff",fontSize:14,fontWeight:700,cursor:schedSaving?"default":"pointer",opacity:schedSaving?0.6:1}}>
               {schedSaving?"Saving...":"Save Scheduling"}
@@ -2558,6 +2588,8 @@ function Dashboard({user, onLogout}){
   const [showAcct,setShowAcct]=useState(false);
   const [showTrain,setShowTrain]=useState(false);
   const [showFairUse,setShowFairUse]=useState(false);
+  const [showTos,setShowTos]=useState(false);
+  const [showPriv,setShowPriv]=useState(false);
   const [profileSlug,setProfileSlug]=useState("");
   const [calRequests,setCalRequests]=useState([]);
   const [selCalDay,setSelCalDay]=useState(null);
@@ -2627,6 +2659,201 @@ function Dashboard({user, onLogout}){
     </div>
   );
 
+  const LegalSection=({icon,number,title,children})=>(
+    <div style={{background:C.card,borderRadius:14,padding:16,marginBottom:16}}>
+      <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:10}}>
+        <span style={{fontSize:16,color:C.mut}}>{icon}</span>
+        <span style={{fontWeight:700,fontSize:18,color:C.txt}}>{number}. {title}</span>
+      </div>
+      {children}
+    </div>
+  );
+  const LP=({children,style})=><p style={{fontSize:15,color:C.lt,lineHeight:1.7,marginBottom:10,...style}}>{children}</p>;
+  const LB=({items,boldPrefixes})=>(
+    <div style={{paddingLeft:4,marginBottom:10}}>
+      {items.map((item,i)=>{
+        const bp=boldPrefixes?.find(p=>item.startsWith(p));
+        return <div key={i} style={{display:"flex",gap:8,marginBottom:6,fontSize:15,color:C.lt,lineHeight:1.6}}>
+          <span>•</span>{bp?<span><strong style={{color:C.txt}}>{bp}</strong>{item.slice(bp.length)}</span>:<span>{item}</span>}
+        </div>;
+      })}
+    </div>
+  );
+
+  if(showTos)return(
+    <div style={{minHeight:"100vh",background:C.bg,color:C.txt}}>
+      <div style={{display:"flex",alignItems:"center",gap:12,padding:"16px 20px",borderBottom:`1px solid ${C.brd}`,background:C.card}}>
+        <button onClick={()=>setShowTos(false)} style={{background:"none",border:"none",color:C.mut,fontSize:22,cursor:"pointer",padding:0,lineHeight:1}}>←</button>
+        <MDRLogo size={28}/>
+        <div><span style={{fontWeight:700,fontSize:17}}>Terms of Service</span><div style={{fontSize:11,color:C.mut}}>Last updated: January 11, 2025</div></div>
+      </div>
+      <div style={{maxWidth:600,margin:"0 auto",padding:"24px 20px"}}>
+        <LP style={{color:C.mut,marginBottom:20}}>Welcome to My Daily Reports. By accessing or using our service, you agree to be bound by these Terms of Service. Please read them carefully before using the application.</LP>
+
+        <LegalSection icon="📄" number={1} title="Acceptance of Terms">
+          <LP>By creating an account or using My Daily Reports ("the Service"), you agree to these Terms of Service, our Privacy Policy, and any additional terms applicable to certain features. If you do not agree to these terms, you may not use the Service.</LP>
+          <LP>We reserve the right to modify these terms at any time. Continued use of the Service after changes constitutes acceptance of the new terms. We will notify users of material changes via email or in-app notification.</LP>
+        </LegalSection>
+
+        <LegalSection icon="🔄" number={2} title="Description of Service">
+          <LP>My Daily Reports is a mobile and web application designed for construction industry professionals, particularly Project Inspectors and Inspectors of Record (IOR), to create, manage, and export daily inspection reports. The Service includes:</LP>
+          <LB items={["Daily report creation and management","Photo documentation and attachment","PDF generation and export","Time tracking and job management","AI-powered document parsing (Premium feature)","Inspection request management (Premium feature)"]}/>
+        </LegalSection>
+
+        <LegalSection icon="👥" number={3} title="User Accounts and Registration">
+          <LP>To use certain features, you must create an account. You agree to:</LP>
+          <LB items={["Provide accurate, current, and complete information during registration","Maintain the security of your password and account","Accept responsibility for all activities under your account","Notify us immediately of any unauthorized use"]}/>
+          <LP>You must be at least 18 years old to use this Service. Accounts registered by automated methods are not permitted.</LP>
+        </LegalSection>
+
+        <LegalSection icon="💳" number={4} title="Subscription and Payments">
+          <LP>The Service offers free and paid subscription tiers:</LP>
+          <LB items={["Free Tier: Limited to 1 job, 1 report per week, 2 photos per report","Silver Tier: Extended limits, draft saving, voice input","Premium Tier: Unlimited usage, AI features, advanced reporting","Enterprise Tier: All features plus priority support"]} boldPrefixes={["Free Tier:","Silver Tier:","Premium Tier:","Enterprise Tier:"]}/>
+          <LP>Paid subscriptions are billed in advance on a monthly or annual basis. Subscriptions automatically renew unless cancelled before the renewal date. Refunds are handled according to applicable app store policies (Apple App Store, Google Play Store).</LP>
+        </LegalSection>
+
+        <LegalSection icon="🏛" number={5} title="App Store Terms and Compliance">
+          <LP>If you access the Service through Apple's App Store or Google Play:</LP>
+          <LB items={["These terms are between you and My Daily Reports, not Apple or Google","Apple/Google have no obligation to provide maintenance or support","Apple/Google are third-party beneficiaries of these terms","In-app purchases are processed through respective app stores","Refund requests should be directed to the respective app store"]}/>
+          <LP>We comply with Apple's App Store Review Guidelines and Google Play Developer Program Policies.</LP>
+        </LegalSection>
+
+        <LegalSection icon="🔒" number={6} title="User Content and Data">
+          <LP>You retain ownership of all content you create using the Service ("User Content"), including reports, photos, and documentation. By using the Service, you grant us a limited license to:</LP>
+          <LB items={["Store and process your content to provide the Service","Create backups for data protection","Generate PDF reports from your data"]}/>
+          <LP>We do not claim ownership of your User Content. You are responsible for ensuring you have rights to any content you upload. User Content is stored securely with access restricted to your account only.</LP>
+        </LegalSection>
+
+        <LegalSection icon="©" number={7} title="Intellectual Property Rights">
+          <LP>The Service, including its original content, features, and functionality, is owned by My Daily Reports and protected by international copyright, trademark, and other intellectual property laws.</LP>
+          <LP>You may not:</LP>
+          <LB items={["Copy, modify, or distribute the application or its content","Reverse engineer, decompile, or disassemble the software","Remove any copyright or proprietary notices","Use the Service to develop competing products","Attempt to bypass subscription restrictions or access premium features without authorization"]}/>
+        </LegalSection>
+
+        <LegalSection icon="⚠️" number={8} title="Prohibited Uses">
+          <LP>You agree not to use the Service to:</LP>
+          <LB items={["Violate any applicable laws or regulations","Submit false or misleading inspection reports","Impersonate any person or entity","Interfere with or disrupt the Service or servers","Attempt unauthorized access to any part of the Service","Use automated scripts to access the Service","Transmit viruses, malware, or other harmful code","Harvest or collect user information without consent"]}/>
+        </LegalSection>
+
+        <LegalSection icon="📋" number={9} title="Professional Responsibility and Disclaimer">
+          <LP>The Service is a documentation tool and does not replace professional judgment. Users are responsible for:</LP>
+          <LB items={["Accuracy and completeness of all reports and documentation","Compliance with applicable building codes, regulations, and standards","Professional licensing requirements in their jurisdiction","Verification of AI-generated content and suggestions"]}/>
+          <LP><strong style={{color:C.txt}}>DISCLAIMER:</strong> The Service is provided "AS IS" without warranties of any kind. We do not warrant that reports generated will meet regulatory requirements or professional standards in any specific jurisdiction. AI features provide suggestions only and should be verified by qualified professionals.</LP>
+        </LegalSection>
+
+        <LegalSection icon="🏛" number={10} title="Limitation of Liability">
+          <LP>TO THE MAXIMUM EXTENT PERMITTED BY LAW:</LP>
+          <LB items={["We shall not be liable for any indirect, incidental, special, consequential, or punitive damages","Our total liability shall not exceed the amount paid by you in the 12 months preceding the claim","We are not liable for any loss of data, business interruption, or professional consequences"]}/>
+          <LP>Some jurisdictions do not allow limitations on implied warranties or exclusion of certain damages, so these limitations may not apply to you.</LP>
+        </LegalSection>
+
+        <LegalSection icon="🔁" number={11} title="Termination">
+          <LP>We may terminate or suspend your account immediately, without prior notice, for conduct that we determine violates these Terms or is harmful to other users, us, or third parties. Upon termination:</LP>
+          <LB items={["Your right to use the Service will immediately cease","You may export your data before termination if possible","We may delete your data after a reasonable retention period"]}/>
+          <LP>You may terminate your account at any time through the app settings. Prepaid subscription fees are handled according to app store refund policies.</LP>
+        </LegalSection>
+
+        <LegalSection icon="⚖️" number={12} title="Governing Law and Dispute Resolution">
+          <LP>These Terms shall be governed by the laws of the State of California, United States, without regard to its conflict of law provisions.</LP>
+          <LP>Any disputes arising from these Terms or the Service shall first be attempted to be resolved through good-faith negotiation. If resolution is not reached within 30 days, disputes shall be submitted to binding arbitration in accordance with the rules of the American Arbitration Association.</LP>
+        </LegalSection>
+
+        <LegalSection icon="💬" number={13} title="Contact Information">
+          <LP>If you have questions about these Terms of Service, please contact us:</LP>
+          <LB items={["Email: support@mydailyreports.app","In-app: Profile → Help & Support"]}/>
+        </LegalSection>
+
+        <div style={{textAlign:"center",padding:"16px 0 32px"}}>
+          <LP style={{color:C.mut,fontSize:13}}>Please also review our Privacy Policy which describes how we collect, use, and protect your personal information.</LP>
+          <div style={{display:"flex",gap:12,justifyContent:"center",marginTop:12}}>
+            <button onClick={()=>{setShowTos(false);setShowPriv(true);}} style={{padding:"10px 20px",background:C.inp,border:`1px solid ${C.brd}`,borderRadius:10,color:C.lt,fontSize:14,fontWeight:600,cursor:"pointer"}}>Privacy Policy</button>
+            <button onClick={()=>setShowTos(false)} style={{padding:"10px 20px",background:C.card,border:`1px solid ${C.brd}`,borderRadius:10,color:C.txt,fontSize:14,fontWeight:600,cursor:"pointer"}}>Return to App</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+
+  if(showPriv)return(
+    <div style={{minHeight:"100vh",background:C.bg,color:C.txt}}>
+      <div style={{display:"flex",alignItems:"center",gap:12,padding:"16px 20px",borderBottom:`1px solid ${C.brd}`,background:C.card}}>
+        <button onClick={()=>setShowPriv(false)} style={{background:"none",border:"none",color:C.mut,fontSize:22,cursor:"pointer",padding:0,lineHeight:1}}>←</button>
+        <MDRLogo size={28}/>
+        <div><span style={{fontWeight:700,fontSize:17}}>Privacy Policy</span><div style={{fontSize:11,color:C.mut}}>Last updated: January 11, 2025</div></div>
+      </div>
+      <div style={{maxWidth:600,margin:"0 auto",padding:"24px 20px"}}>
+        <LP style={{color:C.mut,marginBottom:20}}>My Daily Reports ("we", "our", or "us") is committed to protecting your privacy. This Privacy Policy explains how we collect, use, disclose, and safeguard your information when you use our mobile and web application.</LP>
+
+        <LegalSection icon="📄" number={1} title="Information We Collect">
+          <p style={{fontWeight:700,fontSize:15,color:C.txt,marginBottom:6,marginTop:4}}>Account Information</p>
+          <LB items={["Email address","Display name (optional)","Password (encrypted)"]}/>
+          <p style={{fontWeight:700,fontSize:15,color:C.txt,marginBottom:6,marginTop:4}}>User-Generated Content</p>
+          <LB items={["Daily inspection reports and their contents","Photos and images you upload","Job and project information","Time tracking data","Notes and documentation"]}/>
+          <p style={{fontWeight:700,fontSize:15,color:C.txt,marginBottom:6,marginTop:4}}>Automatically Collected Information</p>
+          <LB items={["Device type and operating system","App version","Usage patterns and feature interactions","Error logs for troubleshooting"]}/>
+        </LegalSection>
+
+        <LegalSection icon="👁" number={2} title="How We Use Your Information">
+          <LP>We use collected information to:</LP>
+          <LB items={["Provide, maintain, and improve the Service","Generate PDF reports from your data","Process AI-powered features (document parsing, suggestions)","Send service-related notifications and updates","Respond to customer support requests","Detect and prevent fraud or abuse","Comply with legal obligations"]}/>
+          <LP><strong style={{color:C.txt}}>AI Processing:</strong> When you use AI-powered features, your content may be processed by third-party AI services (such as Anthropic Claude) to provide functionality. This processing is done securely and data is not used to train AI models.</LP>
+        </LegalSection>
+
+        <LegalSection icon="🔀" number={3} title="Information Sharing and Disclosure">
+          <LP>We do not sell your personal information. We may share information with:</LP>
+          <LB items={["Service Providers: Third parties that help us operate the Service (hosting, payment processing, analytics)","AI Services: For processing AI-powered features (with data protection agreements in place)","Legal Requirements: When required by law or to protect our rights","Business Transfers: In connection with a merger, acquisition, or sale of assets"]} boldPrefixes={["Service Providers:","AI Services:","Legal Requirements:","Business Transfers:"]}/>
+          <LP>Your reports and project data are never shared with other users or third parties without your explicit consent.</LP>
+        </LegalSection>
+
+        <LegalSection icon="🛡" number={4} title="Data Security">
+          <LP>We implement industry-standard security measures including:</LP>
+          <LB items={["Encryption of data in transit (TLS/SSL) and at rest","Row-Level Security (RLS) ensuring users can only access their own data","Secure authentication with password hashing","Regular security audits and monitoring","Access controls limiting employee access to user data"]}/>
+          <LP>While we strive to protect your information, no method of transmission over the internet is 100% secure. We cannot guarantee absolute security.</LP>
+        </LegalSection>
+
+        <LegalSection icon="🗂" number={5} title="Data Retention">
+          <LP>We retain your information as follows:</LP>
+          <LB items={["Account Data: Retained while your account is active","Reports and Content: Retained until you delete them or your account","Backups: May be retained for up to 30 days after deletion","Legal Requirements: Some data may be retained longer if required by law"]} boldPrefixes={["Account Data:","Reports and Content:","Backups:","Legal Requirements:"]}/>
+          <LP>You can request deletion of your account and data at any time through the app settings.</LP>
+        </LegalSection>
+
+        <LegalSection icon="🔄" number={6} title="Your Privacy Rights">
+          <LP>Depending on your location, you may have the right to:</LP>
+          <LB items={["Access: Request a copy of your personal data","Correction: Request correction of inaccurate data","Deletion: Request deletion of your personal data","Export: Download your data in a portable format","Opt-out: Unsubscribe from marketing communications"]} boldPrefixes={["Access:","Correction:","Deletion:","Export:","Opt-out:"]}/>
+          <LP>To exercise these rights, contact us at support@mydailyreports.app or use the in-app settings.</LP>
+        </LegalSection>
+
+        <LegalSection icon="🌐" number={7} title="International Data Transfers">
+          <LP>Your information may be transferred to and processed in countries other than your country of residence. These countries may have different data protection laws.</LP>
+          <LP>We ensure appropriate safeguards are in place for international transfers, including standard contractual clauses and compliance with applicable data protection regulations.</LP>
+        </LegalSection>
+
+        <LegalSection icon="👶" number={8} title="Children's Privacy">
+          <LP>The Service is not intended for users under 18 years of age. We do not knowingly collect personal information from children. If we become aware that we have collected data from a child, we will take steps to delete that information.</LP>
+        </LegalSection>
+
+        <LegalSection icon="🔔" number={9} title="Changes to This Privacy Policy">
+          <LP>We may update this Privacy Policy from time to time. We will notify you of any changes by posting the new Privacy Policy on this page and updating the "Last updated" date.</LP>
+          <LP>For material changes, we will provide additional notice via email or in-app notification. Your continued use of the Service after changes constitutes acceptance of the updated policy.</LP>
+        </LegalSection>
+
+        <LegalSection icon="📧" number={10} title="Contact Us">
+          <LP>If you have questions about this Privacy Policy or our data practices, please contact us:</LP>
+          <LB items={["Email: privacy@mydailyreports.app","In-app: Profile → Help & Support"]}/>
+          <LP>For data protection inquiries from the EU, you may also contact our Data Protection Officer at dpo@mydailyreports.app.</LP>
+        </LegalSection>
+
+        <div style={{textAlign:"center",padding:"16px 0 32px"}}>
+          <LP style={{color:C.mut,fontSize:13}}>This Privacy Policy should be read in conjunction with our Terms of Service.</LP>
+          <div style={{display:"flex",gap:12,justifyContent:"center",marginTop:12}}>
+            <button onClick={()=>{setShowPriv(false);setShowTos(true);}} style={{padding:"10px 20px",background:C.inp,border:`1px solid ${C.brd}`,borderRadius:10,color:C.lt,fontSize:14,fontWeight:600,cursor:"pointer"}}>Terms of Service</button>
+            <button onClick={()=>setShowPriv(false)} style={{padding:"10px 20px",background:C.card,border:`1px solid ${C.brd}`,borderRadius:10,color:C.txt,fontSize:14,fontWeight:600,cursor:"pointer"}}>Return to App</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+
   if(selJob)return(
     <JobDetail job={selJob} user={user} onBack={()=>{setSelJob(null);saveNav(null);load();}} onDeleted={()=>{setSelJob(null);saveNav(null);load();}}/>
   );
@@ -2672,7 +2899,6 @@ function Dashboard({user, onLogout}){
             <div style={{fontSize:12,color:C.mut}}>{user?.email}</div>
           </div>
           <button onClick={()=>{setShowSet(false);setShowAcct(true);}} style={{width:"100%",padding:"12px 16px",background:"none",border:"none",textAlign:"left",color:C.lt,fontSize:14,cursor:"pointer",display:"flex",alignItems:"center",gap:10}}><span>👤</span> Account Settings</button>
-          <button onClick={()=>{setShowSet(false);alert("Notifications coming soon");}} style={{width:"100%",padding:"12px 16px",background:"none",border:"none",textAlign:"left",color:C.lt,fontSize:14,cursor:"pointer",display:"flex",alignItems:"center",gap:10}}><span>🔔</span> Notifications</button>
           <div style={{borderTop:`1px solid ${C.brd}`,margin:"4px 0"}}/>
           <button onClick={()=>{setShowSet(false);onLogout();}} style={{width:"100%",padding:"12px 16px",background:"none",border:"none",textAlign:"left",color:"#ef4444",fontSize:14,cursor:"pointer",display:"flex",alignItems:"center",gap:10}}><span>🚪</span> Sign Out</button>
         </div>
@@ -2861,9 +3087,9 @@ function Dashboard({user, onLogout}){
       <div style={{textAlign:"center",padding:"24px 20px 32px",color:C.mut,fontSize:12}}>
         <a href="#" onClick={e=>{e.preventDefault();setShowFairUse(true);}} style={{color:C.mut,textDecoration:"none"}}>Fair Use Agreement</a>
         <br/><br/>
-        <a href="#" onClick={e=>{e.preventDefault();alert("Terms coming soon");}} style={{color:C.mut,textDecoration:"none"}}>Terms of Service</a>
+        <a href="#" onClick={e=>{e.preventDefault();setShowTos(true);}} style={{color:C.mut,textDecoration:"none"}}>Terms of Service</a>
         <span style={{margin:"0 8px"}}>•</span>
-        <a href="#" onClick={e=>{e.preventDefault();alert("Privacy coming soon");}} style={{color:C.mut,textDecoration:"none"}}>Privacy Policy</a>
+        <a href="#" onClick={e=>{e.preventDefault();setShowPriv(true);}} style={{color:C.mut,textDecoration:"none"}}>Privacy Policy</a>
       </div>
     </div>
   );
@@ -3409,16 +3635,21 @@ function App(){
 ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
 </script>
 <script>
+// Register service worker + auto-update on new version
 if('serviceWorker' in navigator){
   navigator.serviceWorker.register('/sw.js').then(reg=>{
+    // Check for updates every 30 minutes
     setInterval(()=>reg.update(),30*60*1000);
     reg.addEventListener('updatefound',()=>{
       const nw=reg.installing;
       nw.addEventListener('statechange',()=>{
-        if(nw.state==='activated'){window.location.reload();}
+        if(nw.state==='activated'){
+          // New version installed — reload to pick up changes
+          window.location.reload();
+        }
       });
     });
-  });
+  }).catch(e=>console.log('SW registration failed:',e));
 }
 </script>
 </body>
