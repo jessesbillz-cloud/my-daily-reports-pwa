@@ -1234,8 +1234,8 @@ function ReportEditor({job, user, onBack, reportDate}){
       ctx.font=sz+"px Helvetica, Arial, sans-serif";
       const drawX=f.x*scale;
       const drawY=f.y*scale+sz;
-      // For auto-date/auto-num fields, draw white bg to cover the old template date
-      if(isAutoField&&f.w){
+      // Draw white bg to cover any old template text before writing new value
+      if(f.w){
         ctx.fillStyle="#ffffff";
         ctx.fillRect(drawX-1,f.y*scale-1,(f.w||120)*scale+2,(f.h||sz)*scale+2);
       }
@@ -1346,13 +1346,10 @@ function ReportEditor({job, user, onBack, reportDate}){
       }
       // Render photos as additional preview pages — paginate to match PDF output
       if(photos.length>0){
-        // photoLayout: "1"=1 per page, "2"=2 per page (1 col, 2 rows), "4"=4 per page (2 cols, 2 rows)
-        const cols=photoLayout==="4"?2:1;
         const perPage=photoLayout==="1"?1:photoLayout==="2"?2:4;
-        const rows=Math.ceil(perPage/cols);
         const pgW=612*scale;const pgH=792*scale;
-        const maxSlotW=(photoLayout==="1"?Math.min((612-72)/cols,380):(612-72-(cols-1)*12)/cols)*scale;
-        const maxSlotH=photoLayout==="1"?(pgH-100*scale):(pgH-80*scale-(rows-1)*12*scale)/rows;
+        const bodyW=(612-72)*scale;
+        const usableHP=pgH-80*scale;
         // Pre-load all images to get real dimensions
         const loaded=[];
         for(let i=0;i<photos.length;i++){
@@ -1360,38 +1357,67 @@ function ReportEditor({job, user, onBack, reportDate}){
             const src=photos[i].src||photos[i];
             const im=new Image();
             await new Promise((res,rej)=>{im.onload=res;im.onerror=rej;im.src=src;});
-            loaded.push(im);
+            loaded.push({im,ratio:im.naturalWidth/im.naturalHeight,isLandscape:im.naturalWidth>=im.naturalHeight});
           }catch(e){loaded.push(null);}
         }
-        let cvs=null,ctx=null,onPage=0;
-        for(let i=0;i<loaded.length;i++){
-          const im=loaded[i];if(!im)continue;
-          // Start a new page when needed
-          if(i%perPage===0){
-            if(cvs&&onPage>0)previewPages.push(cvs.toDataURL("image/jpeg",0.92));
-            cvs=document.createElement("canvas");cvs.width=pgW;cvs.height=pgH;
-            ctx=cvs.getContext("2d");
-            ctx.fillStyle="#ffffff";ctx.fillRect(0,0,pgW,pgH);
-            ctx.fillStyle="#666666";ctx.font=(12*scale)+"px Helvetica, Arial, sans-serif";
-            ctx.fillText("Photos — "+job.name,36*scale,40*scale);
-            onPage=0;
-          }
-          // Auto-size: fit photo within slot preserving real aspect ratio
-          const ratio=im.naturalWidth/im.naturalHeight;
+        const validPhotos=loaded.filter(Boolean);
+        const newPhotoPage=()=>{
+          const cvs=document.createElement("canvas");cvs.width=pgW;cvs.height=pgH;
+          const ctx=cvs.getContext("2d");
+          ctx.fillStyle="#ffffff";ctx.fillRect(0,0,pgW,pgH);
+          ctx.fillStyle="#666666";ctx.font=(12*scale)+"px Helvetica, Arial, sans-serif";
+          ctx.fillText("Photos — "+job.name,36*scale,40*scale);
+          return {cvs,ctx};
+        };
+        const drawPhoto=(ctx,p,x,y,maxW,maxH)=>{
+          const {im,ratio}=p;
           let imgW,imgH;
-          if(ratio>=1){imgW=Math.min(maxSlotW,maxSlotH*ratio);imgH=imgW/ratio;}
-          else{imgH=Math.min(maxSlotH,maxSlotW/ratio);imgW=imgH*ratio;}
-          const idxOnPage=i%perPage;
-          const slot=idxOnPage%cols;const row=Math.floor(idxOnPage/cols);
-          // Center photo in its slot
-          const slotX=photoLayout==="1"?0:(36*scale+slot*(maxSlotW+12*scale));
-          const slotY=60*scale+(row*(maxSlotH+12*scale));
-          const xPos=photoLayout==="1"?((pgW-imgW)/2):(slotX+(maxSlotW-imgW)/2);
-          const yPos=photoLayout==="1"?(slotY+(maxSlotH-imgH)/2):(slotY+(maxSlotH-imgH)/2);
-          ctx.drawImage(im,xPos,yPos,imgW,imgH);
-          onPage++;
+          if(ratio>=1){imgW=Math.min(maxW,maxH*ratio);imgH=imgW/ratio;}
+          else{imgH=Math.min(maxH,maxW/ratio);imgW=imgH*ratio;}
+          ctx.drawImage(im,x+(maxW-imgW)/2,y+(maxH-imgH)/2,imgW,imgH);
+        };
+        let idx=0;
+        while(idx<validPhotos.length){
+          if(photoLayout==="1"){
+            const {cvs,ctx}=newPhotoPage();
+            drawPhoto(ctx,validPhotos[idx],(pgW-Math.min(bodyW,380*scale))/2,60*scale,Math.min(bodyW,380*scale),usableHP-20*scale);
+            previewPages.push(cvs.toDataURL("image/jpeg",0.92));cvs.width=0;cvs.height=0;
+            idx++;
+          }else if(photoLayout==="2"){
+            const pair=[validPhotos[idx]];
+            if(idx+1<validPhotos.length)pair.push(validPhotos[idx+1]);
+            const {cvs,ctx}=newPhotoPage();
+            if(pair.length===1){
+              drawPhoto(ctx,pair[0],(pgW-Math.min(bodyW,380*scale))/2,60*scale,Math.min(bodyW,380*scale),usableHP-20*scale);
+            }else{
+              const bothPortrait=!pair[0].isLandscape&&!pair[1].isLandscape;
+              if(bothPortrait){
+                const colW=(bodyW-12*scale)/2;
+                pair.forEach((p,s)=>{
+                  drawPhoto(ctx,p,36*scale+s*(colW+12*scale),60*scale,colW,usableHP-20*scale);
+                });
+              }else{
+                const rowH=(usableHP-20*scale-12*scale)/2;
+                pair.forEach((p,r)=>{
+                  drawPhoto(ctx,p,(pgW-bodyW)/2,60*scale+r*(rowH+12*scale),bodyW,rowH);
+                });
+              }
+            }
+            previewPages.push(cvs.toDataURL("image/jpeg",0.92));cvs.width=0;cvs.height=0;
+            idx+=pair.length;
+          }else{
+            // 4 per page — 2x2 grid
+            const chunk=validPhotos.slice(idx,idx+4);
+            const {cvs,ctx}=newPhotoPage();
+            const slotW=(bodyW-12*scale)/2;const slotH=(usableHP-20*scale-12*scale)/2;
+            chunk.forEach((p,ci)=>{
+              const col=ci%2;const row=Math.floor(ci/2);
+              drawPhoto(ctx,p,36*scale+col*(slotW+12*scale),60*scale+row*(slotH+12*scale),slotW,slotH);
+            });
+            previewPages.push(cvs.toDataURL("image/jpeg",0.92));cvs.width=0;cvs.height=0;
+            idx+=chunk.length;
+          }
         }
-        if(cvs&&onPage>0){previewPages.push(cvs.toDataURL("image/jpeg",0.92));cvs.width=0;cvs.height=0;}
       }
       setViewingReport(previewPages);
     }catch(e){
@@ -1458,7 +1484,20 @@ function ReportEditor({job, user, onBack, reportDate}){
         const monthNames=["January","February","March","April","May","June","July","August","September","October","November","December"];
         const monNames=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
         const monthIdx=now.toLocaleDateString("en-US",{month:"numeric",timeZone:tz})-1;
-        const formatDate=(fmt)=>{if(!fmt)return"";return fmt.replace(/YYYY/g,fmtYYYY).replace(/MM/g,fmtMM).replace(/DD/g,fmtDD).replace(/Month/g,monthNames[monthIdx]||"").replace(/Mon/g,monNames[monthIdx]||"");};
+        const fmtMonth=monthNames[monthIdx]||"";const fmtMon=monNames[monthIdx]||"";
+        const formatDate=(fmt)=>{
+          if(!fmt)return"";
+          if(/MM|DD|YYYY|Month|Mon/.test(fmt))return fmt.replace(/YYYY/g,fmtYYYY).replace(/MM/g,fmtMM).replace(/DD/g,fmtDD).replace(/Month/g,fmtMonth).replace(/Mon/g,fmtMon);
+          const f=fmt.trim();
+          if(/^\d{1,2}\/\d{1,2}\/\d{4}$/.test(f))return now.toLocaleDateString("en-US",{timeZone:tz});
+          if(/^\d{4}-\d{2}-\d{2}$/.test(f))return now.toLocaleDateString("en-CA",{timeZone:tz});
+          if(/^[A-Za-z]{3}\s+\d{1,2},?\s+\d{4}$/.test(f))return now.toLocaleDateString("en-US",{month:"short",day:"2-digit",year:"numeric",timeZone:tz});
+          if(/^[A-Za-z]+\s+\d{1,2},?\s+\d{4}$/.test(f))return now.toLocaleDateString("en-US",{month:"long",day:"2-digit",year:"numeric",timeZone:tz});
+          if(/^\d{1,2}\s+[A-Za-z]+\s+\d{4}$/.test(f)){const pd=f.startsWith("0");return now.toLocaleDateString("en-US",{day:pd?"2-digit":"numeric",month:"long",year:"numeric",timeZone:tz}).replace(/^(\w+)\s(\d+),\s(\d+)$/,(_,m,d,y)=>`${pd?d.padStart(2,"0"):d} ${m} ${y}`);}
+          if(/^[A-Za-z]{3}\s+\d{1,2}$/.test(f))return fmtMon+" "+fmtDD.replace(/^0/,"");
+          if(/^\d{2}-\d{2}-\d{4}$/.test(f))return fmtMM+"-"+fmtDD+"-"+fmtYYYY;
+          return now.toLocaleDateString("en-US",{timeZone:tz});
+        };
         const fnPattern=conv.pattern||job.report_filename_pattern||job.name||"Report";
         let baseName=fnPattern.replace(/\.[^.]+$/,"");
         baseName=baseName.replace(/\{report_number\}/g,rptNum);
@@ -1514,8 +1553,8 @@ function ReportEditor({job, user, onBack, reportDate}){
         if(pageIdx<0||pageIdx>=pages.length)return;
         const page=pages[pageIdx];const pageH=page.getHeight();
         const sz=f.fontSize||10;const pdfY=pageH-f.y-sz;
-        // For auto-date/auto-num, cover old template value with white rectangle first
-        if(isAutoField&&f.w){
+        // Cover old template text with white rectangle before writing new value
+        if(f.w){
           page.drawRectangle({x:f.x-1,y:pdfY-2,width:(f.w||120)+2,height:(f.h||sz+4),color:rgb(1,1,1)});
         }
         if(f.multiline&&f.w){
@@ -1579,40 +1618,104 @@ function ReportEditor({job, user, onBack, reportDate}){
         const photoAreaBottom=footerTopPDF+5;
         const usableH=photoAreaTop-photoAreaBottom;
 
-        const cols=photoLayout==="4"?2:1;
-        const perPage=photoLayout==="1"?1:photoLayout==="2"?2:4;
-        const rows=Math.ceil(perPage/cols);
-        const bodyW=pageW-72;
-        const maxSlotW=photoLayout==="1"?Math.min(bodyW/cols,380):(bodyW-(cols-1)*12)/cols;
-        const maxSlotH=photoLayout==="1"?(usableH-20):(usableH-20-(rows-1)*12)/rows;
+        // Embed all photos first so we know their dimensions
+        const embeddedPhotos=[];
         for(let i=0;i<photos.length;i++){
           try{
             const imgData=photos[i].src||photos[i];
             let img;
             if(typeof imgData==="string"&&imgData.startsWith("data:image/png"))img=await pdfDoc.embedPng(imgData);
             else if(typeof imgData==="string")img=await pdfDoc.embedJpg(imgData);
-            if(!img)continue;
-            if(i%perPage===0){
-              // Fresh blank page, same size as template
-              const newPage=pdfDoc.addPage([pageW,pageH]);
-              // Draw header clip at the top
-              if(headerEmbed)newPage.drawPage(headerEmbed,{x:0,y:headerBottomPDF,width:pageW,height:headerH});
-              // Draw footer clip at the bottom
-              if(footerEmbed)newPage.drawPage(footerEmbed,{x:0,y:0,width:pageW,height:footerTopPDF});
-            }
-            const pg=pdfDoc.getPages()[pdfDoc.getPageCount()-1];
-            const ratio=img.width/img.height;
-            let imgW,imgH;
-            if(ratio>=1){imgW=Math.min(maxSlotW,maxSlotH*ratio);imgH=imgW/ratio;}
-            else{imgH=Math.min(maxSlotH,maxSlotW/ratio);imgW=imgH*ratio;}
-            const idxOnPage=i%perPage;
-            const slot=idxOnPage%cols;const row=Math.floor(idxOnPage/cols);
-            const slotX=36+slot*(maxSlotW+12);
-            const rowTop=photoAreaTop-10-(row*(maxSlotH+12));
-            const xPos=photoLayout==="1"?((pageW-imgW)/2):(slotX+(maxSlotW-imgW)/2);
-            const yPos=rowTop-imgH+(maxSlotH-imgH)/2;
-            pg.drawImage(img,{x:xPos,y:Math.max(yPos,photoAreaBottom),width:imgW,height:imgH});
+            if(img)embeddedPhotos.push({img,ratio:img.width/img.height,isLandscape:img.width>=img.height});
           }catch(imgErr){console.error("Photo embed error:",imgErr);}
+        }
+
+        const perPage=photoLayout==="1"?1:photoLayout==="2"?2:4;
+        const bodyW=pageW-72;
+
+        const addPhotoPage=()=>{
+          const np=pdfDoc.addPage([pageW,pageH]);
+          if(headerEmbed)np.drawPage(headerEmbed,{x:0,y:headerBottomPDF,width:pageW,height:headerH});
+          if(footerEmbed)np.drawPage(footerEmbed,{x:0,y:0,width:pageW,height:footerTopPDF});
+          return np;
+        };
+
+        for(let i=0;i<embeddedPhotos.length;){
+          if(photoLayout==="1"){
+            // 1 per page — centered
+            const pg=addPhotoPage();
+            const {img,ratio}=embeddedPhotos[i];
+            const maxW=Math.min(bodyW,380);const maxH=usableH-20;
+            let imgW,imgH;
+            if(ratio>=1){imgW=Math.min(maxW,maxH*ratio);imgH=imgW/ratio;}
+            else{imgH=Math.min(maxH,maxW/ratio);imgW=imgH*ratio;}
+            pg.drawImage(img,{x:(pageW-imgW)/2,y:photoAreaTop-10-imgH+(usableH-20-imgH)/2,width:imgW,height:imgH});
+            i++;
+          }else if(photoLayout==="2"){
+            // Smart 2-per-page: detect orientation for layout
+            const pair=[embeddedPhotos[i]];
+            if(i+1<embeddedPhotos.length)pair.push(embeddedPhotos[i+1]);
+            const pg=addPhotoPage();
+            if(pair.length===1){
+              // Single remaining photo — center it
+              const {img,ratio}=pair[0];
+              const maxW=Math.min(bodyW,380);const maxH=usableH-20;
+              let imgW,imgH;
+              if(ratio>=1){imgW=Math.min(maxW,maxH*ratio);imgH=imgW/ratio;}
+              else{imgH=Math.min(maxH,maxW/ratio);imgW=imgH*ratio;}
+              pg.drawImage(img,{x:(pageW-imgW)/2,y:photoAreaTop-10-imgH+(usableH-20-imgH)/2,width:imgW,height:imgH});
+            }else{
+              // Both portrait → side by side (2 columns, 1 row)
+              // Either landscape → stacked vertically (1 column, 2 rows)
+              const bothPortrait=!pair[0].isLandscape&&!pair[1].isLandscape;
+              if(bothPortrait){
+                const colW=(bodyW-12)/2;const slotH=usableH-20;
+                pair.forEach((p,s)=>{
+                  const {img,ratio}=p;
+                  let imgW,imgH;
+                  if(ratio>=1){imgW=Math.min(colW,slotH*ratio);imgH=imgW/ratio;}
+                  else{imgH=Math.min(slotH,colW/ratio);imgW=imgH*ratio;}
+                  const slotX=36+s*(colW+12);
+                  const xPos=slotX+(colW-imgW)/2;
+                  const yPos=photoAreaTop-10-imgH+(slotH-imgH)/2;
+                  pg.drawImage(img,{x:xPos,y:Math.max(yPos,photoAreaBottom),width:imgW,height:imgH});
+                });
+              }else{
+                // Stacked vertically — 2 rows
+                const rowH=(usableH-20-12)/2;
+                pair.forEach((p,r)=>{
+                  const {img,ratio}=p;
+                  let imgW,imgH;
+                  if(ratio>=1){imgW=Math.min(bodyW,rowH*ratio);imgH=imgW/ratio;}
+                  else{imgH=Math.min(rowH,bodyW/ratio);imgW=imgH*ratio;}
+                  const rowTop=photoAreaTop-10-(r*(rowH+12));
+                  const xPos=(pageW-imgW)/2;
+                  const yPos=rowTop-imgH+(rowH-imgH)/2;
+                  pg.drawImage(img,{x:xPos,y:Math.max(yPos,photoAreaBottom),width:imgW,height:imgH});
+                });
+              }
+            }
+            i+=pair.length;
+          }else{
+            // 4 per page — 2x2 grid
+            const cols=2;const rows=2;
+            const chunk=embeddedPhotos.slice(i,i+4);
+            const pg=addPhotoPage();
+            const slotW=(bodyW-12)/cols;const slotH=(usableH-20-12)/rows;
+            chunk.forEach((p,idx)=>{
+              const {img,ratio}=p;
+              let imgW,imgH;
+              if(ratio>=1){imgW=Math.min(slotW,slotH*ratio);imgH=imgW/ratio;}
+              else{imgH=Math.min(slotH,slotW/ratio);imgW=imgH*ratio;}
+              const col=idx%cols;const row=Math.floor(idx/cols);
+              const slotX=36+col*(slotW+12);
+              const rowTop=photoAreaTop-10-(row*(slotH+12));
+              const xPos=slotX+(slotW-imgW)/2;
+              const yPos=rowTop-imgH+(slotH-imgH)/2;
+              pg.drawImage(img,{x:xPos,y:Math.max(yPos,photoAreaBottom),width:imgW,height:imgH});
+            });
+            i+=chunk.length;
+          }
         }
       }
 
@@ -1643,7 +1746,20 @@ function ReportEditor({job, user, onBack, reportDate}){
       const fmtDay=String(parseInt(fmtDD));
       const formatDate=(fmt)=>{
         if(!fmt)return"";
-        return fmt.replace(/YYYY/g,fmtYYYY).replace(/MM/g,fmtMM).replace(/DD/g,fmtDD).replace(/Month/g,fmtMonth).replace(/Mon/g,fmtMon);
+        // If fmt contains tokens like MM, DD, YYYY, Mon, Month — do token replacement
+        if(/MM|DD|YYYY|Month|Mon/.test(fmt)){
+          return fmt.replace(/YYYY/g,fmtYYYY).replace(/MM/g,fmtMM).replace(/DD/g,fmtDD).replace(/Month/g,fmtMonth).replace(/Mon/g,fmtMon);
+        }
+        // Otherwise fmt is a literal date from the template — detect its format and generate today's date
+        const f=fmt.trim();
+        if(/^\d{1,2}\/\d{1,2}\/\d{4}$/.test(f))return now.toLocaleDateString("en-US",{timeZone:tz});
+        if(/^\d{4}-\d{2}-\d{2}$/.test(f))return now.toLocaleDateString("en-CA",{timeZone:tz});
+        if(/^[A-Za-z]{3}\s+\d{1,2},?\s+\d{4}$/.test(f))return now.toLocaleDateString("en-US",{month:"short",day:"2-digit",year:"numeric",timeZone:tz});
+        if(/^[A-Za-z]+\s+\d{1,2},?\s+\d{4}$/.test(f))return now.toLocaleDateString("en-US",{month:"long",day:"2-digit",year:"numeric",timeZone:tz});
+        if(/^\d{1,2}\s+[A-Za-z]+\s+\d{4}$/.test(f)){const pd=f.startsWith("0");return now.toLocaleDateString("en-US",{day:pd?"2-digit":"numeric",month:"long",year:"numeric",timeZone:tz}).replace(/^(\w+)\s(\d+),\s(\d+)$/,(_,m,d,y)=>`${pd?d.padStart(2,"0"):d} ${m} ${y}`);}
+        if(/^[A-Za-z]{3}\s+\d{1,2}$/.test(f))return fmtMon+" "+fmtDD.replace(/^0/,"");
+        if(/^\d{2}-\d{2}-\d{4}$/.test(f))return fmtMM+"-"+fmtDD+"-"+fmtYYYY;
+        return now.toLocaleDateString("en-US",{timeZone:tz});
       };
       // Build filename from the stored pattern (which the user may have edited)
       const pattern=conv.pattern||job.report_filename_pattern||job.name||"Report";
@@ -1731,7 +1847,7 @@ function ReportEditor({job, user, onBack, reportDate}){
   };
 
   const fs={width:"100%",padding:"12px 14px",background:C.inp,border:`1px solid ${C.brd}`,borderRadius:10,color:C.txt,fontSize:15};
-  const layouts=[{k:"1",l:"1 per page"},{k:"2",l:"2 side-by-side"},{k:"4",l:"4 per page"}];
+  const layouts=[{k:"1",l:"1 per page"},{k:"2",l:"2 per page (auto)"},{k:"4",l:"4 per page"}];
 
   if(loadingDraft)return(<div style={{minHeight:"100vh",background:C.bg,display:"flex",alignItems:"center",justifyContent:"center"}}><p style={{color:C.mut}}>Loading report...</p></div>);
 
@@ -2074,7 +2190,19 @@ function JobDetail({job, user, onBack, onDeleted}){
     const monthIdx=d.toLocaleDateString("en-US",{month:"numeric",timeZone:tz})-1;
     const formatDate=(fmt)=>{
       if(!fmt)return"";
-      return fmt.replace(/YYYY/g,yyyy).replace(/MM/g,mm).replace(/DD/g,dd).replace(/Month/g,monthNames[monthIdx]||"").replace(/Mon/g,monNames[monthIdx]||"");
+      if(/MM|DD|YYYY|Month|Mon/.test(fmt)){
+        return fmt.replace(/YYYY/g,yyyy).replace(/MM/g,mm).replace(/DD/g,dd).replace(/Month/g,monthNames[monthIdx]||"").replace(/Mon/g,monNames[monthIdx]||"");
+      }
+      // fmt is a literal date from template — detect format and generate this report's date in same format
+      const f=fmt.trim();
+      if(/^\d{1,2}\/\d{1,2}\/\d{4}$/.test(f))return d.toLocaleDateString("en-US",{timeZone:tz});
+      if(/^\d{4}-\d{2}-\d{2}$/.test(f))return d.toLocaleDateString("en-CA",{timeZone:tz});
+      if(/^[A-Za-z]{3}\s+\d{1,2},?\s+\d{4}$/.test(f))return d.toLocaleDateString("en-US",{month:"short",day:"2-digit",year:"numeric",timeZone:tz});
+      if(/^[A-Za-z]+\s+\d{1,2},?\s+\d{4}$/.test(f))return d.toLocaleDateString("en-US",{month:"long",day:"2-digit",year:"numeric",timeZone:tz});
+      if(/^\d{1,2}\s+[A-Za-z]+\s+\d{4}$/.test(f)){const pd=f.startsWith("0");return d.toLocaleDateString("en-US",{day:pd?"2-digit":"numeric",month:"long",year:"numeric",timeZone:tz}).replace(/^(\w+)\s(\d+),\s(\d+)$/,(_,m,dv,y)=>`${pd?dv.padStart(2,"0"):dv} ${m} ${y}`);}
+      if(/^[A-Za-z]{3}\s+\d{1,2}$/.test(f))return monNames[monthIdx]+" "+dd.replace(/^0/,"");
+      if(/^\d{2}-\d{2}-\d{4}$/.test(f))return mm+"-"+dd+"-"+yyyy;
+      return d.toLocaleDateString("en-US",{timeZone:tz});
     };
     const dateStr=formatDate(conv.dateFormat);
     n=n.replace(/\{date\}/g,dateStr);
