@@ -3587,6 +3587,9 @@ function App(){
   const [booting,setBooting]=useState(true);
   const [setupDone,setSetupDone]=useState(null); // null=loading, true/false
 
+  // Clear stale parse attempt counters from localStorage
+  useEffect(()=>{try{Object.keys(localStorage).filter(k=>k.startsWith("mdr_parse_")).forEach(k=>localStorage.removeItem(k));}catch(e){}},[]);
+
   // On mount, try to restore existing session
   useEffect(()=>{
     authGetSession().then(async(u)=>{

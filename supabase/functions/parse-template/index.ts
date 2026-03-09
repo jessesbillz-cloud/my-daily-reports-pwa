@@ -1,6 +1,6 @@
 import "https://deno.land/x/xhr@0.3.0/mod.ts";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { unzipSync } from "https://esm.sh/fflate@0.8.2";
+import { BlobReader, ZipReader, TextWriter } from "https://deno.land/x/zipjs@v2.7.32/index.js";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -8,22 +8,40 @@ const corsHeaders = {
 };
 
 // ── DOCX XML parser — extracts text structure from .docx ZIP ──
-function parseDocxToTextItems(docxBytes: Uint8Array): any[] {
-  // .docx is a ZIP — use fflate to unzip, then grab word/document.xml
+async function parseDocxToTextItems(docxBytes: Uint8Array): Promise<any[]> {
+  const blob = new Blob([docxBytes]);
+  const reader = new ZipReader(new BlobReader(blob));
+  const entries = await reader.getEntries();
+
+  // Read document.xml (main body)
   let documentXml = "";
-
-  const unzipped = unzipSync(docxBytes);
-  const docEntry = unzipped["word/document.xml"];
-  if (docEntry) {
-    documentXml = new TextDecoder().decode(docEntry);
+  for (const entry of entries) {
+    if (entry.filename === "word/document.xml") {
+      const writer = new TextWriter();
+      documentXml = await entry.getData!(writer);
+      break;
+    }
   }
+  await reader.close();
 
-  if (!documentXml) throw new Error("Could not extract document.xml from .docx file");
+  if (!documentXml) throw new Error("No document.xml found in .docx");
 
+  // Parse the XML to extract text from table cells and paragraphs
+  // We create "text items" similar to pdf.js output but with table structure info
   const items: any[] = [];
-  let y = 0;
+  let y = 0; // simulated y position (increments per row/paragraph)
   const PAGE_W = 612;
 
+  // Extract table rows: <w:tr> contains <w:tc> cells
+  // Extract paragraphs: <w:p> contains <w:r> runs with <w:t> text
+  const tableRowRegex = /<w:tr\b[^>]*>([\s\S]*?)<\/w:tr>/g;
+  const cellRegex = /<w:tc\b[^>]*>([\s\S]*?)<\/w:tc>/g;
+  const paraRegex = /<w:p\b[^>]*>([\s\S]*?)<\/w:p>/g;
+  const runRegex = /<w:r\b[^>]*>([\s\S]*?)<\/w:r>/g;
+  const textRegex = /<w:t[^>]*>([^<]*)<\/w:t>/g;
+  const boldRegex = /<w:b\s*\/?>|<w:b\s[^>]*\/>/;
+
+  // Helper: extract all text from a run/paragraph XML chunk
   const extractText = (xml: string): string => {
     let text = "";
     let m;
@@ -32,92 +50,84 @@ function parseDocxToTextItems(docxBytes: Uint8Array): any[] {
     return text.trim();
   };
 
-  const boldRegex = /<w:b\s*\/?>|<w:b\s[^>]*\/>/;
+  // Helper: check if a run is bold
   const isBold = (xml: string): boolean => boldRegex.test(xml);
 
+  // Track whether we're inside tables or free paragraphs
   // First pass: extract table content
-  const tableRe = /<w:tbl\b[^>]*>([\s\S]*?)<\/w:tbl>/g;
   let tableMatch;
+  const tableRe = /<w:tbl\b[^>]*>([\s\S]*?)<\/w:tbl>/g;
   while ((tableMatch = tableRe.exec(documentXml)) !== null) {
     const tableXml = tableMatch[1];
-    const rowRe = /<w:tr\b[^>]*>([\s\S]*?)<\/w:tr>/g;
     let rowMatch;
+    const rowRe = /<w:tr\b[^>]*>([\s\S]*?)<\/w:tr>/g;
     while ((rowMatch = rowRe.exec(tableXml)) !== null) {
       const rowXml = rowMatch[1];
-      const cellRe = /<w:tc\b[^>]*>([\s\S]*?)<\/w:tc>/g;
       let cellMatch;
-      let cellX = 36;
-      const cellWidth = (PAGE_W - 72) / 4;
+      const cellRe = /<w:tc\b[^>]*>([\s\S]*?)<\/w:tc>/g;
+      let cellX = 36; // left margin
+      const cellWidth = (PAGE_W - 72) / 4; // approximate equal column widths
       let cellIdx = 0;
       while ((cellMatch = cellRe.exec(rowXml)) !== null) {
         const cellXml = cellMatch[1];
+        // Extract all text from this cell
         const cellTexts: string[] = [];
-        const pRe = /<w:p\b[^>]*>([\s\S]*?)<\/w:p>/g;
         let pMatch;
+        const pRe = /<w:p\b[^>]*>([\s\S]*?)<\/w:p>/g;
         while ((pMatch = pRe.exec(cellXml)) !== null) {
           const pText = extractText(pMatch[1]);
           if (pText) cellTexts.push(pText);
         }
         const fullText = cellTexts.join(" ").trim();
         if (fullText) {
+          // Check if any run in this cell is bold (likely a label)
           const bold = isBold(cellXml);
           items.push({
-            str: fullText, x: Math.round(cellX), y: Math.round(y),
-            w: Math.round(cellWidth), h: 14, page: 1, fontSize: 10,
-            bold, inTable: true, cellIndex: cellIdx,
+            str: fullText,
+            x: Math.round(cellX),
+            y: Math.round(y),
+            w: Math.round(cellWidth),
+            h: 14,
+            page: 1,
+            fontSize: 10,
+            bold,
+            inTable: true,
+            cellIndex: cellIdx,
           });
         }
         cellX += cellWidth;
         cellIdx++;
       }
-      y += 18;
+      y += 18; // row height
     }
-    y += 10;
+    y += 10; // gap after table
   }
 
-  // Second pass: standalone paragraphs outside tables
+  // Second pass: extract standalone paragraphs (outside tables)
+  // Remove tables first, then parse remaining paragraphs
   const noTables = documentXml.replace(/<w:tbl\b[^>]*>[\s\S]*?<\/w:tbl>/g, "");
-  const pRe = /<w:p\b[^>]*>([\s\S]*?)<\/w:p>/g;
   let pMatch;
+  const pRe = /<w:p\b[^>]*>([\s\S]*?)<\/w:p>/g;
   while ((pMatch = pRe.exec(noTables)) !== null) {
     const pText = extractText(pMatch[1]);
     if (pText && pText.length > 1) {
       const bold = isBold(pMatch[1]);
       items.push({
-        str: pText, x: 36, y: Math.round(y),
-        w: PAGE_W - 72, h: 14, page: 1,
-        fontSize: bold ? 14 : 10, bold, inTable: false,
+        str: pText,
+        x: 36,
+        y: Math.round(y),
+        w: PAGE_W - 72,
+        h: 14,
+        page: 1,
+        fontSize: bold ? 14 : 10,
+        bold,
+        inTable: false,
       });
       y += 16;
     }
   }
 
   return items;
-}
-
-// ── Safely extract JSON from AI response text ──
-function extractJSON(text: string): any {
-  // Strip markdown fences
-  let clean = text.replace(/```json\s*/gi, "").replace(/```\s*/g, "").trim();
-
-  // Try parsing as-is
-  try { return JSON.parse(clean); } catch (_) {}
-
-  // Find the first { and last } for object
-  const firstBrace = clean.indexOf("{");
-  const lastBrace = clean.lastIndexOf("}");
-  if (firstBrace >= 0 && lastBrace > firstBrace) {
-    try { return JSON.parse(clean.substring(firstBrace, lastBrace + 1)); } catch (_) {}
-  }
-
-  // Find array brackets
-  const firstBracket = clean.indexOf("[");
-  const lastBracket = clean.lastIndexOf("]");
-  if (firstBracket >= 0 && lastBracket > firstBracket) {
-    try { return JSON.parse(clean.substring(firstBracket, lastBracket + 1)); } catch (_) {}
-  }
-
-  throw new Error("Could not extract valid JSON from AI response");
 }
 
 // Claude does SEMANTIC classification — coordinates come from text extraction (PDF) or table structure (DOCX)
@@ -155,8 +165,8 @@ CRITICAL RULES:
 5. The "label" field MUST exactly match a "str" value from the input text items.
 6. Date values next to signatures ARE fields and MUST be included.
 
-Return ONLY valid JSON object with "fields" array, no markdown, no explanation:
-{"fields":[{"label":"Date:","name":"Date","category":"editable","layout":"inline","autoFill":"date","voiceEnabled":false,"multiline":false,"valueText":""}]}`;
+Return ONLY valid JSON object with "fields" array, no markdown:
+{"fields":[{"label":"Date:","name":"Date","category":"editable","layout":"inline","autoFill":"date","voiceEnabled":false,"multiline":false,"valueText":"04 February 2026"},{"label":"Jan 31, 2026","name":"Signature Date","category":"editable","layout":"inline","autoFill":"date","voiceEnabled":false,"multiline":false,"valueText":"Jan 31, 2026"},{"label":"IOR Notes","name":"IOR Notes","category":"editable","layout":"below","autoFill":null,"voiceEnabled":true,"multiline":true,"valueText":""}]}`;
 
 // Separate prompt for filename convention analysis
 const FILENAME_PROMPT = `You are analyzing a PDF filename to determine its naming convention.
@@ -170,11 +180,28 @@ TOKENS to detect:
 
 Return a JSON object:
 - "pattern": The filename with tokens replacing the dynamic parts. Keep ALL static text exactly as-is.
-- "dateFormat": The detected date format using these codes: MM=2-digit month, DD=2-digit day, YYYY=4-digit year, Month=full month name, Mon=abbreviated month. Use the actual separator found.
+- "dateFormat": The detected date format using these codes: MM=2-digit month, DD=2-digit day, YYYY=4-digit year, Month=full month name, Mon=abbreviated month. Use the actual separator found (dash, slash, dot, underscore, space, or none).
+  Examples: "MM-DD-YYYY", "YYYY-MM-DD", "MM.DD.YYYY", "MMDDYYYY", "Month DD YYYY", "MM/DD/YYYY"
   If no date found, use "".
-- "numberPadding": How many digits the report number is zero-padded to (e.g. "45"→0, "045"→3). Use 0 if no padding detected.
+- "numberPadding": How many digits the report number is zero-padded to (e.g. "45"→0, "045"→3, "01"→2). Use 0 if no padding detected.
 
-Return ONLY valid JSON, no markdown, no explanation.`;
+EXAMPLES:
+Filename: "Daily Report 45 Woodland Park 03-08-2026"
+→ {"pattern":"Daily Report {report_number} Woodland Park {date}","dateFormat":"MM-DD-YYYY","numberPadding":0}
+
+Filename: "DR_001_ProjectAlpha_2026-03-08"
+→ {"pattern":"DR_{report_number}_ProjectAlpha_{date}","dateFormat":"YYYY-MM-DD","numberPadding":3}
+
+Filename: "Inspection Report 12 - March 8 2026"
+→ {"pattern":"Inspection Report {report_number} - {date}","dateFormat":"Month DD YYYY","numberPadding":0}
+
+Filename: "Site Visit Log 003"
+→ {"pattern":"Site Visit Log {report_number}","dateFormat":"","numberPadding":3}
+
+Filename: "Highway Project DR7 2026"
+→ {"pattern":"Highway Project DR{report_number} {year}","dateFormat":"","numberPadding":0}
+
+Return ONLY valid JSON, no markdown.`;
 
 serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -190,28 +217,20 @@ serve(async (req) => {
     let fileType = "pdf";
 
     if (docx_base64) {
+      // Parse .docx XML to extract text items
       fileType = "docx";
-      try {
-        const raw = Uint8Array.from(atob(docx_base64), c => c.charCodeAt(0));
-        resolvedItems = parseDocxToTextItems(raw);
-      } catch (docxErr) {
-        return new Response(JSON.stringify({
-          error: "Could not parse DOCX file: " + (docxErr.message || "Unknown error") + ". Try saving the file as a new .docx in Word first."
-        }), {
-          status: 400,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
-      }
+      const raw = Uint8Array.from(atob(docx_base64), c => c.charCodeAt(0));
+      resolvedItems = await parseDocxToTextItems(raw);
     }
 
     if (!resolvedItems || !resolvedItems.length) {
-      return new Response(JSON.stringify({ error: "No text items found in document. The template may be image-based — try a text-based PDF." }), {
+      return new Response(JSON.stringify({ error: "No text items found in document" }), {
         status: 400,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
-    // Format text items for Claude
+    // Format text items for Claude — include position data for context
     const itemsSummary = resolvedItems.map((t: any, i: number) =>
       `[${i}] page:${t.page} str:"${t.str}" x:${t.x} y:${t.y} w:${t.w} h:${t.h} fs:${t.fontSize}${t.bold ? " BOLD" : ""}${t.inTable ? " TABLE" : ""}`
     ).join("\n");
@@ -219,13 +238,6 @@ serve(async (req) => {
     const userMsg = `Here are ${resolvedItems.length} text items extracted from "${file_name}" (${fileType}):\n\n${itemsSummary}\n\n${PROMPT}`;
 
     const apiKey = Deno.env.get("ANTHROPIC_API_KEY");
-    if (!apiKey) {
-      return new Response(JSON.stringify({ error: "ANTHROPIC_API_KEY not configured. Set it in Supabase Edge Function secrets." }), {
-        status: 500,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-
     const apiHeaders = {
       "Content-Type": "application/json",
       "x-api-key": apiKey,
@@ -261,50 +273,29 @@ serve(async (req) => {
     const fnData = await fnResp.json();
 
     if (data.error) {
-      return new Response(JSON.stringify({ error: "AI service error: " + (data.error.message || JSON.stringify(data.error)) }), {
+      return new Response(JSON.stringify({ error: data.error.message || "Anthropic API error" }), {
         status: 500,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
-    // Parse filename convention result (non-fatal if it fails)
+    // Parse filename convention result
     let filenameConvention: any = null;
     try {
       const fnRaw = fnData.content?.map((c: any) => c.text || "").join("") || "";
-      filenameConvention = extractJSON(fnRaw);
+      const fnClean = fnRaw.replace(/```json|```/g, "").trim();
+      filenameConvention = JSON.parse(fnClean);
     } catch (_e) {
-      // Non-fatal
+      // Non-fatal — filename convention is optional
     }
 
-    // Parse field analysis result
     const rawText = data.content?.map((c: any) => c.text || "").join("") || "";
-    let parsed: any;
-    try {
-      parsed = extractJSON(rawText);
-    } catch (jsonErr) {
-      return new Response(JSON.stringify({
-        error: "AI returned invalid response. Please try again.",
-        rawResponse: rawText.substring(0, 200)
-      }), {
-        status: 500,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-
+    const clean = rawText.replace(/```json|```/g, "").trim();
+    const parsed = JSON.parse(clean);
     const fieldMappings = Array.isArray(parsed) ? parsed : (parsed.fields || parsed);
 
-    if (!Array.isArray(fieldMappings) || fieldMappings.length === 0) {
-      return new Response(JSON.stringify({
-        error: "AI could not identify any fields in this template. You can still create the job and configure fields manually.",
-        editable: [],
-        locked: [],
-        fileType
-      }), {
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-
     // ── Reconstruct coordinates from real text positions ──
+    // Build a lookup of text items by str for fast matching
     const itemsByStr = new Map<string, any[]>();
     for (const item of resolvedItems) {
       const key = (item.str || "").trim();
@@ -312,20 +303,24 @@ serve(async (req) => {
       itemsByStr.get(key)!.push(item);
     }
 
+    // Also build sorted-by-position list per page for neighbor lookups
     const itemsByPage = new Map<number, any[]>();
     for (const item of resolvedItems) {
       const pg = item.page || 1;
       if (!itemsByPage.has(pg)) itemsByPage.set(pg, []);
       itemsByPage.get(pg)!.push(item);
     }
+    // Sort each page's items by y then x (reading order)
     for (const [, items] of itemsByPage) {
       items.sort((a: any, b: any) => a.y - b.y || a.x - b.x);
     }
 
     const PADDING = 4;
-    const PAGE_WIDTH = 612;
+    const PAGE_WIDTH = 612; // standard letter
 
+    // Find the text item that best matches a label string
     const findLabelItem = (label: string, page?: number): any | null => {
+      // Exact match first
       const exactMatches = itemsByStr.get(label) || [];
       if (exactMatches.length === 1) return exactMatches[0];
       if (exactMatches.length > 1 && page) {
@@ -334,7 +329,12 @@ serve(async (req) => {
       }
       if (exactMatches.length > 0) return exactMatches[0];
 
-      const variants = [label.replace(/:$/, "").trim(), label.trim() + ":", label.trim()];
+      // Fuzzy: try with/without colon, trimmed
+      const variants = [
+        label.replace(/:$/, "").trim(),
+        label.trim() + ":",
+        label.trim(),
+      ];
       for (const v of variants) {
         const matches = itemsByStr.get(v);
         if (matches && matches.length > 0) {
@@ -346,14 +346,17 @@ serve(async (req) => {
         }
       }
 
+      // Substring match — find text items containing the label
       for (const item of resolvedItems) {
         if ((item.str || "").toLowerCase().includes(label.toLowerCase())) {
           if (!page || item.page === page) return item;
         }
       }
+
       return null;
     };
 
+    // Find the next text item to the right on the same line (for value text / width calc)
     const findNextItemRight = (item: any): any | null => {
       const pageItems = itemsByPage.get(item.page || 1) || [];
       const yTolerance = (item.h || 10) * 0.6;
@@ -363,11 +366,15 @@ serve(async (req) => {
         if (other === item) continue;
         if (Math.abs(other.y - item.y) > yTolerance) continue;
         const dist = other.x - (item.x + (item.w || 0));
-        if (dist > -2 && dist < bestDist) { bestDist = dist; best = other; }
+        if (dist > -2 && dist < bestDist) {
+          bestDist = dist;
+          best = other;
+        }
       }
       return best;
     };
 
+    // Find the next text item below (for "below" layout height calc)
     const findNextItemBelow = (item: any): any | null => {
       const pageItems = itemsByPage.get(item.page || 1) || [];
       let best: any = null;
@@ -375,7 +382,10 @@ serve(async (req) => {
       for (const other of pageItems) {
         if (other === item) continue;
         const dist = other.y - (item.y + (item.h || 10));
-        if (dist > 2 && dist < bestDist) { bestDist = dist; best = other; }
+        if (dist > 2 && dist < bestDist) {
+          bestDist = dist;
+          best = other;
+        }
       }
       return best;
     };
@@ -384,7 +394,8 @@ serve(async (req) => {
     const locked: any[] = [];
     const NOTES_KEYWORDS = ["notes", "observations", "comments"];
 
-    // Column detection for inline field positioning
+    // Detect table column boundaries for smarter inline field positioning
+    // Groups items by y-position (rows), finds where value columns typically start
     const columnCache = new Map<number, number[]>();
     const getColumnStarts = (pg: number): number[] => {
       if (columnCache.has(pg)) return columnCache.get(pg)!;
@@ -417,25 +428,28 @@ serve(async (req) => {
     };
 
     for (const mapping of fieldMappings) {
-      if (!mapping || !mapping.label) continue;
       const labelItem = findLabelItem(mapping.label, mapping.page);
-      if (!labelItem) continue;
+      if (!labelItem) continue; // Could not match label to any text item
 
       let x: number, y: number, w: number, h: number;
       const fontSize = labelItem.fontSize || 10;
       const page = labelItem.page || 1;
 
       if (mapping.layout === "below") {
+        // Value area starts below the label
         x = labelItem.x;
         y = labelItem.y + (labelItem.h || fontSize) + PADDING;
-        w = PAGE_WIDTH - labelItem.x - 36;
+        w = PAGE_WIDTH - labelItem.x - 36; // extend to right margin
+        // Height: distance to next item below, or default 100
         const nextBelow = findNextItemBelow(labelItem);
         h = nextBelow ? Math.max(nextBelow.y - y - PADDING, 40) : 100;
       } else {
+        // Inline: value area to the right of the label
         const labelEnd = labelItem.x + (labelItem.w || 0);
         x = labelEnd + PADDING;
         y = labelItem.y;
 
+        // Try to find actual value text item for better positioning
         if (mapping.valueText) {
           const valVariants = [mapping.valueText, mapping.valueText.trim()];
           for (const vt of valVariants) {
@@ -447,21 +461,24 @@ serve(async (req) => {
           }
         }
 
+        // If x is still right after the label, snap to detected column boundary
         if (x < labelEnd + 20) {
           const cols = getColumnStarts(page);
           const snapCol = cols.find((cx: number) => cx > labelEnd + 10 && cx < labelEnd + 250);
           if (snapCol) x = snapCol;
         }
 
+        // Width: distance to next item on the right, or to page margin
         const nextRight = findNextItemRight(labelItem);
         if (nextRight && nextRight.x > x) {
           w = nextRight.x - x - PADDING;
         } else {
-          w = PAGE_WIDTH - x - 36;
+          w = PAGE_WIDTH - x - 36; // extend to right margin
         }
         h = labelItem.h || fontSize;
       }
 
+      // Guardrails
       if (x > 560) x = labelItem.x + 5;
       if (w < 20) w = 100;
       if (h < 10) h = fontSize;
@@ -516,21 +533,28 @@ serve(async (req) => {
     const dedupedEditable = mergeNotes(dedup(editable));
     const editNames = new Set(dedupedEditable.map((f: any) => (f.name || "").toLowerCase().trim()));
     let dedupedLocked = mergeNotes(dedup(locked));
+    // Remove any locked fields that exist in editable
     dedupedLocked = dedupedLocked.filter((f: any) => !editNames.has((f.name || "").toLowerCase().trim()));
+    // No notes in locked if editable has one
     const editHasNotes = dedupedEditable.some((f: any) => NOTES_KEYWORDS.some((k) => (f.name || "").toLowerCase().includes(k)));
     if (editHasNotes) {
       dedupedLocked = dedupedLocked.filter((f: any) => !NOTES_KEYWORDS.some((k) => (f.name || "").toLowerCase().includes(k)));
     }
 
     const result: any = { editable: dedupedEditable, locked: dedupedLocked, fileType };
-    if (filenameConvention) result.filenameConvention = filenameConvention;
-    if (fileType === "docx") result.docxTextItems = resolvedItems;
+    if (filenameConvention) {
+      result.filenameConvention = filenameConvention;
+    }
+    // For docx, also return the extracted text items so client can store them
+    if (fileType === "docx") {
+      result.docxTextItems = resolvedItems;
+    }
 
     return new Response(JSON.stringify(result), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (error) {
-    return new Response(JSON.stringify({ error: "Parse failed: " + (error.message || "Unknown error") }), {
+    return new Response(JSON.stringify({ error: error.message }), {
       status: 500,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
