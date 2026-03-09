@@ -1,5 +1,6 @@
 import "https://deno.land/x/xhr@0.3.0/mod.ts";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { unzipSync } from "https://esm.sh/fflate@0.8.2";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -7,29 +8,14 @@ const corsHeaders = {
 };
 
 // ── DOCX XML parser — extracts text structure from .docx ZIP ──
-// Uses DecompressionStream (built into Deno) instead of external zip library
-async function parseDocxToTextItems(docxBytes: Uint8Array): Promise<any[]> {
-  // Use the built-in JSZip-free approach: read ZIP entries manually
-  // .docx is a ZIP file — we need word/document.xml
+function parseDocxToTextItems(docxBytes: Uint8Array): any[] {
+  // .docx is a ZIP — use fflate to unzip, then grab word/document.xml
   let documentXml = "";
 
-  try {
-    // Try using Deno's built-in zip handling via Response + DecompressionStream
-    // Actually, ZIP format isn't gzip — we need to parse the ZIP manually
-    // Use a minimal ZIP reader for Deno
-    const zip = await readZipEntries(docxBytes);
-    const docEntry = zip.find(e => e.filename === "word/document.xml");
-    if (docEntry) {
-      documentXml = new TextDecoder().decode(docEntry.data);
-    }
-  } catch (zipErr) {
-    console.error("ZIP parse error:", zipErr);
-    // Fallback: try to find XML directly in the binary (sometimes works for simple docs)
-    const text = new TextDecoder("utf-8", { fatal: false }).decode(docxBytes);
-    const xmlStart = text.indexOf("<?xml");
-    if (xmlStart >= 0) {
-      documentXml = text.substring(xmlStart);
-    }
+  const unzipped = unzipSync(docxBytes);
+  const docEntry = unzipped["word/document.xml"];
+  if (docEntry) {
+    documentXml = new TextDecoder().decode(docEntry);
   }
 
   if (!documentXml) throw new Error("Could not extract document.xml from .docx file");
@@ -107,77 +93,6 @@ async function parseDocxToTextItems(docxBytes: Uint8Array): Promise<any[]> {
   }
 
   return items;
-}
-
-// ── Minimal ZIP reader for Deno (no external dependencies) ──
-interface ZipEntry { filename: string; data: Uint8Array; }
-
-async function readZipEntries(zipData: Uint8Array): Promise<ZipEntry[]> {
-  const entries: ZipEntry[] = [];
-  const view = new DataView(zipData.buffer, zipData.byteOffset, zipData.byteLength);
-  let offset = 0;
-
-  while (offset < zipData.length - 4) {
-    const sig = view.getUint32(offset, true);
-    if (sig !== 0x04034b50) break; // Not a local file header
-
-    const compressionMethod = view.getUint16(offset + 8, true);
-    const compressedSize = view.getUint32(offset + 18, true);
-    const uncompressedSize = view.getUint32(offset + 22, true);
-    const filenameLen = view.getUint16(offset + 26, true);
-    const extraLen = view.getUint16(offset + 28, true);
-    const filename = new TextDecoder().decode(zipData.slice(offset + 30, offset + 30 + filenameLen));
-    const dataStart = offset + 30 + filenameLen + extraLen;
-
-    let fileData: Uint8Array;
-    if (compressionMethod === 0) {
-      // Stored (no compression)
-      fileData = zipData.slice(dataStart, dataStart + compressedSize);
-    } else if (compressionMethod === 8) {
-      // Deflate — use DecompressionStream
-      const compressed = zipData.slice(dataStart, dataStart + compressedSize);
-      try {
-        // Create a raw deflate stream (no gzip/zlib headers)
-        const ds = new DecompressionStream("raw");
-        const writer = ds.writable.getWriter();
-        const reader = ds.readable.getReader();
-        const chunks: Uint8Array[] = [];
-
-        const writePromise = writer.write(compressed).then(() => writer.close());
-
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          chunks.push(value);
-        }
-
-        await writePromise;
-
-        // Concatenate chunks
-        const totalLen = chunks.reduce((s, c) => s + c.length, 0);
-        fileData = new Uint8Array(totalLen);
-        let pos = 0;
-        for (const chunk of chunks) {
-          fileData.set(chunk, pos);
-          pos += chunk.length;
-        }
-      } catch (decompErr) {
-        // If decompression fails, skip this entry
-        console.error(`Decompression failed for ${filename}:`, decompErr);
-        offset = dataStart + compressedSize;
-        continue;
-      }
-    } else {
-      // Unknown compression, skip
-      offset = dataStart + compressedSize;
-      continue;
-    }
-
-    entries.push({ filename, data: fileData });
-    offset = dataStart + compressedSize;
-  }
-
-  return entries;
 }
 
 // ── Safely extract JSON from AI response text ──
@@ -278,7 +193,7 @@ serve(async (req) => {
       fileType = "docx";
       try {
         const raw = Uint8Array.from(atob(docx_base64), c => c.charCodeAt(0));
-        resolvedItems = await parseDocxToTextItems(raw);
+        resolvedItems = parseDocxToTextItems(raw);
       } catch (docxErr) {
         return new Response(JSON.stringify({
           error: "Could not parse DOCX file: " + (docxErr.message || "Unknown error") + ". Try saving the file as a new .docx in Word first."
