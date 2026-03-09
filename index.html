@@ -1125,12 +1125,67 @@ function WorkLogEditor({job, user, onBack, reportDate}){
   const [weatherPM,setWeatherPM]=useState("");
   const photoRef=useRef(null);
   const [photoTarget,setPhotoTarget]=useState(null); // contractor id for photo upload
+  const [weatherLoading,setWeatherLoading]=useState(false);
 
   const fs={width:"100%",padding:"12px 14px",background:C.inp,border:`1px solid ${C.brd}`,borderRadius:10,color:C.txt,fontSize:15};
+
+  // WMO weather code → human-readable description
+  const wmoDesc=(code)=>{
+    const m={0:"Clear",1:"Mostly Clear",2:"Partly Cloudy",3:"Overcast",45:"Foggy",48:"Fog (Rime)",51:"Light Drizzle",53:"Drizzle",55:"Heavy Drizzle",56:"Light Freezing Drizzle",57:"Freezing Drizzle",61:"Light Rain",63:"Rain",65:"Heavy Rain",66:"Light Freezing Rain",67:"Freezing Rain",71:"Light Snow",73:"Snow",75:"Heavy Snow",77:"Snow Grains",80:"Light Showers",81:"Showers",82:"Heavy Showers",85:"Light Snow Showers",86:"Snow Showers",95:"Thunderstorm",96:"Thunderstorm + Hail",99:"Thunderstorm + Heavy Hail"};
+    return m[code]||"Unknown";
+  };
+
+  // Fetch weather from Open-Meteo (free, no API key)
+  const fetchWeather=async()=>{
+    setWeatherLoading(true);
+    try{
+      let lat,lng;
+      // Try geocoding the job's site address first
+      if(job.site_address){
+        try{
+          const geoR=await fetch(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(job.site_address)}&count=1&language=en&format=json`);
+          const geoD=await geoR.json();
+          if(geoD.results&&geoD.results.length>0){lat=geoD.results[0].latitude;lng=geoD.results[0].longitude;}
+        }catch(e){console.log("Geocode failed, trying device location");}
+      }
+      // Fallback to device geolocation
+      if(!lat||!lng){
+        try{
+          const pos=await new Promise((resolve,reject)=>navigator.geolocation.getCurrentPosition(resolve,reject,{timeout:10000}));
+          lat=pos.coords.latitude;lng=pos.coords.longitude;
+        }catch(e){
+          alert("Could not determine location. Enter a site address on the job or allow location access.");
+          setWeatherLoading(false);return;
+        }
+      }
+      // Fetch hourly weather for today
+      const wxR=await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lng}&hourly=temperature_2m,weather_code,wind_speed_10m,relative_humidity_2m,precipitation&temperature_unit=fahrenheit&wind_speed_unit=mph&precipitation_unit=inch&timezone=auto&forecast_days=1`);
+      const wxD=await wxR.json();
+      if(!wxD.hourly||!wxD.hourly.time)throw new Error("No weather data");
+      const h=wxD.hourly;
+      // Pick representative hours: 7am (morning), 12pm (midday), 4pm (afternoon)
+      const fmt=(idx)=>{
+        if(idx<0||idx>=h.time.length)return"";
+        const temp=Math.round(h.temperature_2m[idx]);
+        const desc=wmoDesc(h.weather_code[idx]);
+        const wind=Math.round(h.wind_speed_10m[idx]);
+        const hum=Math.round(h.relative_humidity_2m[idx]);
+        const precip=h.precipitation[idx];
+        let s=`${temp}°F ${desc}, Wind ${wind} mph, ${hum}% humidity`;
+        if(precip>0)s+=`, ${precip}" precip`;
+        return s;
+      };
+      setWeatherAM(fmt(7));   // 7:00 AM
+      setWeatherMid(fmt(12)); // 12:00 PM
+      setWeatherPM(fmt(16));  // 4:00 PM
+    }catch(e){console.error("Weather fetch:",e);alert("Weather fetch failed: "+e.message);}
+    finally{setWeatherLoading(false);}
+  };
 
   // Load existing report on mount
   useEffect(()=>{
     (async()=>{
+      let hasWeather=false;
       try{
         const rpt=await db.getReport(job.id,todayISO);
         if(rpt){
@@ -1140,12 +1195,14 @@ function WorkLogEditor({job, user, onBack, reportDate}){
             if(c.contractors)setContractors(c.contractors);
             if(c.generalNotes)setGeneralNotes(c.generalNotes);
             if(c.safetyNotes)setSafetyNotes(c.safetyNotes);
-            if(c.weatherAM)setWeatherAM(c.weatherAM);
-            if(c.weatherMid)setWeatherMid(c.weatherMid);
-            if(c.weatherPM)setWeatherPM(c.weatherPM);
+            if(c.weatherAM){setWeatherAM(c.weatherAM);hasWeather=true;}
+            if(c.weatherMid){setWeatherMid(c.weatherMid);hasWeather=true;}
+            if(c.weatherPM){setWeatherPM(c.weatherPM);hasWeather=true;}
           }
         }
       }catch(e){console.error(e);}
+      // Auto-fetch weather if no existing weather data
+      if(!hasWeather)fetchWeather();
     })();
   },[]);
 
@@ -1244,22 +1301,32 @@ function WorkLogEditor({job, user, onBack, reportDate}){
         <div style={{background:C.card,border:`1px solid ${C.brd}`,borderRadius:12,padding:16,marginBottom:16}}>
           <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:12}}>
             <span style={{fontSize:18}}>🌤</span>
-            <span style={{fontWeight:700,fontSize:15}}>Weather</span>
+            <span style={{fontWeight:700,fontSize:15,flex:1}}>Weather</span>
+            <button onClick={fetchWeather} disabled={weatherLoading} style={{padding:"6px 12px",background:C.blu+"18",border:`1px solid ${C.blu}44`,borderRadius:6,color:C.blu,fontSize:11,fontWeight:600,cursor:weatherLoading?"default":"pointer",opacity:weatherLoading?0.6:1}}>
+              {weatherLoading?"Fetching...":"Refresh"}
+            </button>
           </div>
-          <div style={{display:"flex",gap:8}}>
-            <div style={{flex:1}}>
-              <label style={{display:"block",fontSize:11,color:C.mut,marginBottom:4}}>Morning</label>
-              <input type="text" value={weatherAM} onChange={e=>setWeatherAM(e.target.value)} placeholder="72° Sunny" style={{...fs,padding:"10px 12px",fontSize:13}}/>
+          {weatherLoading&&!weatherAM?(
+            <div style={{textAlign:"center",padding:"16px 0",color:C.mut,fontSize:13}}>
+              <div style={{width:24,height:24,border:`2px solid ${C.brd}`,borderTop:`2px solid ${C.org}`,borderRadius:"50%",margin:"0 auto 8px",animation:"spin 1s linear infinite"}}/>
+              Fetching weather for {job.site_address||"your location"}...
             </div>
-            <div style={{flex:1}}>
-              <label style={{display:"block",fontSize:11,color:C.mut,marginBottom:4}}>Midday</label>
-              <input type="text" value={weatherMid} onChange={e=>setWeatherMid(e.target.value)} placeholder="78° Partly Cloudy" style={{...fs,padding:"10px 12px",fontSize:13}}/>
+          ):(
+            <div style={{display:"flex",flexDirection:"column",gap:8}}>
+              {[{label:"Morning (7 AM)",val:weatherAM,set:setWeatherAM,icon:"🌅"},
+                {label:"Midday (12 PM)",val:weatherMid,set:setWeatherMid,icon:"☀️"},
+                {label:"Afternoon (4 PM)",val:weatherPM,set:setWeatherPM,icon:"🌇"}
+              ].map(w=>(
+                <div key={w.label} style={{display:"flex",alignItems:"center",gap:10}}>
+                  <span style={{fontSize:16,flexShrink:0}}>{w.icon}</span>
+                  <div style={{flex:1}}>
+                    <label style={{display:"block",fontSize:10,color:C.mut,marginBottom:2}}>{w.label}</label>
+                    <input type="text" value={w.val} onChange={e=>w.set(e.target.value)} placeholder="72°F Sunny, Wind 5 mph, 45% humidity" style={{...fs,padding:"8px 10px",fontSize:12}}/>
+                  </div>
+                </div>
+              ))}
             </div>
-            <div style={{flex:1}}>
-              <label style={{display:"block",fontSize:11,color:C.mut,marginBottom:4}}>Afternoon</label>
-              <input type="text" value={weatherPM} onChange={e=>setWeatherPM(e.target.value)} placeholder="75° Clear" style={{...fs,padding:"10px 12px",fontSize:13}}/>
-            </div>
-          </div>
+          )}
         </div>
 
         {/* Contractor Cards */}
