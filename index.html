@@ -1074,7 +1074,9 @@ function ReportEditor({job, user, onBack, reportDate}){
   // If editable already has a notes field, remove any notes from locked too
   const initLock=editHasNotes?[...(fc.locked||[])].filter(f=>!isNotes(f.name)):dedupNotes([...(fc.locked||[])]);
   const tz=Intl.DateTimeFormat().resolvedOptions().timeZone;
-  const todayISO=reportDate||new Date().toLocaleDateString("en-CA",{timeZone:tz});
+  // Use reportDate if editing a specific past date, otherwise always compute fresh "today"
+  const getTodayISO=()=>reportDate||new Date().toLocaleDateString("en-CA",{timeZone:tz});
+  const todayISO=getTodayISO();
   const todayDisplay=new Date(todayISO+"T12:00:00").toLocaleDateString("en-US",{weekday:"long",month:"long",day:"numeric",year:"numeric",timeZone:tz});
 
   // Mutable field lists — locked fields can be unlocked/relocked
@@ -1215,11 +1217,13 @@ function ReportEditor({job, user, onBack, reportDate}){
   const saveWorking=async()=>{
     setSaving(true);
     try{
+      // Always use fresh date (not stale closure if app was open overnight)
+      const saveDate=reportDate||new Date().toLocaleDateString("en-CA",{timeZone:tz});
       const content={vals,lockVals,photos,photoLayout,lockFields,editFields};
       await db.saveReport({
         job_id:job.id,
         user_id:user.id,
-        report_date:todayISO,
+        report_date:saveDate,
         status:"working_copy",
         content:JSON.stringify(content),
         updated_at:new Date().toISOString()
@@ -1448,6 +1452,8 @@ function ReportEditor({job, user, onBack, reportDate}){
   // Submit Report — generates filled PDF with pdf-lib, uploads, emails, all in one step
   const submitReport=async()=>{
     setSubmitting(true);
+    // Always use fresh current date at submit time (not stale closure value)
+    const submitDate=reportDate||new Date().toLocaleDateString("en-CA",{timeZone:tz});
     try{
       const {PDFDocument,rgb,StandardFonts}=PDFLib;
 
@@ -1492,7 +1498,7 @@ function ReportEditor({job, user, onBack, reportDate}){
         // Build filename (same logic as PDF path)
         let rptNumber=1;
         try{const cntR=await fetch(`${SB_URL}/rest/v1/reports?select=report_number&job_id=eq.${job.id}&order=report_number.desc&limit=1`,{headers:db._h()});const topR=cntR.ok?await cntR.json():[];if(topR[0]?.report_number){rptNumber=topR[0].report_number+1;}else{const countR=await fetch(`${SB_URL}/rest/v1/reports?select=id&job_id=eq.${job.id}&limit=0`,{headers:{...db._h(),Prefer:"count=exact"}});const total=parseInt(countR.headers.get("content-range")?.split("/")[1]||"0");rptNumber=total+1;}}catch(e){}
-        if(draftId){try{const exR=await fetch(`${SB_URL}/rest/v1/reports?select=report_number&id=eq.${draftId}`,{headers:db._h()});const exD=exR.ok?await exR.json():[];if(exD[0]?.report_number)rptNumber=exD[0].report_number;}catch(e){}}
+        if(draftId){try{const exR=await fetch(`${SB_URL}/rest/v1/reports?select=report_number,report_date&id=eq.${draftId}`,{headers:db._h()});const exD=exR.ok?await exR.json():[];if(exD[0]?.report_number&&exD[0]?.report_date===submitDate)rptNumber=exD[0].report_number;}catch(e){}}
         const conv=job.field_config?.filenameConvention||{};
         const padding=conv.numberPadding||0;
         const rptNum=padding>0?String(rptNumber).padStart(padding,"0"):String(rptNumber);
@@ -1527,7 +1533,7 @@ function ReportEditor({job, user, onBack, reportDate}){
         const vals={};const lockVals={};
         allFields.forEach(f=>{if(f.autoFill||f.mode==="edit")vals[f.name]=f.val;else lockVals[f.name]=f.val;});
         const reportContent={vals,lockVals,photos:[],photoLayout:"1",lockFields:[],editFields:allFields};
-        await db.saveReport({job_id:job.id,user_id:user.id,report_date:todayISO,status:"submitted",content:JSON.stringify(reportContent),updated_at:new Date().toISOString()});
+        await db.saveReport({job_id:job.id,user_id:user.id,report_date:submitDate,status:"submitted",content:JSON.stringify(reportContent),updated_at:new Date().toISOString()});
         const storagePath=`${user.id}/${job.id}/reports/${docxFilename}`;
         let upR=await fetch(`${SB_URL}/storage/v1/object/report-source-docs/${storagePath}`,{
           method:"POST",headers:{apikey:SB_KEY,Authorization:`Bearer ${AUTH_TOKEN||SB_KEY}`,"Content-Type":"application/octet-stream"},body:docxBlob
@@ -1748,7 +1754,7 @@ function ReportEditor({job, user, onBack, reportDate}){
       // ── 7. Build filename using AI-detected convention ──
       let rptNumber=1;
       try{const cntR=await fetch(`${SB_URL}/rest/v1/reports?select=report_number&job_id=eq.${job.id}&order=report_number.desc&limit=1`,{headers:db._h()});const topR=cntR.ok?await cntR.json():[];if(topR[0]?.report_number){rptNumber=topR[0].report_number+1;}else{const countR=await fetch(`${SB_URL}/rest/v1/reports?select=id&job_id=eq.${job.id}&limit=0`,{headers:{...db._h(),Prefer:"count=exact"}});const total=parseInt(countR.headers.get("content-range")?.split("/")[1]||"0");rptNumber=total+1;}}catch(e){}
-      if(draftId){try{const exR=await fetch(`${SB_URL}/rest/v1/reports?select=report_number&id=eq.${draftId}`,{headers:db._h()});const exD=exR.ok?await exR.json():[];if(exD[0]?.report_number)rptNumber=exD[0].report_number;}catch(e){}}
+      if(draftId){try{const exR=await fetch(`${SB_URL}/rest/v1/reports?select=report_number,report_date&id=eq.${draftId}`,{headers:db._h()});const exD=exR.ok?await exR.json():[];if(exD[0]?.report_number&&exD[0]?.report_date===submitDate)rptNumber=exD[0].report_number;}catch(e){}}
       const conv=job.field_config?.filenameConvention||{};
       const padding=conv.numberPadding||0;
       const rptNum=padding>0?String(rptNumber).padStart(padding,"0"):String(rptNumber);
@@ -1792,7 +1798,7 @@ function ReportEditor({job, user, onBack, reportDate}){
       // ── 8. Save report, upload PDF, send email — all at once ──
       const reportContent={vals,lockVals,photos,photoLayout,lockFields,editFields};
       await db.saveReport({
-        job_id:job.id,user_id:user.id,report_date:todayISO,status:"submitted",
+        job_id:job.id,user_id:user.id,report_date:submitDate,status:"submitted",
         content:JSON.stringify(reportContent),updated_at:new Date().toISOString()
       });
 
@@ -1894,9 +1900,12 @@ function ReportEditor({job, user, onBack, reportDate}){
             ))
           )}
         </div>
-        <div style={{position:"fixed",bottom:0,left:0,right:0,padding:"14px 20px",borderTop:`1px solid ${C.brd}`,background:C.card,zIndex:100}}>
-          <button onClick={()=>{setViewingReport(null);setViewDocxHtml(null);}} style={{width:"100%",padding:"14px 0",background:C.blu,border:"none",borderRadius:10,color:"#fff",fontSize:15,fontWeight:700,cursor:"pointer"}}>
+        <div style={{position:"fixed",bottom:0,left:0,right:0,padding:"14px 20px",borderTop:`1px solid ${C.brd}`,background:C.card,zIndex:100,display:"flex",gap:10}}>
+          <button onClick={()=>{setViewingReport(null);setViewDocxHtml(null);}} style={{flex:1,padding:"14px 0",background:C.card,border:`1px solid ${C.brd}`,borderRadius:10,color:C.txt,fontSize:15,fontWeight:700,cursor:"pointer"}}>
             Back to Editing
+          </button>
+          <button onClick={()=>{setViewingReport(null);setViewDocxHtml(null);saveWorking();}} disabled={saving} style={{flex:1,padding:"14px 0",background:C.blu,border:"none",borderRadius:10,color:"#fff",fontSize:15,fontWeight:700,cursor:"pointer",opacity:saving?0.5:1}}>
+            {saving?"Saving...":"Save & Close"}
           </button>
         </div>
       </div>
