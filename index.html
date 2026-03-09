@@ -1120,6 +1120,7 @@ function WorkLogEditor({job, user, onBack, reportDate}){
   const [draftId,setDraftId]=useState(null);
   const [generalNotes,setGeneralNotes]=useState("");
   const [safetyNotes,setSafetyNotes]=useState("");
+  const [weatherEnabled,setWeatherEnabled]=useState(false); // opt-in weather display
   const [weatherAM,setWeatherAM]=useState("");
   const [weatherMid,setWeatherMid]=useState("");
   const [weatherPM,setWeatherPM]=useState("");
@@ -1135,28 +1136,31 @@ function WorkLogEditor({job, user, onBack, reportDate}){
     return m[code]||"Unknown";
   };
 
+  // Toggle weather on — requires site address
+  const toggleWeather=(on)=>{
+    if(on&&!job.site_address){
+      alert("To enable weather, add a site address in Job Settings (tap the gear icon from the job dashboard).");
+      return;
+    }
+    setWeatherEnabled(on);
+    if(on&&!weatherAM)fetchWeather();
+  };
+
   // Fetch weather from Open-Meteo (free, no API key)
   const fetchWeather=async()=>{
+    if(!job.site_address){alert("Add a site address in Job Settings to fetch weather.");return;}
     setWeatherLoading(true);
     try{
       let lat,lng;
-      // Try geocoding the job's site address first
-      if(job.site_address){
-        try{
-          const geoR=await fetch(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(job.site_address)}&count=1&language=en&format=json`);
-          const geoD=await geoR.json();
-          if(geoD.results&&geoD.results.length>0){lat=geoD.results[0].latitude;lng=geoD.results[0].longitude;}
-        }catch(e){console.log("Geocode failed, trying device location");}
-      }
-      // Fallback to device geolocation
+      // Geocode the job's site address
+      try{
+        const geoR=await fetch(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(job.site_address)}&count=1&language=en&format=json`);
+        const geoD=await geoR.json();
+        if(geoD.results&&geoD.results.length>0){lat=geoD.results[0].latitude;lng=geoD.results[0].longitude;}
+      }catch(e){console.log("Geocode failed");}
       if(!lat||!lng){
-        try{
-          const pos=await new Promise((resolve,reject)=>navigator.geolocation.getCurrentPosition(resolve,reject,{timeout:10000}));
-          lat=pos.coords.latitude;lng=pos.coords.longitude;
-        }catch(e){
-          alert("Could not determine location. Enter a site address on the job or allow location access.");
-          setWeatherLoading(false);return;
-        }
+        alert("Could not find location for \""+job.site_address+"\". Check the site address in Job Settings.");
+        setWeatherLoading(false);return;
       }
       // Fetch hourly weather for today
       const wxR=await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lng}&hourly=temperature_2m,weather_code,wind_speed_10m,relative_humidity_2m,precipitation&temperature_unit=fahrenheit&wind_speed_unit=mph&precipitation_unit=inch&timezone=auto&forecast_days=1`);
@@ -1185,7 +1189,6 @@ function WorkLogEditor({job, user, onBack, reportDate}){
   // Load existing report on mount
   useEffect(()=>{
     (async()=>{
-      let hasWeather=false;
       try{
         const rpt=await db.getReport(job.id,todayISO);
         if(rpt){
@@ -1195,14 +1198,13 @@ function WorkLogEditor({job, user, onBack, reportDate}){
             if(c.contractors)setContractors(c.contractors);
             if(c.generalNotes)setGeneralNotes(c.generalNotes);
             if(c.safetyNotes)setSafetyNotes(c.safetyNotes);
-            if(c.weatherAM){setWeatherAM(c.weatherAM);hasWeather=true;}
-            if(c.weatherMid){setWeatherMid(c.weatherMid);hasWeather=true;}
-            if(c.weatherPM){setWeatherPM(c.weatherPM);hasWeather=true;}
+            if(c.weatherEnabled)setWeatherEnabled(true);
+            if(c.weatherAM)setWeatherAM(c.weatherAM);
+            if(c.weatherMid)setWeatherMid(c.weatherMid);
+            if(c.weatherPM)setWeatherPM(c.weatherPM);
           }
         }
       }catch(e){console.error(e);}
-      // Auto-fetch weather if no existing weather data
-      if(!hasWeather)fetchWeather();
     })();
   },[]);
 
@@ -1249,7 +1251,8 @@ function WorkLogEditor({job, user, onBack, reportDate}){
   };
 
   const buildContent=()=>({
-    contractors,generalNotes,safetyNotes,weatherAM,weatherMid,weatherPM,
+    contractors,generalNotes,safetyNotes,
+    weatherEnabled,weatherAM,weatherMid,weatherPM,
     reportType:"worklog"
   });
 
@@ -1270,7 +1273,7 @@ function WorkLogEditor({job, user, onBack, reportDate}){
     if(contractors.length===0)return;
     const t=setInterval(()=>saveWorking(),30000);
     return()=>clearInterval(t);
-  },[contractors,generalNotes,safetyNotes,weatherAM,weatherMid,weatherPM]);
+  },[contractors,generalNotes,safetyNotes,weatherEnabled,weatherAM,weatherMid,weatherPM]);
 
   const totalHours=contractors.reduce((sum,c)=>{
     const h=parseFloat(c.hours)||0;
@@ -1297,34 +1300,46 @@ function WorkLogEditor({job, user, onBack, reportDate}){
 
       <div style={{maxWidth:560,margin:"0 auto",padding:"20px 16px 120px"}}>
 
-        {/* Weather Section */}
-        <div style={{background:C.card,border:`1px solid ${C.brd}`,borderRadius:12,padding:16,marginBottom:16}}>
-          <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:12}}>
-            <span style={{fontSize:18}}>🌤</span>
-            <span style={{fontWeight:700,fontSize:15,flex:1}}>Weather</span>
-            <button onClick={fetchWeather} disabled={weatherLoading} style={{padding:"6px 12px",background:C.blu+"18",border:`1px solid ${C.blu}44`,borderRadius:6,color:C.blu,fontSize:11,fontWeight:600,cursor:weatherLoading?"default":"pointer",opacity:weatherLoading?0.6:1}}>
-              {weatherLoading?"Fetching...":"Refresh"}
+        {/* Weather Toggle */}
+        <div style={{background:C.card,border:`1px solid ${weatherEnabled?C.org:C.brd}`,borderRadius:12,overflow:"hidden",marginBottom:16}}>
+          <div style={{display:"flex",alignItems:"center",padding:16}}>
+            <span style={{fontSize:18,marginRight:10}}>🌤</span>
+            <div style={{flex:1}}>
+              <span style={{fontWeight:700,fontSize:15}}>Weather</span>
+              {!weatherEnabled&&<div style={{fontSize:11,color:C.mut,marginTop:2}}>Include weather conditions on this report</div>}
+            </div>
+            <button onClick={()=>toggleWeather(!weatherEnabled)} style={{width:48,height:28,borderRadius:14,border:"none",cursor:"pointer",background:weatherEnabled?C.org:C.brd,position:"relative"}}>
+              <div style={{width:22,height:22,borderRadius:"50%",background:"#fff",position:"absolute",top:3,left:weatherEnabled?23:3,transition:"left 0.2s"}}/>
             </button>
           </div>
-          {weatherLoading&&!weatherAM?(
-            <div style={{textAlign:"center",padding:"16px 0",color:C.mut,fontSize:13}}>
-              <div style={{width:24,height:24,border:`2px solid ${C.brd}`,borderTop:`2px solid ${C.org}`,borderRadius:"50%",margin:"0 auto 8px",animation:"spin 1s linear infinite"}}/>
-              Fetching weather for {job.site_address||"your location"}...
-            </div>
-          ):(
-            <div style={{display:"flex",flexDirection:"column",gap:8}}>
-              {[{label:"Morning (7 AM)",val:weatherAM,set:setWeatherAM,icon:"🌅"},
-                {label:"Midday (12 PM)",val:weatherMid,set:setWeatherMid,icon:"☀️"},
-                {label:"Afternoon (4 PM)",val:weatherPM,set:setWeatherPM,icon:"🌇"}
-              ].map(w=>(
-                <div key={w.label} style={{display:"flex",alignItems:"center",gap:10}}>
-                  <span style={{fontSize:16,flexShrink:0}}>{w.icon}</span>
-                  <div style={{flex:1}}>
-                    <label style={{display:"block",fontSize:10,color:C.mut,marginBottom:2}}>{w.label}</label>
-                    <input type="text" value={w.val} onChange={e=>w.set(e.target.value)} placeholder="72°F Sunny, Wind 5 mph, 45% humidity" style={{...fs,padding:"8px 10px",fontSize:12}}/>
-                  </div>
+          {weatherEnabled&&(
+            <div style={{padding:"0 16px 16px",borderTop:`1px solid ${C.brd}`}}>
+              {weatherLoading&&!weatherAM?(
+                <div style={{textAlign:"center",padding:"16px 0",color:C.mut,fontSize:13}}>
+                  <div style={{width:24,height:24,border:`2px solid ${C.brd}`,borderTop:`2px solid ${C.org}`,borderRadius:"50%",margin:"0 auto 8px",animation:"spin 1s linear infinite"}}/>
+                  Fetching weather for {job.site_address}...
                 </div>
-              ))}
+              ):(
+                <>
+                  <div style={{display:"flex",flexDirection:"column",gap:8,marginTop:12}}>
+                    {[{label:"Morning (7 AM)",val:weatherAM,set:setWeatherAM,icon:"🌅"},
+                      {label:"Midday (12 PM)",val:weatherMid,set:setWeatherMid,icon:"☀️"},
+                      {label:"Afternoon (4 PM)",val:weatherPM,set:setWeatherPM,icon:"🌇"}
+                    ].map(w=>(
+                      <div key={w.label} style={{display:"flex",alignItems:"center",gap:10}}>
+                        <span style={{fontSize:16,flexShrink:0}}>{w.icon}</span>
+                        <div style={{flex:1}}>
+                          <label style={{display:"block",fontSize:10,color:C.mut,marginBottom:2}}>{w.label}</label>
+                          <input type="text" value={w.val} onChange={e=>w.set(e.target.value)} placeholder="72°F Sunny, Wind 5 mph, 45% humidity" style={{...fs,padding:"8px 10px",fontSize:12}}/>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  <button onClick={fetchWeather} disabled={weatherLoading} style={{width:"100%",marginTop:10,padding:"8px 0",background:C.blu+"12",border:`1px solid ${C.blu}33`,borderRadius:8,color:C.blu,fontSize:12,fontWeight:600,cursor:weatherLoading?"default":"pointer",opacity:weatherLoading?0.6:1}}>
+                    {weatherLoading?"Fetching...":"Refresh Weather Data"}
+                  </button>
+                </>
+              )}
             </div>
           )}
         </div>
