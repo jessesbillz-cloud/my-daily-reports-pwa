@@ -582,6 +582,7 @@ function CreateJob({user, onBack, onCreated}){
   const [fnConvention,setFnConvention]=useState(null); // AI-detected: {pattern, dateFormat, numberPadding}
   const [savingTpl,setSavingTpl]=useState(false);
   const [tplSaved,setTplSaved]=useState(false); // whether current parse was saved
+  const [jobType,setJobType]=useState("template"); // "template" or "worklog"
   const trackParseAttempt=()=>{};
 
   // Load saved templates on mount
@@ -813,7 +814,7 @@ function CreateJob({user, onBack, onCreated}){
       const lockFields=[...fields.filter(f=>f.mode==="lock"),...fields.filter(f=>f.mode==="edit"&&f.lockAfterCreate)].map(f=>({name:f.name,value:f.value,...coords(f)}));
       const autoFields=fields.filter(f=>f.mode==="auto-date"||f.mode==="auto-num").map(f=>({name:f.name,value:f.value,originalValue:f.value||"",autoFill:f.mode==="auto-date"?"date":"increment",...coords(f)}));
       const fc={editable:[...editFields,...autoFields],locked:lockFields,filenameConvention:convention};
-      const job=await db.mkJob({user_id:user.id,name:jn.trim(),site_address:addr.trim()||null,report_filename_pattern:filePattern,schedule:es,schedule_days:es==="custom"?days:[],reminder_enabled:remOn,reminder_time:remOn?remT:null,reminder_hours_before:remOn?remH:null,scheduling_enabled:schedOn,field_config:fc});
+      const job=await db.mkJob({user_id:user.id,name:jn.trim(),site_address:addr.trim()||null,job_type:jobType,report_filename_pattern:filePattern,schedule:es,schedule_days:es==="custom"?days:[],reminder_enabled:remOn,reminder_time:remOn?remT:null,reminder_hours_before:remOn?remH:null,scheduling_enabled:schedOn,field_config:fc});
       if(tf&&job?.id){
         try{
           const ext=tf.name.split(".").pop().toLowerCase();
@@ -889,7 +890,24 @@ function CreateJob({user, onBack, onCreated}){
         {/* Site Address — optional */}
         <div style={{marginBottom:20}}><label style={ls}>Site Address</label><input type="text" value={addr} onChange={e=>setAddr(e.target.value)} style={fs}/></div>
 
-        {/* Template Section */}
+        {/* Job Type Toggle */}
+        <div style={{marginBottom:20}}>
+          <label style={ls}>Report Type</label>
+          <div style={{display:"flex",background:C.inp,borderRadius:10,padding:3}}>
+            <button onClick={()=>setJobType("template")} style={{flex:1,padding:"12px 0",background:jobType==="template"?C.card:"transparent",border:"none",borderRadius:8,color:jobType==="template"?C.txt:C.mut,fontSize:14,fontWeight:700,cursor:"pointer"}}>
+              📄 Template
+            </button>
+            <button onClick={()=>setJobType("worklog")} style={{flex:1,padding:"12px 0",background:jobType==="worklog"?C.card:"transparent",border:"none",borderRadius:8,color:jobType==="worklog"?C.txt:C.mut,fontSize:14,fontWeight:700,cursor:"pointer"}}>
+              👷 Work Log
+            </button>
+          </div>
+          <div style={{fontSize:11,color:C.mut,marginTop:6}}>
+            {jobType==="template"?"Upload a PDF/DOCX template — AI detects fields, you fill them daily.":"Track contractors, hours, and work descriptions. Generates a detailed report."}
+          </div>
+        </div>
+
+        {/* Template Section — only for template jobs */}
+        {jobType==="template"&&(<>
         <div style={{marginBottom:20}}>
           <label style={ls}>Template</label>
 
@@ -1026,6 +1044,7 @@ function CreateJob({user, onBack, onCreated}){
             )}
           </div>
         )}
+        </>)}
 
         {/* ── Three Toggle Boxes ── */}
 
@@ -1083,6 +1102,295 @@ function ArchivedJobs({jobs, onBack, onSelect}){
             <span style={{color:C.mut,fontSize:18}}>›</span>
           </button>
         ))}
+      </div>
+    </div>
+  );
+}
+
+/* ── Work Log Editor ── */
+function WorkLogEditor({job, user, onBack, reportDate}){
+  const tz=Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const todayISO=reportDate||new Date().toLocaleDateString("en-CA",{timeZone:tz});
+  const [contractors,setContractors]=useState([]); // [{id,name,description,hours,quantity,photos:[]}]
+  const [activeId,setActiveId]=useState(null); // expanded contractor id
+  const [showAdd,setShowAdd]=useState(false);
+  const [newName,setNewName]=useState("");
+  const [saving,setSaving]=useState(false);
+  const [submitting,setSubmitting]=useState(false);
+  const [draftId,setDraftId]=useState(null);
+  const [generalNotes,setGeneralNotes]=useState("");
+  const [safetyNotes,setSafetyNotes]=useState("");
+  const [weatherAM,setWeatherAM]=useState("");
+  const [weatherMid,setWeatherMid]=useState("");
+  const [weatherPM,setWeatherPM]=useState("");
+  const photoRef=useRef(null);
+  const [photoTarget,setPhotoTarget]=useState(null); // contractor id for photo upload
+
+  const fs={width:"100%",padding:"12px 14px",background:C.inp,border:`1px solid ${C.brd}`,borderRadius:10,color:C.txt,fontSize:15};
+
+  // Load existing report on mount
+  useEffect(()=>{
+    (async()=>{
+      try{
+        const rpt=await db.getReport(job.id,todayISO);
+        if(rpt){
+          setDraftId(rpt.id);
+          if(rpt.content){
+            const c=typeof rpt.content==="string"?JSON.parse(rpt.content):rpt.content;
+            if(c.contractors)setContractors(c.contractors);
+            if(c.generalNotes)setGeneralNotes(c.generalNotes);
+            if(c.safetyNotes)setSafetyNotes(c.safetyNotes);
+            if(c.weatherAM)setWeatherAM(c.weatherAM);
+            if(c.weatherMid)setWeatherMid(c.weatherMid);
+            if(c.weatherPM)setWeatherPM(c.weatherPM);
+          }
+        }
+      }catch(e){console.error(e);}
+    })();
+  },[]);
+
+  const addContractor=()=>{
+    if(!newName.trim())return;
+    const c={id:Date.now().toString(),name:newName.trim(),description:"",hours:"",quantity:"1",photos:[]};
+    setContractors(p=>[...p,c]);
+    setActiveId(c.id);
+    setNewName("");
+    setShowAdd(false);
+  };
+
+  const updateContractor=(id,field,val)=>{
+    setContractors(p=>p.map(c=>c.id===id?{...c,[field]:val}:c));
+  };
+
+  const removeContractor=(id)=>{
+    if(!confirm("Remove this contractor?"))return;
+    setContractors(p=>p.filter(c=>c.id!==id));
+    if(activeId===id)setActiveId(null);
+  };
+
+  const handlePhotoUpload=(e)=>{
+    const file=e.target.files[0];
+    if(!file||!photoTarget)return;
+    const reader=new FileReader();
+    reader.onload=(ev)=>{
+      setContractors(p=>p.map(c=>{
+        if(c.id!==photoTarget)return c;
+        return{...c,photos:[...(c.photos||[]),{data:ev.target.result,name:file.name,ts:Date.now()}]};
+      }));
+    };
+    reader.readAsDataURL(file);
+    e.target.value="";
+  };
+
+  const removePhoto=(contractorId,photoIdx)=>{
+    setContractors(p=>p.map(c=>{
+      if(c.id!==contractorId)return c;
+      const ph=[...(c.photos||[])];
+      ph.splice(photoIdx,1);
+      return{...c,photos:ph};
+    }));
+  };
+
+  const buildContent=()=>({
+    contractors,generalNotes,safetyNotes,weatherAM,weatherMid,weatherPM,
+    reportType:"worklog"
+  });
+
+  const saveWorking=async()=>{
+    setSaving(true);
+    try{
+      const saveDate=reportDate||new Date().toLocaleDateString("en-CA",{timeZone:tz});
+      await db.saveReport({
+        job_id:job.id,user_id:user.id,report_date:saveDate,status:"working_copy",
+        content:buildContent()
+      });
+    }catch(e){console.error("Save failed:",e);}
+    finally{setSaving(false);}
+  };
+
+  // Auto-save every 30 seconds if there are contractors
+  useEffect(()=>{
+    if(contractors.length===0)return;
+    const t=setInterval(()=>saveWorking(),30000);
+    return()=>clearInterval(t);
+  },[contractors,generalNotes,safetyNotes,weatherAM,weatherMid,weatherPM]);
+
+  const totalHours=contractors.reduce((sum,c)=>{
+    const h=parseFloat(c.hours)||0;
+    const q=parseInt(c.quantity)||1;
+    return sum+h*q;
+  },0);
+
+  const active=contractors.find(c=>c.id===activeId);
+
+  return(
+    <div style={{minHeight:"100vh",background:C.bg,color:C.txt}}>
+      {/* Header */}
+      <div style={{display:"flex",alignItems:"center",gap:12,padding:"16px 20px",borderBottom:`1px solid ${C.brd}`,background:C.card}}>
+        <button onClick={()=>{saveWorking();onBack();}} style={{background:"none",border:"none",color:C.blu,fontSize:28,cursor:"pointer",padding:"8px 12px",lineHeight:1,borderRadius:8,minWidth:48,minHeight:48,display:"flex",alignItems:"center",justifyContent:"center"}}>←</button>
+        <MDRLogo size={28}/>
+        <div style={{flex:1}}>
+          <div style={{fontWeight:700,fontSize:16}}>{job.name}</div>
+          <div style={{fontSize:12,color:C.mut}}>Work Log — {new Date(todayISO+"T12:00:00").toLocaleDateString("en-US",{weekday:"short",month:"short",day:"numeric",timeZone:tz})}</div>
+        </div>
+        <button onClick={saveWorking} disabled={saving} style={{padding:"8px 14px",background:C.blu,border:"none",borderRadius:8,color:"#fff",fontSize:13,fontWeight:600,cursor:saving?"default":"pointer",opacity:saving?0.7:1}}>
+          {saving?"Saving...":"Save"}
+        </button>
+      </div>
+
+      <div style={{maxWidth:560,margin:"0 auto",padding:"20px 16px 120px"}}>
+
+        {/* Weather Section */}
+        <div style={{background:C.card,border:`1px solid ${C.brd}`,borderRadius:12,padding:16,marginBottom:16}}>
+          <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:12}}>
+            <span style={{fontSize:18}}>🌤</span>
+            <span style={{fontWeight:700,fontSize:15}}>Weather</span>
+          </div>
+          <div style={{display:"flex",gap:8}}>
+            <div style={{flex:1}}>
+              <label style={{display:"block",fontSize:11,color:C.mut,marginBottom:4}}>Morning</label>
+              <input type="text" value={weatherAM} onChange={e=>setWeatherAM(e.target.value)} placeholder="72° Sunny" style={{...fs,padding:"10px 12px",fontSize:13}}/>
+            </div>
+            <div style={{flex:1}}>
+              <label style={{display:"block",fontSize:11,color:C.mut,marginBottom:4}}>Midday</label>
+              <input type="text" value={weatherMid} onChange={e=>setWeatherMid(e.target.value)} placeholder="78° Partly Cloudy" style={{...fs,padding:"10px 12px",fontSize:13}}/>
+            </div>
+            <div style={{flex:1}}>
+              <label style={{display:"block",fontSize:11,color:C.mut,marginBottom:4}}>Afternoon</label>
+              <input type="text" value={weatherPM} onChange={e=>setWeatherPM(e.target.value)} placeholder="75° Clear" style={{...fs,padding:"10px 12px",fontSize:13}}/>
+            </div>
+          </div>
+        </div>
+
+        {/* Contractor Cards */}
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:12}}>
+          <div style={{display:"flex",alignItems:"center",gap:8}}>
+            <span style={{fontSize:18}}>👷</span>
+            <span style={{fontWeight:700,fontSize:15}}>Contractors</span>
+            <span style={{fontSize:12,color:C.mut,fontWeight:600}}>({contractors.length})</span>
+          </div>
+          {totalHours>0&&(
+            <span style={{fontSize:12,fontWeight:700,color:C.org}}>{totalHours} total hrs</span>
+          )}
+        </div>
+
+        {contractors.map(c=>(
+          <div key={c.id} style={{background:C.card,border:`1px solid ${activeId===c.id?C.org:C.brd}`,borderRadius:12,marginBottom:10,overflow:"hidden",transition:"border-color 0.2s"}}>
+            {/* Contractor name bar — tap to expand/collapse */}
+            <button onClick={()=>setActiveId(activeId===c.id?null:c.id)} style={{width:"100%",display:"flex",alignItems:"center",gap:12,padding:"14px 16px",background:"none",border:"none",cursor:"pointer",textAlign:"left"}}>
+              <div style={{width:36,height:36,borderRadius:10,background:C.org+"22",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,flexShrink:0}}>👷</div>
+              <div style={{flex:1,minWidth:0}}>
+                <div style={{fontSize:14,fontWeight:700,color:C.txt,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{c.name}</div>
+                <div style={{fontSize:11,color:C.mut}}>
+                  {c.hours?`${c.hours} hrs`:"No hours"} · {c.quantity||1} {parseInt(c.quantity||1)===1?"person":"people"}
+                  {(c.photos||[]).length>0&&` · ${c.photos.length} photo${c.photos.length>1?"s":""}`}
+                </div>
+              </div>
+              <span style={{color:C.mut,fontSize:14,transform:activeId===c.id?"rotate(180deg)":"none",transition:"transform 0.2s"}}>▼</span>
+            </button>
+
+            {/* Expanded entry area */}
+            {activeId===c.id&&(
+              <div style={{padding:"0 16px 16px",borderTop:`1px solid ${C.brd}`}}>
+                <div style={{marginTop:14,marginBottom:14}}>
+                  <label style={{display:"block",fontSize:12,color:C.lt,fontWeight:600,marginBottom:4}}>Work Description</label>
+                  <textarea value={c.description} onChange={e=>updateContractor(c.id,"description",e.target.value)} placeholder="Tap here and use your keyboard mic to dictate..." rows={3} style={{...fs,resize:"vertical",minHeight:70,lineHeight:1.5}}/>
+                </div>
+                <div style={{display:"flex",gap:10,marginBottom:14}}>
+                  <div style={{flex:1}}>
+                    <label style={{display:"block",fontSize:12,color:C.lt,fontWeight:600,marginBottom:4}}>Total Hours</label>
+                    <input type="number" inputMode="decimal" value={c.hours} onChange={e=>updateContractor(c.id,"hours",e.target.value)} placeholder="8" style={fs}/>
+                  </div>
+                  <div style={{flex:1}}>
+                    <label style={{display:"block",fontSize:12,color:C.lt,fontWeight:600,marginBottom:4}}>Quantity (Men)</label>
+                    <input type="number" inputMode="numeric" value={c.quantity} onChange={e=>updateContractor(c.id,"quantity",e.target.value)} placeholder="1" style={fs}/>
+                  </div>
+                </div>
+
+                {/* Photos for this contractor */}
+                <div style={{marginBottom:14}}>
+                  <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:8}}>
+                    <label style={{fontSize:12,color:C.lt,fontWeight:600}}>Photos ({(c.photos||[]).length})</label>
+                    <button onClick={()=>{setPhotoTarget(c.id);setTimeout(()=>photoRef.current?.click(),100);}} style={{padding:"6px 12px",background:C.org,border:"none",borderRadius:6,color:"#fff",fontSize:12,fontWeight:600,cursor:"pointer"}}>+ Add Photo</button>
+                  </div>
+                  {(c.photos||[]).length>0&&(
+                    <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+                      {c.photos.map((ph,i)=>(
+                        <div key={i} style={{width:72,height:72,borderRadius:8,overflow:"hidden",position:"relative",border:`1px solid ${C.brd}`}}>
+                          <img src={ph.data} style={{width:"100%",height:"100%",objectFit:"cover"}}/>
+                          <button onClick={()=>removePhoto(c.id,i)} style={{position:"absolute",top:2,right:2,width:20,height:20,borderRadius:"50%",background:"rgba(0,0,0,0.6)",border:"none",color:"#fff",fontSize:12,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}>✕</button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                <button onClick={()=>removeContractor(c.id)} style={{width:"100%",padding:"10px 0",background:"transparent",border:`1px solid ${C.err}33`,borderRadius:8,color:C.err,fontSize:13,fontWeight:600,cursor:"pointer"}}>
+                  Remove Contractor
+                </button>
+              </div>
+            )}
+          </div>
+        ))}
+
+        {/* Add Contractor */}
+        {showAdd?(
+          <div style={{background:C.card,border:`2px solid ${C.org}`,borderRadius:12,padding:16,marginBottom:16}}>
+            <label style={{display:"block",fontSize:13,color:C.lt,fontWeight:600,marginBottom:6}}>Contractor Name</label>
+            <div style={{display:"flex",gap:8}}>
+              <input type="text" value={newName} onChange={e=>setNewName(e.target.value)} onKeyDown={e=>{if(e.key==="Enter")addContractor();}} placeholder="e.g. ABC Electric" autoFocus style={{...fs,flex:1}}/>
+              <button onClick={addContractor} disabled={!newName.trim()} style={{padding:"12px 20px",background:newName.trim()?C.org:C.brd,border:"none",borderRadius:10,color:"#fff",fontSize:14,fontWeight:700,cursor:newName.trim()?"pointer":"default"}}>Add</button>
+            </div>
+            <button onClick={()=>{setShowAdd(false);setNewName("");}} style={{width:"100%",marginTop:8,padding:"8px 0",background:"transparent",border:"none",color:C.mut,fontSize:13,cursor:"pointer"}}>Cancel</button>
+          </div>
+        ):(
+          <button onClick={()=>setShowAdd(true)} style={{width:"100%",padding:"14px 0",background:C.card,border:`2px dashed ${C.brd}`,borderRadius:12,color:C.org,fontSize:15,fontWeight:700,cursor:"pointer",marginBottom:16}}>
+            + Add Contractor
+          </button>
+        )}
+
+        {/* General Notes */}
+        <div style={{background:C.card,border:`1px solid ${C.brd}`,borderRadius:12,padding:16,marginBottom:16}}>
+          <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:10}}>
+            <span style={{fontSize:16}}>📝</span>
+            <span style={{fontWeight:700,fontSize:14}}>General Notes</span>
+          </div>
+          <textarea value={generalNotes} onChange={e=>setGeneralNotes(e.target.value)} placeholder="Tap here and use your keyboard mic to dictate..." rows={3} style={{...fs,resize:"vertical",minHeight:70,lineHeight:1.5}}/>
+        </div>
+
+        {/* Safety Notes */}
+        <div style={{background:C.card,border:`1px solid ${C.brd}`,borderRadius:12,padding:16,marginBottom:16}}>
+          <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:10}}>
+            <span style={{fontSize:16}}>🦺</span>
+            <span style={{fontWeight:700,fontSize:14}}>Site Safety Observations</span>
+          </div>
+          <textarea value={safetyNotes} onChange={e=>setSafetyNotes(e.target.value)} placeholder="Safety observations, incidents, precautions..." rows={3} style={{...fs,resize:"vertical",minHeight:70,lineHeight:1.5}}/>
+        </div>
+
+      </div>
+
+      {/* Hidden photo input */}
+      <input ref={photoRef} type="file" accept="image/*" capture="environment" style={{display:"none"}} onChange={handlePhotoUpload}/>
+
+      {/* Bottom bar */}
+      <div style={{position:"fixed",bottom:0,left:0,right:0,padding:"14px 20px",borderTop:`1px solid ${C.brd}`,background:C.card,zIndex:100,display:"flex",gap:10}}>
+        <button onClick={()=>{saveWorking();onBack();}} style={{flex:1,padding:"14px 0",background:C.inp,border:`1px solid ${C.brd}`,borderRadius:10,color:C.txt,fontSize:15,fontWeight:700,cursor:"pointer"}}>
+          Save & Close
+        </button>
+        <button onClick={async()=>{
+          setSubmitting(true);
+          try{
+            const submitDate=reportDate||new Date().toLocaleDateString("en-CA",{timeZone:tz});
+            await db.saveReport({
+              job_id:job.id,user_id:user.id,report_date:submitDate,status:"submitted",
+              content:buildContent()
+            });
+            onBack();
+          }catch(e){alert("Submit failed: "+e.message);}
+          finally{setSubmitting(false);}
+        }} disabled={submitting||contractors.length===0} style={{flex:1,padding:"14px 0",background:contractors.length>0?C.org:C.brd,border:"none",borderRadius:10,color:"#fff",fontSize:15,fontWeight:700,cursor:contractors.length>0&&!submitting?"pointer":"default",opacity:submitting?0.7:1}}>
+          {submitting?"Submitting...":"Submit Report"}
+        </button>
       </div>
     </div>
   );
@@ -2304,7 +2612,10 @@ function JobDetail({job, user, onBack, onDeleted}){
     </div>
   );
 
-  if(showReport)return<ReportEditor key={job.id+"-"+(editDate||"")} job={job} user={user} onBack={closeReport} reportDate={editDate}/>;
+  if(showReport){
+    if(job.job_type==="worklog")return<WorkLogEditor key={job.id+"-"+(editDate||"")} job={job} user={user} onBack={closeReport} reportDate={editDate}/>;
+    return<ReportEditor key={job.id+"-"+(editDate||"")} job={job} user={user} onBack={closeReport} reportDate={editDate}/>;
+  }
 
   if(loading)return(<div style={{minHeight:"100vh",background:C.bg,display:"flex",alignItems:"center",justifyContent:"center"}}><p style={{color:C.mut}}>Loading...</p></div>);
 
@@ -3126,7 +3437,7 @@ function Dashboard({user, onLogout}){
             {act.map(j=>{const s=stat(j.id,j.schedule);const sc=s==="submitted"?C.ok:s==="working"?C.org:s==="due"?"#ef4444":C.brd;return(
               <button key={j.id} onClick={()=>setSelJob(j)} style={{textAlign:"left",background:C.card,border:`1px solid ${C.brd}`,borderRadius:12,padding:14,cursor:"pointer",display:"flex",flexDirection:"column",gap:8,position:"relative",borderTop:`3px solid ${sc}`}}>
                 <div style={{display:"flex",alignItems:"center",gap:8}}>
-                  <div style={{width:36,height:36,borderRadius:8,background:C.inp,border:`1px solid ${C.brd}`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:18,flexShrink:0}}>📋</div>
+                  <div style={{width:36,height:36,borderRadius:8,background:C.inp,border:`1px solid ${C.brd}`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:18,flexShrink:0}}>{j.job_type==="worklog"?"👷":"📋"}</div>
                   <div style={{flex:1,minWidth:0}}>
                     <div style={{fontWeight:700,fontSize:14,color:C.txt,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{j.name}</div>
                   </div>

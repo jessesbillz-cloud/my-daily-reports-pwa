@@ -60,5 +60,8 @@ create policy "Company creator can manage templates"
     )
   );
 
+-- Add job_type column to jobs table (defaults to 'template' for existing jobs)
+alter table jobs add column if not exists job_type text default 'template';
+
 -- Allow anon key to search companies by name (for signup flow)
 -- This uses the existing anon role through Supabase's API
