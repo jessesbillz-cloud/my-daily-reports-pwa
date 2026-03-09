@@ -1329,23 +1329,33 @@ function WorkLogEditor({job, user, onBack, reportDate}){
           doc.addPage(copiedPage);
           page=doc.getPages()[0];
           hasTemplate=true;
-          // Start content below the template — leave top portion for branding
-          // Use extractPdfTextStructure to find where the template content ends
+          // Figure out where the branding header ends, then white-out everything below
+          let headerCutoff=160; // default: keep top 160pt as branding
           try{
             const textItems=await extractPdfTextStructure(new Uint8Array(tplBytes));
-            if(textItems.length>0){
-              // Find the lowest text item (highest y in top-left coords = lowest on page)
-              const maxY=Math.max(...textItems.map(t=>t.y+t.h));
-              y=H-maxY-30; // start 30pt below the last text
-            }else{
-              y=H-200; // default: start at 200pt from top if no text found
+            const pg1Items=textItems.filter(t=>t.page===1).sort((a,b)=>a.y-b.y);
+            if(pg1Items.length>2){
+              // Find the first big gap (>30pt) between text items — that's where header ends
+              for(let i=0;i<pg1Items.length-1;i++){
+                const gap=pg1Items[i+1].y-(pg1Items[i].y+pg1Items[i].h);
+                const itemY=pg1Items[i].y+pg1Items[i].h;
+                // Only consider gaps in the top third of the page as header boundaries
+                if(gap>25&&itemY<H*0.45){
+                  headerCutoff=itemY+8;
+                  break;
+                }
+              }
+              // If no big gap found, use the bottom of the first 3-4 items
+              if(headerCutoff===160&&pg1Items.length>=3){
+                headerCutoff=Math.min(pg1Items[3]?.y||160, pg1Items[2].y+pg1Items[2].h+10);
+              }
             }
-          }catch(e){
-            y=H-200; // fallback
-          }
-          // Overlay date on the template — draw in top-right area
-          page.drawText(todayDisplay2,{x:W-M-font.widthOfTextAtSize(todayDisplay2,10),y:H-30,size:10,font:fontB,color:rgb(.2,.2,.2)});
-          page.drawText("Prepared By: "+(userName||"—"),{x:W-M-font.widthOfTextAtSize("Prepared By: "+(userName||"—"),9),y:H-44,size:9,font,color:rgb(.4,.4,.4)});
+          }catch(e){}
+          // White-out everything below the header branding area
+          const clearY=H-headerCutoff; // convert from top-left to PDF bottom-left coords
+          page.drawRectangle({x:0,y:0,width:W,height:clearY,color:rgb(1,1,1)});
+          // Start dynamic content just below the header
+          y=clearY-10;
         }
       }
     }catch(e){console.log("No template found, using default header");}
@@ -1495,28 +1505,42 @@ function WorkLogEditor({job, user, onBack, reportDate}){
       y-=10;
     }
 
-    // ── Photo Pages (grouped by contractor) ──
-    const contractorsWithPhotos=contractors.filter(c=>(c.photos||[]).length>0);
-    for(const c of contractorsWithPhotos){
-      for(const ph of c.photos){
+    // ── Photos Section — compact, 2 per row with contractor labels ──
+    const allPhotos=[];
+    contractors.forEach(c=>{(c.photos||[]).forEach(ph=>{allPhotos.push({contractor:c.name,data:ph.data,name:ph.name});});});
+    if(allPhotos.length>0){
+      ensureSpace(40);
+      page.drawRectangle({x:M,y:y-24,width:CW,height:24,color:rgb(.3,.3,.3)});
+      page.drawText("SITE PHOTOS",{x:M+8,y:y-16,size:11,font:fontB,color:rgb(1,1,1)});
+      y-=30;
+      const photoW=(CW-10)/2; // two columns with 10pt gap
+      const photoH=200; // max photo height per slot
+      let col=0;
+      for(const ph of allPhotos){
         try{
-          const imgBytes=Uint8Array.from(atob(ph.data.split(",")[1]||""),c=>c.charCodeAt(0));
+          const imgBytes=Uint8Array.from(atob(ph.data.split(",")[1]||""),c2=>c2.charCodeAt(0));
           let img;
           if(ph.data.includes("image/png"))img=await doc.embedPng(imgBytes);
           else img=await doc.embedJpg(imgBytes);
-          const photoPage=doc.addPage([W,H]);pageNum++;totalPagesRef.val=pageNum;
-          // Header
-          photoPage.drawRectangle({x:0,y:H-50,width:W,height:50,color:rgb(.3,.3,.3)});
-          photoPage.drawText(job.name||"Work Log",{x:M,y:H-30,size:14,font:fontB,color:rgb(1,1,1)});
-          photoPage.drawText("Photo — "+c.name,{x:M,y:H-44,size:10,font,color:rgb(.8,.8,.8)});
-          // Scale photo to fit
-          const maxW2=W-2*M,maxH2=H-120;
-          const scale2=Math.min(maxW2/img.width,maxH2/img.height,1);
-          const pw=img.width*scale2,ph2=img.height*scale2;
-          photoPage.drawImage(img,{x:(W-pw)/2,y:H-60-ph2,width:pw,height:ph2});
-          drawFooter(photoPage);
+          // Each photo needs: label(16pt) + image(up to photoH) + gap(8pt)
+          const slotH=photoH+24;
+          if(col===0)ensureSpace(slotH);
+          const xPos=M+col*(photoW+10);
+          // Scale photo to fit in slot
+          const scl=Math.min(photoW/img.width,photoH/img.height,1);
+          const pw=img.width*scl,ph2=img.height*scl;
+          // Contractor label
+          page.drawText(ph.contractor,{x:xPos,y:y-12,size:9,font:fontB,color:rgb(.3,.3,.3)});
+          // Center image in slot
+          page.drawImage(img,{x:xPos+(photoW-pw)/2,y:y-16-ph2,width:pw,height:ph2});
+          // Light border around photo
+          page.drawRectangle({x:xPos+(photoW-pw)/2,y:y-16-ph2,width:pw,height:ph2,borderColor:rgb(.8,.8,.8),borderWidth:.5,color:undefined});
+          col++;
+          if(col>=2){col=0;y-=slotH;}
         }catch(e){console.error("Photo embed error:",e);}
       }
+      if(col===1)y-=(photoH+24); // finished mid-row, advance past it
+      y-=10;
     }
 
     // Add footers to all pages
