@@ -48,6 +48,7 @@ var hdrs={headers:{'apikey':AK,'Authorization':'Bearer '+AK}};
 
 var params=new URLSearchParams(window.location.search);
 var inspSlug=params.get('i');
+var isAdmin=params.get('admin')==='true';
 
 if(!inspSlug){
   document.getElementById('app').innerHTML='<div class="error">No inspector specified. Check the URL.</div>';
@@ -92,7 +93,7 @@ function renderHub(profile,jobs){
     html+='<div class="project-list">';
     jobs.forEach(function(job){
       var projSlug=job.name.replace(/\s+/g,'-').replace(/[^a-zA-Z0-9-]/g,'');
-      var url='schedule.html?i='+encodeURIComponent(inspSlug)+'&project='+encodeURIComponent(projSlug)+'&job_id='+job.id;
+      var url='schedule.html?i='+encodeURIComponent(inspSlug)+'&project='+encodeURIComponent(projSlug)+'&job_id='+job.id+(isAdmin?'&admin=true':'');
       html+='<a href="'+url+'" class="project-btn">';
       html+='<div class="project-info">';
       html+='<span class="project-name">'+job.name+'</span>';
