@@ -232,7 +232,8 @@ details[open] .collapsible-summary::after { content: '−'; }
 <script>
 var SB='https://wluvkmpncafugdbunlkw.supabase.co';
 var params=new URLSearchParams(window.location.search);
-var PROJ=params.get('project')||'Demo';
+var hashSlug=window.location.hash?window.location.hash.substring(1):'';
+var PROJ=params.get('project')||hashSlug||'Demo';
 var cleanName=PROJ.replace(/-/g,' ');
 document.getElementById('projectSubtitle').textContent=cleanName;
 document.title=cleanName+' - Scheduling Request';
@@ -473,9 +474,15 @@ function submitIR(){
     var idnt=document.getElementById('iIdentifier').value.trim();
     if(idnt) fd.append('inspection_identifier',idnt);
     fetch(SB+'/functions/v1/submit-inspection',{method:'POST',headers:{'Authorization':'Bearer '+AK,'apikey':AK},body:fd})
-    .then(function(r){return r.json();}).then(function(data){
+    .then(function(r){
+        if(!r.ok) throw new Error('Server returned '+r.status);
+        return r.json();
+    }).then(function(data){
         if(data.success){ document.getElementById('requestView').style.display='none'; document.getElementById('successView').style.display='block'; }
-        else { alert('Error: '+data.error); btn.disabled=false; btn.textContent='Submit Scheduling Request'; }
+        else { alert('Error: '+(data.error||'Unknown error')); btn.disabled=false; btn.textContent='Submit Scheduling Request'; }
+    }).catch(function(err){
+        alert('Submit failed: '+err.message+'. Please try again.');
+        btn.disabled=false; btn.textContent='Submit Scheduling Request';
     });
 }
 function loadContacts(){
