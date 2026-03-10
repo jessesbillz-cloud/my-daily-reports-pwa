@@ -76,10 +76,8 @@ details[open] .collapsible-summary::after { content: '−'; }
 </head>
 <body>
 <!-- SCHEDULING HEADER (primary) -->
-<div style="text-align:center;padding:4px 0;margin-bottom:8px;">
-<a id="backToHub" href="hub.html" style="color:#5a8fc0;text-decoration:none;font-size:13px;font-weight:600;border:1px solid #5a8fc0;padding:6px 14px;border-radius:20px;background:rgba(90,143,192,0.08);">&larr; Back to Project List</a>
-</div>
-<div class="header">
+<div class="header" style="display:flex;align-items:center;gap:12px;margin-bottom:12px;">
+    <a id="backToHub" href="hub.html" style="background:none;border:none;color:#5a8fc0;font-size:28px;cursor:pointer;padding:8px 12px;line-height:1;border-radius:8px;min-width:48px;min-height:48px;display:flex;align-items:center;justify-content:center;text-decoration:none;">←</a>
     <img src="logo.jpg" alt="Logo" style="width:45px;height:45px;border-radius:6px;">
     <div>
         <h2>Scheduling Request</h2>
@@ -305,7 +303,7 @@ function showDay(d){
                 html+='<div class="evt-actions">';
                 html+='<button class="btn-edit" onclick="editInsp(\''+e.id+'\',\''+e.inspection_date+'\',\''+e.inspection_time.substring(0,5)+'\')">Edit</button>';
                 html+='<button class="btn-cancel" onclick="cancelInsp(\''+e.id+'\',\''+e.project+'\',\'Regular\',\''+e.inspection_date+'\',\''+e.inspection_time.substring(0,5)+'\')">Cancel</button>';
-                if(isAdmin && e.status!=='scheduled') html+='<button class="btn-scheduled" onclick="scheduleInsp(\''+e.id+'\')">Schedule</button>';
+                if(isAdmin && e.status!=='scheduled') html+='<button style="color:#fff;background:#e8742a;border:none;padding:6px 14px;border-radius:6px;font-size:12px;font-weight:700;cursor:pointer;" onclick="scheduleInsp(\''+e.id+'\')">Schedule</button>';
                 html+='</div>';
             }
             html+='</div>';

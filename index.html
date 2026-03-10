@@ -4464,7 +4464,7 @@ function Dashboard({user, onLogout}){
                   const isSel=ds===selCalDay;
                   const isWeekend=i%7===0||i%7===6;
                   const dayReqs=reqsByDay[ds]||[];
-                  const hasConfirmed=dayReqs.some(r=>r.status==="confirmed");
+                  const hasConfirmed=dayReqs.some(r=>r.status==="scheduled");
                   const hasPending=dayReqs.some(r=>r.status==="pending");
                   return(
                     <div key={i} onClick={()=>setSelCalDay(isSel?null:ds)} style={{padding:"4px 2px",textAlign:"center",background:isSel?C.blu+"22":isToday?C.org+"12":"transparent",cursor:"pointer",borderBottom:isSel?`2px solid ${C.blu}`:"2px solid transparent"}}>
@@ -4487,7 +4487,7 @@ function Dashboard({user, onLogout}){
                   ):(
                     selDayReqs.map(rq=>(
                       <div key={rq.id} style={{background:C.inp,border:`1px solid ${C.brd}`,borderRadius:8,padding:12,marginBottom:8,position:"relative"}}>
-                        {rq.status==="confirmed"&&<div style={{position:"absolute",top:8,right:10,fontSize:16}}>✅</div>}
+                        {rq.status==="scheduled"&&<div style={{position:"absolute",top:8,right:10,fontSize:16}}>✅</div>}
                         <div style={{fontSize:13,fontWeight:700,color:C.txt}}>{rq.jobs?.name||"Job"}</div>
                         <div style={{fontSize:12,color:C.lt,marginTop:2}}>{rq.inspection_type||(rq.inspection_types||[])[0]||"General Visit"}{rq.special_type?` — ${rq.special_type}`:""} — {rq.requester_name||rq.submitted_by||""}</div>
                         {rq.inspection_time&&<div style={{fontSize:11,color:C.blu,marginTop:2}}>{(rq.inspection_time+"").substring(0,5)}{rq.duration?` (${rq.duration>=60?rq.duration/60+"hr":rq.duration+"min"})`:""}</div>}
@@ -4495,9 +4495,9 @@ function Dashboard({user, onLogout}){
                         {rq.inspection_identifier&&<div style={{fontSize:11,color:C.mut,marginTop:2}}>#{rq.inspection_identifier}</div>}
                         {rq.notes&&<div style={{fontSize:11,color:C.mut,marginTop:4,fontStyle:"italic"}}>{rq.notes}</div>}
                         <div style={{display:"flex",gap:8,marginTop:10}}>
-                          {rq.status!=="confirmed"&&(
+                          {rq.status!=="scheduled"&&(
                             <button onClick={async(e)=>{e.stopPropagation();try{
-                              await db.updateRequest(rq.id,{status:"confirmed"});
+                              await db.updateRequest(rq.id,{status:"scheduled"});
                               // Send confirmation email to requester
                               if(rq.requester_email){
                                 const reqDate=new Date(rq.requested_date+"T12:00:00").toLocaleDateString("en-US",{weekday:"long",month:"long",day:"numeric",year:"numeric"});
@@ -4517,9 +4517,9 @@ function Dashboard({user, onLogout}){
                               ✓ Scheduled
                             </button>
                           )}
-                          {rq.status==="confirmed"&&(
+                          {rq.status==="scheduled"&&(
                             <button onClick={async(e)=>{e.stopPropagation();try{await db.updateRequest(rq.id,{status:"pending"});await loadRequests();}catch(er){alert("Error: "+er.message);}}} style={{flex:1,padding:"7px 0",fontSize:12,fontWeight:700,borderRadius:6,background:C.org,border:"none",color:"#fff",cursor:"pointer"}}>
-                              Unschedule
+                              Edit
                             </button>
                           )}
                           <button onClick={async(e)=>{e.stopPropagation();if(!confirm("Delete this request?"))return;try{await db.deleteRequest(rq.id);await loadRequests();}catch(er){alert("Error: "+er.message);}}} style={{padding:"7px 12px",fontSize:12,fontWeight:700,borderRadius:6,background:"transparent",border:`1px solid #ef4444`,color:"#ef4444",cursor:"pointer"}}>
