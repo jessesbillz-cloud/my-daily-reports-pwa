@@ -119,6 +119,31 @@ serve(async (req) => {
       console.error("Owner lookup failed:", e);
     }
 
+    // Look up the job's site address so it populates in calendar events
+    let siteAddress = locationDetail; // use form-provided location as default
+    if (!siteAddress && ownerId) {
+      try {
+        const { data: jobs } = await supabase
+          .from("jobs")
+          .select("site_address")
+          .eq("user_id", ownerId)
+          .limit(10);
+        // Match job by project slug (job name slugified)
+        const matchJob = (jobs || []).find(
+          (j: any) =>
+            j.site_address &&
+            (j.name || "").toLowerCase().replace(/[^a-z0-9]+/g, "-") === project
+        );
+        if (matchJob?.site_address) siteAddress = matchJob.site_address;
+        // Fallback: just use the first job's address if only one job
+        if (!siteAddress && jobs?.length === 1 && jobs[0].site_address) {
+          siteAddress = jobs[0].site_address;
+        }
+      } catch (e) {
+        console.error("Job address lookup:", e);
+      }
+    }
+
     // Insert inspection request — include user_id and requested_date so it shows on owner's calendar
     const insertData: Record<string, any> = {
       project,
@@ -129,7 +154,7 @@ serve(async (req) => {
       submitted_by: submittedBy,
       notes,
       subcontractor,
-      location_detail: locationDetail,
+      location_detail: siteAddress,
       inspection_identifier: inspectionIdentifier,
       email_recipients: emailRecipients,
       flexible_display: flexibleDisplay,

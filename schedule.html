@@ -286,7 +286,9 @@ function showDay(d){
             if(e.project!==PROJ) html+=' <span style="color:#888;font-size:11px;">('+e.project+')</span>';
             if(e.inspection_identifier) html+='<div style="color:#e8742a;font-weight:700;font-size:13px;margin:4px 0;">'+e.inspection_identifier+'</div>';
             html+='<div style="font-size:11px;color:#888;margin-top:4px;">By: '+e.submitted_by+'</div>';
-            if(e.status==='scheduled') html+='<div style="color:#4a4;font-size:12px;font-weight:700;margin-top:4px;">Scheduled</div>';
+            if(e.location_detail) html+='<div style="font-size:11px;color:#5a8fc0;margin-top:2px;">📍 '+e.location_detail+'</div>';
+            if(e.status==='scheduled') html+='<div style="color:#4a4;font-size:13px;font-weight:700;margin-top:6px;padding:4px 10px;background:rgba(74,170,74,0.12);border:1px solid #4a4;border-radius:6px;display:inline-block;">✅ Scheduled</div>';
+            else html+='<div style="color:#e8742a;font-size:12px;font-weight:600;margin-top:4px;">⏳ Pending</div>';
             if(e.project===PROJ){
                 html+='<div class="evt-actions">';
                 html+='<button class="btn-edit" onclick="editInsp(\''+e.id+'\',\''+e.inspection_date+'\',\''+e.inspection_time.substring(0,5)+'\')">Edit</button>';
@@ -376,7 +378,14 @@ function renderCal(){
         c.className='day-cell';c.innerHTML='<span class="day-num">'+d+'</span>';
         if(mD[s]){
             var active=mD[s].filter(function(e){return e.status!=='cancelled';});
-            if(active.length>0) c.innerHTML+='<div style="font-size:12px;color:#5a8fc0;font-weight:700;">'+active.length+'</div>';
+            if(active.length>0){
+                var scheduled=active.filter(function(e){return e.status==='scheduled';}).length;
+                var pending=active.length-scheduled;
+                var dots='';
+                if(scheduled>0) dots+='<span style="color:#4a4;">✅ '+scheduled+'</span> ';
+                if(pending>0) dots+='<span style="color:#e8742a;">⏳ '+pending+'</span>';
+                c.innerHTML+='<div style="font-size:10px;font-weight:700;line-height:1.4;">'+dots+'</div>';
+            }
         }
         c.onclick=(function(x){return function(){showDay(x);};})(s);
         g.appendChild(c);
@@ -385,8 +394,9 @@ function renderCal(){
 function setType(t){inspType=t;document.getElementById('btnSpecial').classList.toggle('active',t==='Special');document.getElementById('btnRegular').classList.toggle('active',t==='Regular');document.getElementById('specialSub').classList.toggle('show',t==='Special');if(t!=='Special')document.getElementById('specialType').selectedIndex=0;}
 function setDur(d){inspDur=d;document.querySelectorAll('.dur-btn').forEach(function(b){b.classList.remove('active');});event.target.classList.add('active');}
 function scheduleInsp(id){
-fetch(SB+'/rest/v1/inspection_requests?id=eq.'+id,{method:'PATCH',headers:{'apikey':AK,'Authorization':'Bearer '+AK,'Content-Type':'application/json'},body:JSON.stringify({status:'scheduled'})})
-.then(function(r){if(r.ok){alert('Marked as Scheduled.'); loadMD();} else {alert('Error updating status.');}});
+fetch(SB+'/functions/v1/update-inspection',{method:'POST',headers:{'Authorization':'Bearer '+AK,'apikey':AK,'Content-Type':'application/json'},body:JSON.stringify({request_id:id,action:'schedule'})})
+.then(function(r){return r.json();}).then(function(data){if(data.success){alert('Marked as Scheduled — notifications sent.'); loadMD();} else {alert('Error: '+(data.error||'Unknown'));}})
+.catch(function(err){alert('Failed: '+err.message);});
 }
 // ── ADD PERSON TO TEAM (like job settings pattern) ──
 function addPersonToTeam(){
