@@ -4497,6 +4497,12 @@ function SetupWizard({user, onComplete}){
   const [companyMatches,setCompanyMatches]=useState([]);
   const [selectedCompany,setSelectedCompany]=useState(null); // {id,name} if user chose to join
   const [companySearching,setCompanySearching]=useState(false);
+  // Template picker state (shown after company join when templates exist)
+  const [showTemplatePicker,setShowTemplatePicker]=useState(false);
+  const [availableTemplates,setAvailableTemplates]=useState([]);
+  const [selectedTemplates,setSelectedTemplates]=useState(new Set());
+  const [templatePickerLoading,setTemplatePickerLoading]=useState(false);
+
   const companyDebounce=useRef(null);
   const SECTION_ORDER=["parsing","cleanDoc","notes","photos","bestPractices"];
   const toggleSection=(key)=>{setReadSections(p=>({...p,[key]:true}));setOpenSections(p=>{const wasOpen=p[key];if(wasOpen){const idx=SECTION_ORDER.indexOf(key);const nextKey=idx>=0&&idx<SECTION_ORDER.length-1?SECTION_ORDER[idx+1]:null;const next={};if(nextKey)next[nextKey]=true;return next;}return{[key]:true};});};
@@ -4601,20 +4607,52 @@ function SetupWizard({user, onComplete}){
       }
       setSlug(slugVal);
 
-      // If joining an existing company, copy their templates to user's saved_templates
+      // If joining an existing company, check for templates to offer
       if(selectedCompany&&companyId){
         try{
           const companyTpls=await db.getCompanyTemplates(companyId);
           if(companyTpls.length>0){
-            await db.copyCompanyTemplatesToUser(companyTpls,user.id);
+            // Show template picker instead of auto-copying all
+            setAvailableTemplates(companyTpls);
+            setSelectedTemplates(new Set(companyTpls.map(t=>t.id))); // all selected by default
+            setShowTemplatePicker(true);
+            setSaving(false);
+            return; // don't finish wizard yet — template picker will call finishWizard
           }
-        }catch(e){console.error("Copy company templates:",e);}
+        }catch(e){console.error("Fetch company templates:",e);}
       }
 
-      try{await db.upsertProfile({id:user.id,setup_complete:true,wizard_completed_at:new Date().toISOString()});}catch(_){}
-      onComplete();
+      await finishWizard([]);
     }catch(e){alert("Error saving profile: "+e.message);}
     finally{setSaving(false);}
+  };
+
+  // Called after template picker confirmation (or directly if no templates)
+  const finishWizard=async(templatesToCopy)=>{
+    setSaving(true);
+    try{
+      if(templatesToCopy&&templatesToCopy.length>0){
+        await db.copyCompanyTemplatesToUser(templatesToCopy,user.id);
+      }
+      try{await db.upsertProfile({id:user.id,setup_complete:true,wizard_completed_at:new Date().toISOString()});}catch(_){}
+      onComplete();
+    }catch(e){alert("Error finishing setup: "+e.message);}
+    finally{setSaving(false);}
+  };
+
+  const confirmTemplatePicker=async()=>{
+    setTemplatePickerLoading(true);
+    const chosen=availableTemplates.filter(t=>selectedTemplates.has(t.id));
+    await finishWizard(chosen);
+    setTemplatePickerLoading(false);
+  };
+
+  const toggleTemplateSelection=(id)=>{
+    setSelectedTemplates(prev=>{
+      const next=new Set(prev);
+      if(next.has(id))next.delete(id);else next.add(id);
+      return next;
+    });
   };
 
   const next=()=>{if(step<WIZARD_STEPS.length-1)setStep(step+1);};
@@ -4630,6 +4668,38 @@ function SetupWizard({user, onComplete}){
         <span style={{fontSize:12,color:C.mut,fontWeight:600}}>Step {step+1} of {WIZARD_STEPS.length}</span>
       </div>
       <div style={{height:3,background:C.brd}}><div style={{height:3,background:C.org,width:pct+"%",transition:"width 0.3s ease"}}/></div>
+
+      {/* Template Picker Modal */}
+      {showTemplatePicker&&(
+        <div style={{position:"fixed",inset:0,zIndex:999,background:"rgba(0,0,0,0.6)",display:"flex",alignItems:"center",justifyContent:"center",padding:20}}>
+          <div style={{background:C.card,border:`1px solid ${C.brd}`,borderRadius:16,maxWidth:480,width:"100%",maxHeight:"80vh",overflow:"auto",padding:24}}>
+            <div style={{textAlign:"center",marginBottom:20}}>
+              <span style={{fontSize:32}}>📋</span>
+              <h2 style={{fontSize:20,fontWeight:700,marginTop:8}}>Company Templates</h2>
+              <p style={{fontSize:13,color:C.mut,marginTop:6,lineHeight:1.5}}>Your company has report templates ready to go. Select the ones you want added to your account.</p>
+            </div>
+            <div style={{display:"flex",flexDirection:"column",gap:8,marginBottom:20}}>
+              {availableTemplates.map(t=>(
+                <button key={t.id} onClick={()=>toggleTemplateSelection(t.id)} style={{display:"flex",alignItems:"center",gap:12,padding:"14px 16px",background:selectedTemplates.has(t.id)?"rgba(232,116,42,0.08)":C.inp,border:`1px solid ${selectedTemplates.has(t.id)?"rgba(232,116,42,0.4)":C.brd}`,borderRadius:10,cursor:"pointer",textAlign:"left",transition:"all 0.15s"}}>
+                  <div style={{width:22,height:22,borderRadius:6,border:`2px solid ${selectedTemplates.has(t.id)?C.org:C.brd}`,background:selectedTemplates.has(t.id)?C.org:"transparent",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>
+                    {selectedTemplates.has(t.id)&&<span style={{color:"#fff",fontSize:14,fontWeight:700}}>✓</span>}
+                  </div>
+                  <div style={{flex:1}}>
+                    <div style={{fontSize:14,fontWeight:600,color:C.txt}}>{t.template_name||t.name||t.file_name||"Report Template"}</div>
+                    {t.file_type&&<div style={{fontSize:11,color:C.mut,marginTop:2}}>{t.file_type.toUpperCase()} template</div>}
+                  </div>
+                </button>
+              ))}
+            </div>
+            <button onClick={confirmTemplatePicker} disabled={templatePickerLoading} style={{width:"100%",padding:"14px 0",background:C.org,border:"none",borderRadius:10,color:"#fff",fontSize:15,fontWeight:700,cursor:templatePickerLoading?"default":"pointer",opacity:templatePickerLoading?0.7:1}}>
+              {templatePickerLoading?"Setting up...":(selectedTemplates.size>0?`Add ${selectedTemplates.size} Template${selectedTemplates.size>1?"s":""} & Finish`:"Skip & Finish Without Templates")}
+            </button>
+            <button onClick={()=>{setShowTemplatePicker(false);finishWizard([]);}} style={{width:"100%",padding:"10px 0",background:"transparent",border:"none",color:C.mut,fontSize:13,cursor:"pointer",marginTop:8}}>
+              Skip for now
+            </button>
+          </div>
+        </div>
+      )}
 
       <div style={{maxWidth:560,margin:"0 auto",padding:"20px 16px 40px"}}>
 
@@ -4962,6 +5032,16 @@ function LoginScreen({onAuth}){
 
         <div style={{textAlign:"center",marginTop:24,color:C.mut,fontSize:11}}>
           Free during beta — no credit card required
+        </div>
+
+        {/* Concierge service blurb */}
+        <div style={{marginTop:28,padding:"18px 16px",background:"rgba(232,116,42,0.06)",border:"1px solid rgba(232,116,42,0.2)",borderRadius:12,textAlign:"center"}}>
+          <div style={{fontSize:14,fontWeight:700,color:C.txt,marginBottom:6}}>New to digital daily reports?</div>
+          <div style={{fontSize:13,color:C.lt,lineHeight:1.6,marginBottom:12}}>Send us your PDF or Word template and we'll set it up for you — configured, tested, and ready for your whole team.</div>
+          <a href="mailto:support@mydailyreports.org?subject=Template%20Setup%20Request&body=Hi%2C%20I'd%20like%20help%20setting%20up%20my%20report%20template.%20I've%20attached%20it%20to%20this%20email." style={{display:"inline-block",padding:"10px 20px",background:C.org,color:"#fff",borderRadius:8,fontSize:13,fontWeight:700,textDecoration:"none"}}>
+            Send Us Your Template
+          </a>
+          <div style={{fontSize:11,color:C.mut,marginTop:8}}>support@mydailyreports.org</div>
         </div>
       </div>
     </div>

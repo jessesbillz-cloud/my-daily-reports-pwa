@@ -54,8 +54,8 @@
 <body>
 
 <div class="container">
-  <h1>MDR Admin — Drop Template to User</h1>
-  <p class="subtitle">Preview the parsed template, then drop it into a user's saved templates</p>
+  <h1>MDR Admin — Template Management</h1>
+  <p class="subtitle">Drop templates to individual users or set up company-wide template libraries</p>
 
   <div class="card">
     <h2>1. Auth</h2>
@@ -64,17 +64,25 @@
     <div class="hint">Service role key bypasses RLS. Never share this.</div>
   </div>
 
-  <div class="card">
-    <h2>2. Find User</h2>
-    <label>User Email</label>
-    <input type="text" id="userEmail" placeholder="ryan@example.com" />
-    <button onclick="lookupUser()" id="lookupBtn" class="btn-secondary">Look Up User</button>
-    <div id="userInfo" style="display:none;" class="user-info"></div>
-    <input type="hidden" id="userId" />
+  <!-- Mode tabs -->
+  <div style="display:flex;gap:4px;background:#161616;border:1px solid #2a2a2a;border-radius:12px;padding:4px;margin-bottom:20px;">
+    <button onclick="switchMode('user')" id="tabUser" style="flex:1;padding:10px 0;background:#2563eb;color:#fff;border:none;border-radius:8px;font-size:14px;font-weight:700;cursor:pointer;">Drop to User</button>
+    <button onclick="switchMode('company')" id="tabCompany" style="flex:1;padding:10px 0;background:transparent;color:#888;border:none;border-radius:8px;font-size:14px;font-weight:700;cursor:pointer;">Company Template</button>
   </div>
 
-  <div class="card">
-    <h2>3. Template</h2>
+  <!-- USER MODE -->
+  <div id="userModeSection">
+    <div class="card">
+      <h2>2. Find User</h2>
+      <label>User Email</label>
+      <input type="text" id="userEmail" placeholder="ryan@example.com" />
+      <button onclick="lookupUser()" id="lookupBtn" class="btn-secondary">Look Up User</button>
+      <div id="userInfo" style="display:none;" class="user-info"></div>
+      <input type="hidden" id="userId" />
+    </div>
+
+    <div class="card">
+      <h2>3. Template</h2>
     <label>Template File (PDF or DOCX)</label>
     <input type="file" id="templateFile" accept=".pdf,.docx" onchange="onFileChange()" />
 
@@ -105,11 +113,51 @@
     </table>
   </div>
 
-  <!-- Drop to User -->
-  <div class="card" id="dropCard" style="display:none;">
-    <h2>5. Drop to User</h2>
-    <div id="dropSummary" style="margin-bottom:16px;font-size:13px;color:#999;"></div>
-    <button onclick="dropTemplate()" id="dropBtn" class="btn-green">Looks Good — Drop Template into User Account</button>
+    <!-- Drop to User -->
+    <div class="card" id="dropCard" style="display:none;">
+      <h2>5. Drop to User</h2>
+      <div id="dropSummary" style="margin-bottom:16px;font-size:13px;color:#999;"></div>
+      <button onclick="dropTemplate()" id="dropBtn" class="btn-green">Looks Good — Drop Template into User Account</button>
+    </div>
+  </div>
+
+  <!-- COMPANY MODE -->
+  <div id="companyModeSection" style="display:none;">
+    <div class="card">
+      <h2>2. Select or Create Company</h2>
+      <label>Search Companies</label>
+      <input type="text" id="companySearch" placeholder="Type company name..." oninput="searchCompaniesAdmin()" />
+      <div id="companyResults" style="margin-bottom:14px;"></div>
+
+      <div id="selectedCompanyInfo" style="display:none;" class="user-info"></div>
+      <input type="hidden" id="selectedCompanyId" />
+
+      <div style="border-top:1px solid #222;padding-top:14px;margin-top:14px;">
+        <label>Or Create New Company</label>
+        <input type="text" id="newCompanyName" placeholder="ACME Construction Inc." />
+        <button onclick="createCompanyAdmin()" class="btn-secondary">Create Company</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>3. Template File & Config</h2>
+      <label>Template File (PDF or DOCX)</label>
+      <input type="file" id="companyTemplateFile" accept=".pdf,.docx" />
+
+      <label>Template Name</label>
+      <input type="text" id="companyTemplateName" placeholder="Daily Inspection Report" />
+
+      <label>Field Config JSON</label>
+      <textarea id="companyFieldConfig" rows="12" placeholder='[{"name":"Date","value":"","mode":"auto-date","page":1,"x":100,"y":50,"w":80,"h":14,"fontSize":12}, ...]'></textarea>
+      <div class="hint">Paste the field config from Claude. All users joining this company will get this template.</div>
+
+      <button onclick="dropCompanyTemplate()" id="companyDropBtn" class="btn-green" style="margin-top:8px;">Upload to Company Template Library</button>
+    </div>
+
+    <div class="card" id="companyTemplatesList" style="display:none;">
+      <h2>Existing Company Templates</h2>
+      <div id="companyTemplatesBody"></div>
+    </div>
   </div>
 
   <div class="card" id="logCard" style="display:none;">
@@ -316,6 +364,172 @@ async function renderPage(pageNum) {
 
     container.appendChild(div);
   });
+}
+
+// ── Mode switching ──
+let currentMode = "user";
+function switchMode(mode) {
+  currentMode = mode;
+  document.getElementById("userModeSection").style.display = mode === "user" ? "block" : "none";
+  document.getElementById("companyModeSection").style.display = mode === "company" ? "block" : "none";
+  document.getElementById("tabUser").style.background = mode === "user" ? "#2563eb" : "transparent";
+  document.getElementById("tabUser").style.color = mode === "user" ? "#fff" : "#888";
+  document.getElementById("tabCompany").style.background = mode === "company" ? "#e8742a" : "transparent";
+  document.getElementById("tabCompany").style.color = mode === "company" ? "#fff" : "#888";
+}
+
+// ── Company search ──
+let searchTimeout = null;
+async function searchCompaniesAdmin() {
+  const q = document.getElementById("companySearch").value.trim();
+  const resultsEl = document.getElementById("companyResults");
+  if (q.length < 2) { resultsEl.innerHTML = ""; return; }
+  clearTimeout(searchTimeout);
+  searchTimeout = setTimeout(async () => {
+    const sk = getServiceKey();
+    if (!sk) return;
+    try {
+      const r = await fetch(`${SB_URL}/rest/v1/companies?name=ilike.*${encodeURIComponent(q)}*&select=id,name&limit=10`, {
+        headers: { apikey: SB_KEY, Authorization: `Bearer ${sk}` }
+      });
+      const companies = await r.json();
+      if (!companies.length) { resultsEl.innerHTML = '<div style="color:#666;font-size:13px;padding:8px 0;">No companies found</div>'; return; }
+      resultsEl.innerHTML = companies.map(c =>
+        `<button onclick="selectCompanyAdmin('${c.id}','${c.name.replace(/'/g, "\\'")}')" style="display:block;width:100%;text-align:left;padding:10px 14px;background:#1a1a1a;border:1px solid #333;border-radius:8px;color:#e0e0e0;cursor:pointer;margin-bottom:4px;font-size:13px;font-weight:600;">🏢 ${c.name}</button>`
+      ).join("");
+    } catch (e) { resultsEl.innerHTML = '<div style="color:#ef4444;font-size:12px;">Search error: ' + e.message + '</div>'; }
+  }, 300);
+}
+
+function selectCompanyAdmin(id, name) {
+  document.getElementById("selectedCompanyId").value = id;
+  const info = document.getElementById("selectedCompanyInfo");
+  info.style.display = "block";
+  info.innerHTML = `<strong>${name}</strong><br/>ID: <code style="font-size:11px;color:#888;">${id}</code>`;
+  document.getElementById("companyResults").innerHTML = "";
+  document.getElementById("companySearch").value = name;
+  loadCompanyTemplates(id);
+}
+
+async function createCompanyAdmin() {
+  const name = document.getElementById("newCompanyName").value.trim();
+  const sk = getServiceKey();
+  if (!sk) { alert("Enter service role key first"); return; }
+  if (!name) { alert("Enter a company name"); return; }
+  try {
+    const r = await fetch(`${SB_URL}/rest/v1/companies`, {
+      method: "POST",
+      headers: { ...serviceHeaders(), Prefer: "return=representation" },
+      body: JSON.stringify({ name })
+    });
+    if (!r.ok) throw new Error(await r.text());
+    const data = await r.json();
+    const co = data[0] || data;
+    selectCompanyAdmin(co.id, co.name);
+    log(`Company "${name}" created (${co.id})`, "ok");
+  } catch (e) { alert("Create failed: " + e.message); }
+}
+
+async function loadCompanyTemplates(companyId) {
+  const sk = getServiceKey();
+  try {
+    const r = await fetch(`${SB_URL}/rest/v1/company_templates?company_id=eq.${companyId}&select=*`, {
+      headers: { apikey: SB_KEY, Authorization: `Bearer ${sk}` }
+    });
+    const tpls = await r.json();
+    const listEl = document.getElementById("companyTemplatesList");
+    const bodyEl = document.getElementById("companyTemplatesBody");
+    if (!tpls.length) { listEl.style.display = "none"; return; }
+    listEl.style.display = "block";
+    bodyEl.innerHTML = tpls.map(t =>
+      `<div style="padding:10px 14px;background:#1a1a1a;border:1px solid #222;border-radius:8px;margin-bottom:6px;font-size:13px;">
+        <strong style="color:#fff;">${t.template_name || t.name || "Unnamed"}</strong>
+        <span style="color:#666;margin-left:8px;">${t.file_type || "?"} • ${t.mode || "template"}</span>
+        <div style="color:#555;font-size:11px;margin-top:4px;">${(t.field_config || []).length} fields configured</div>
+      </div>`
+    ).join("");
+  } catch (e) { console.error("Load templates:", e); }
+}
+
+async function dropCompanyTemplate() {
+  const sk = getServiceKey();
+  const companyId = document.getElementById("selectedCompanyId").value;
+  const fileInput = document.getElementById("companyTemplateFile");
+  const file = fileInput.files?.[0];
+  const templateName = document.getElementById("companyTemplateName").value.trim();
+  const fieldConfigRaw = document.getElementById("companyFieldConfig").value.trim();
+
+  if (!sk) { alert("Enter service role key"); return; }
+  if (!companyId) { alert("Select or create a company first"); return; }
+  if (!file) { alert("Select a template file"); return; }
+  if (!templateName) { alert("Enter a template name"); return; }
+
+  let fieldConfig = null;
+  if (fieldConfigRaw) {
+    try { fieldConfig = JSON.parse(fieldConfigRaw); } catch (e) { alert("Invalid JSON: " + e.message); return; }
+  }
+
+  const btn = document.getElementById("companyDropBtn");
+  btn.disabled = true;
+  btn.textContent = "Uploading...";
+  document.getElementById("log").innerHTML = "";
+
+  const ext = file.name.split(".").pop().toLowerCase();
+  const u8 = new Uint8Array(await file.arrayBuffer());
+
+  try {
+    // Upload file to company-templates bucket
+    const storagePath = `${companyId}/${Date.now()}_${file.name}`;
+    const contentType = ext === "pdf" ? "application/pdf" : "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+
+    log("Uploading to company-templates bucket...", "info");
+    let upResp = await fetch(`${SB_URL}/storage/v1/object/company-templates/${storagePath}`, {
+      method: "POST",
+      headers: { apikey: SB_KEY, Authorization: `Bearer ${sk}`, "Content-Type": contentType },
+      body: new Blob([u8], { type: contentType })
+    });
+    if (!upResp.ok) {
+      upResp = await fetch(`${SB_URL}/storage/v1/object/company-templates/${storagePath}`, {
+        method: "PUT",
+        headers: { apikey: SB_KEY, Authorization: `Bearer ${sk}`, "Content-Type": contentType },
+        body: new Blob([u8], { type: contentType })
+      });
+    }
+    if (!upResp.ok) throw new Error(`Storage upload failed (${upResp.status}): ${await upResp.text()}`);
+    log("File uploaded to storage", "ok");
+
+    // Insert into company_templates
+    log("Inserting into company_templates...", "info");
+    const insertData = {
+      company_id: companyId,
+      template_name: templateName,
+      name: templateName,
+      file_name: file.name,
+      file_type: ext,
+      storage_path: storagePath,
+      field_config: fieldConfig,
+      mode: "template"
+    };
+
+    const saveResp = await fetch(`${SB_URL}/rest/v1/company_templates`, {
+      method: "POST",
+      headers: { ...serviceHeaders(), Prefer: "return=representation" },
+      body: JSON.stringify(insertData)
+    });
+    if (!saveResp.ok) throw new Error(`Insert failed (${saveResp.status}): ${await saveResp.text()}`);
+    const result = await saveResp.json();
+    log(`Company template "${templateName}" created (${result?.[0]?.id || "ok"})`, "ok");
+    log("Users joining this company will now see this template.", "ok");
+    log("\nDone!", "ok");
+
+    // Refresh template list
+    loadCompanyTemplates(companyId);
+  } catch (e) {
+    log("\nERROR: " + e.message, "err");
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "Upload to Company Template Library";
+  }
 }
 
 async function dropTemplate() {
