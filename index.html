@@ -212,6 +212,13 @@ const db = {
     const d=await r.json();
     return d[0]||null;
   },
+  // Get the most recent report before a given date for a job (for contractor carry-over)
+  async getLatestReport(jobId,beforeDate){
+    const r=await fetch(`${SB_URL}/rest/v1/reports?select=*&job_id=eq.${jobId}&report_date=lt.${beforeDate}&order=report_date.desc&limit=1`,{headers:this._h()});
+    if(!r.ok)return null;
+    const d=await r.json();
+    return d[0]||null;
+  },
   // Update job field_config
   async updateJobFieldConfig(jobId,fieldConfig){
     const r=await fetch(`${SB_URL}/rest/v1/jobs?id=eq.${jobId}`,{method:"PATCH",headers:this._h(),body:JSON.stringify({field_config:fieldConfig})});
@@ -1155,6 +1162,19 @@ function WorkLogEditor({job, user, onBack, reportDate}){
   const [draftId,setDraftId]=useState(null);
   const [generalNotes,setGeneralNotes]=useState("");
   const [safetyNotes,setSafetyNotes]=useState("");
+  const [materials,setMaterials]=useState("");
+  const [equipment,setEquipment]=useState("");
+  const [qualityControl,setQualityControl]=useState("");
+  const [survey,setSurvey]=useState([
+    {q:"Any accidents on site today?",answer:"",desc:""},
+    {q:"Any schedule delays occur?",answer:"",desc:""},
+    {q:"Did weather cause any delays?",answer:"",desc:""},
+    {q:"Any visitors on site?",answer:"",desc:""},
+    {q:"Any areas that can't be worked on?",answer:"",desc:""},
+    {q:"Any equipment rented on site?",answer:"",desc:""}
+  ]);
+  const [expandedSections,setExpandedSections]=useState({});
+  const toggleSection=(key)=>setExpandedSections(p=>({...p,[key]:!p[key]}));
   const [weatherEnabled,setWeatherEnabled]=useState(false); // opt-in weather display
   const [weatherAM,setWeatherAM]=useState("");
   const [weatherMid,setWeatherMid]=useState("");
@@ -1187,12 +1207,22 @@ function WorkLogEditor({job, user, onBack, reportDate}){
     setWeatherLoading(true);
     try{
       let lat,lng;
-      // Geocode the job's site address
+      // Geocode the job's site address using OpenStreetMap Nominatim (handles full addresses)
       try{
-        const geoR=await fetch(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(job.site_address)}&count=1&language=en&format=json`);
+        const geoR=await fetch(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(job.site_address)}&format=json&limit=1`,{headers:{"User-Agent":"MyDailyReports/1.0"}});
         const geoD=await geoR.json();
-        if(geoD.results&&geoD.results.length>0){lat=geoD.results[0].latitude;lng=geoD.results[0].longitude;}
-      }catch(e){console.log("Geocode failed");}
+        if(geoD&&geoD.length>0){lat=parseFloat(geoD[0].lat);lng=parseFloat(geoD[0].lon);}
+      }catch(e){console.log("Geocode failed:",e);}
+      // Fallback: try Open-Meteo geocoding with just city name
+      if(!lat||!lng){
+        try{
+          const cityMatch=job.site_address.match(/,\s*([^,]+),?\s*[A-Z]{2}/);
+          const searchName=cityMatch?cityMatch[1].trim():job.site_address;
+          const geoR2=await fetch(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(searchName)}&count=1&language=en&format=json`);
+          const geoD2=await geoR2.json();
+          if(geoD2.results&&geoD2.results.length>0){lat=geoD2.results[0].latitude;lng=geoD2.results[0].longitude;}
+        }catch(e){console.log("Fallback geocode failed:",e);}
+      }
       if(!lat||!lng){
         alert("Could not find location for \""+job.site_address+"\". Check the site address in Job Settings.");
         setWeatherLoading(false);return;
@@ -1221,7 +1251,7 @@ function WorkLogEditor({job, user, onBack, reportDate}){
     finally{setWeatherLoading(false);}
   };
 
-  // Load existing report on mount
+  // Load existing report on mount — or carry over contractors from most recent report
   useEffect(()=>{
     (async()=>{
       try{
@@ -1233,11 +1263,39 @@ function WorkLogEditor({job, user, onBack, reportDate}){
             if(c.contractors)setContractors(c.contractors);
             if(c.generalNotes)setGeneralNotes(c.generalNotes);
             if(c.safetyNotes)setSafetyNotes(c.safetyNotes);
+            if(c.materials)setMaterials(c.materials);
+            if(c.equipment)setEquipment(c.equipment);
+            if(c.qualityControl)setQualityControl(c.qualityControl);
+            if(c.survey)setSurvey(c.survey);
             if(c.weatherEnabled)setWeatherEnabled(true);
             if(c.weatherAM)setWeatherAM(c.weatherAM);
             if(c.weatherMid)setWeatherMid(c.weatherMid);
             if(c.weatherPM)setWeatherPM(c.weatherPM);
           }
+        } else {
+          // No report for today — carry over contractors from most recent previous report
+          try{
+            const prev=await db.getLatestReport(job.id,todayISO);
+            if(prev&&prev.content){
+              const pc=typeof prev.content==="string"?JSON.parse(prev.content):prev.content;
+              if(pc.contractors&&pc.contractors.length>0){
+                // Only carry over LOCKED contractors — clear daily data (photos, hours)
+                const locked=pc.contractors.filter(ct=>ct.locked);
+                if(locked.length>0){
+                  const carried=locked.map(ct=>({
+                    id:Date.now().toString()+Math.random().toString(36).slice(2,6),
+                    name:ct.name||"",
+                    description:ct.description||"",
+                    hours:"",
+                    quantity:ct.quantity||"1",
+                    photos:[],
+                    locked:true
+                  }));
+                  setContractors(carried);
+                }
+              }
+            }
+          }catch(pe){console.error("Contractor carry-over:",pe);}
         }
       }catch(e){console.error(e);}
     })();
@@ -1245,7 +1303,7 @@ function WorkLogEditor({job, user, onBack, reportDate}){
 
   const addContractor=()=>{
     if(!newName.trim())return;
-    const c={id:Date.now().toString(),name:newName.trim(),description:"",hours:"",quantity:"1",photos:[]};
+    const c={id:Date.now().toString(),name:newName.trim(),description:"",hours:"",quantity:"1",photos:[],locked:false};
     setContractors(p=>[...p,c]);
     setActiveId(c.id);
     setNewName("");
@@ -1262,15 +1320,31 @@ function WorkLogEditor({job, user, onBack, reportDate}){
     if(activeId===id)setActiveId(null);
   };
 
+  // Compress photo to max 1600px, JPEG quality 0.7 (~150KB vs 4MB raw)
+  const compressPhoto=(dataUrl)=>new Promise(resolve=>{
+    const img=new Image();
+    img.onload=()=>{
+      const MAX=1600;
+      let w=img.width,h=img.height;
+      if(w>MAX||h>MAX){const r=Math.min(MAX/w,MAX/h);w=Math.round(w*r);h=Math.round(h*r);}
+      const cvs=document.createElement("canvas");cvs.width=w;cvs.height=h;
+      cvs.getContext("2d").drawImage(img,0,0,w,h);
+      resolve(cvs.toDataURL("image/jpeg",0.7));
+    };
+    img.onerror=()=>resolve(dataUrl); // fallback to original
+    img.src=dataUrl;
+  });
+
   const handlePhotoUpload=(e)=>{
     const files=Array.from(e.target.files||[]);
     if(!files.length||!photoTarget)return;
     files.forEach(file=>{
       const reader=new FileReader();
-      reader.onload=(ev)=>{
+      reader.onload=async(ev)=>{
+        const compressed=await compressPhoto(ev.target.result);
         setContractors(p=>p.map(c=>{
           if(c.id!==photoTarget)return c;
-          return{...c,photos:[...(c.photos||[]),{data:ev.target.result,name:file.name,ts:Date.now()}]};
+          return{...c,photos:[...(c.photos||[]),{data:compressed,name:file.name,ts:Date.now()}]};
         }));
       };
       reader.readAsDataURL(file);
@@ -1295,7 +1369,7 @@ function WorkLogEditor({job, user, onBack, reportDate}){
   const showToast=(m)=>{setToast(m);setTimeout(()=>setToast(""),3000);};
 
   const buildContent=()=>({
-    contractors,generalNotes,safetyNotes,
+    contractors,generalNotes,safetyNotes,materials,equipment,qualityControl,survey,
     weatherEnabled,weatherAM,weatherMid,weatherPM,
     reportType:"worklog"
   });
@@ -1373,7 +1447,7 @@ function WorkLogEditor({job, user, onBack, reportDate}){
           // Redraw a fresh info bar (orange/dark bar with our own Date / Job # / Prepared By)
           const infoBarH=28;
           const infoBarPdfY=clearTopY-infoBarH;
-          page.drawRectangle({x:0,y:infoBarPdfY,width:W,height:infoBarH,color:rgb(.15,.15,.15)});
+          page.drawRectangle({x:M,y:infoBarPdfY,width:CW,height:infoBarH,color:rgb(.15,.15,.15)});
 
           const dateStr=new Date(todayISO+"T12:00:00").toLocaleDateString("en-US",{weekday:"short",month:"2-digit",day:"2-digit",year:"numeric",timeZone:tz});
           const infoTextY=infoBarPdfY+9;
@@ -1600,31 +1674,90 @@ function WorkLogEditor({job, user, onBack, reportDate}){
     page.drawText(String(totalHrs),{x:M+nameW+descW+qtyW+(hrsW-fontB.widthOfTextAtSize(String(totalHrs),12))/2,y:y-19,size:12,font:fontB,color:rgb(1,1,1)});
     y-=36;
 
-    // ── General Notes ──
-    if(generalNotes){
+    // ── Helper: draw a Raken-style text section ──
+    const drawTextSection=(title,text)=>{
+      if(!text){
+        // Draw "No entry" bar like Raken
+        ensureSpace(34);
+        page.drawRectangle({x:M,y:y-30,width:CW,height:30,color:rgb(.45,.45,.45)});
+        page.drawText(title,{x:M+(CW-fontB.widthOfTextAtSize(title,14))/2,y:y-22,size:14,font:fontB,color:rgb(.92,.57,.17)});
+        page.drawText("No entry",{x:M+CW-font.widthOfTextAtSize("No entry",9)-10,y:y-22,size:9,font,color:rgb(.85,.85,.85)});
+        y-=36;
+        return;
+      }
       ensureSpace(60);
-      page.drawRectangle({x:M,y:y-24,width:CW,height:24,color:rgb(.3,.3,.3)});
-      page.drawText("GENERAL NOTES",{x:M+8,y:y-16,size:11,font:fontB,color:rgb(1,1,1)});
-      y-=30;
-      const noteLines=[];const noteWords=generalNotes.split(" ");let nl="";
-      noteWords.forEach(w=>{const t=nl?nl+" "+w:w;if(font.widthOfTextAtSize(t,10)>CW-20&&nl){noteLines.push(nl);nl=w;}else nl=t;});
-      if(nl)noteLines.push(nl);
-      noteLines.forEach(ln=>{ensureSpace(14);page.drawText(ln,{x:M+8,y:y-12,size:10,font,color:rgb(.2,.2,.2)});y-=14;});
-      y-=10;
-    }
+      page.drawRectangle({x:M,y:y-30,width:CW,height:30,color:rgb(.45,.45,.45)});
+      page.drawText(title,{x:M+(CW-fontB.widthOfTextAtSize(title,14))/2,y:y-22,size:14,font:fontB,color:rgb(.92,.57,.17)});
+      y-=36;
+      // Wrap and draw text
+      const wrapLines=[];const words=text.split(" ");let wl="";
+      words.forEach(w=>{const t=wl?wl+" "+w:w;if(font.widthOfTextAtSize(t,10)>CW-20&&wl){wrapLines.push(wl);wl=w;}else wl=t;});
+      if(wl)wrapLines.push(wl);
+      // Draw border box around content
+      const boxH=wrapLines.length*14+20;
+      ensureSpace(boxH);
+      page.drawRectangle({x:M,y:y-boxH,width:CW,height:boxH,borderColor:rgb(.85,.85,.85),borderWidth:.5,color:rgb(1,1,1)});
+      let ty=y-14;
+      wrapLines.forEach(ln=>{page.drawText(ln,{x:M+12,y:ty,size:10,font,color:rgb(.2,.2,.2)});ty-=14;});
+      y-=boxH+6;
+    };
 
-    // ── Safety Notes ──
-    if(safetyNotes){
-      ensureSpace(60);
-      page.drawRectangle({x:M,y:y-24,width:CW,height:24,color:rgb(.3,.3,.3)});
-      page.drawText("SITE SAFETY OBSERVATIONS",{x:M+8,y:y-16,size:11,font:fontB,color:rgb(1,1,1)});
-      y-=30;
-      const safeLines=[];const safeWords=safetyNotes.split(" ");let sl="";
-      safeWords.forEach(w=>{const t=sl?sl+" "+w:w;if(font.widthOfTextAtSize(t,10)>CW-20&&sl){safeLines.push(sl);sl=w;}else sl=t;});
-      if(sl)safeLines.push(sl);
-      safeLines.forEach(ln=>{ensureSpace(14);page.drawText(ln,{x:M+8,y:y-12,size:10,font,color:rgb(.2,.2,.2)});y-=14;});
-      y-=10;
-    }
+    // ── Materials ──
+    drawTextSection("Materials",materials);
+
+    // ── Equipment ──
+    drawTextSection("Equipment",equipment);
+
+    // ── General Notes ──
+    drawTextSection("General Notes",generalNotes);
+
+    // ── Site Safety Observations ──
+    drawTextSection("Site Safety Observations",safetyNotes);
+
+    // ── Quality Control Observations ──
+    drawTextSection("Quality Control Observations",qualityControl);
+
+    // ── Survey ──
+    ensureSpace(40);
+    page.drawRectangle({x:M,y:y-30,width:CW,height:30,color:rgb(.45,.45,.45)});
+    page.drawText("Survey",{x:M+(CW-fontB.widthOfTextAtSize("Survey",14))/2,y:y-22,size:14,font:fontB,color:rgb(.92,.57,.17)});
+    y-=36;
+    // Survey column headers
+    const sqW=CW-200; // question column
+    const scW=50; // each checkbox column (N/A, No, Yes)
+    const sdW=CW-sqW-scW*3; // description column
+    ensureSpace(22);
+    page.drawRectangle({x:M,y:y-22,width:CW,height:22,color:rgb(.97,.97,.97)});
+    page.drawLine({start:{x:M,y:y-22},end:{x:M+CW,y:y-22},thickness:.5,color:rgb(.85,.85,.85)});
+    page.drawText("Questions",{x:M+10,y:y-15,size:10,font:fontB,color:rgb(.3,.3,.3)});
+    page.drawText("N/A",{x:M+sqW+(scW-fontB.widthOfTextAtSize("N/A",9))/2,y:y-15,size:9,font:fontB,color:rgb(.3,.3,.3)});
+    page.drawText("No",{x:M+sqW+scW+(scW-fontB.widthOfTextAtSize("No",9))/2,y:y-15,size:9,font:fontB,color:rgb(.3,.3,.3)});
+    page.drawText("Yes",{x:M+sqW+scW*2+(scW-fontB.widthOfTextAtSize("Yes",9))/2,y:y-15,size:9,font:fontB,color:rgb(.3,.3,.3)});
+    page.drawText("Description",{x:M+sqW+scW*3+8,y:y-15,size:9,font:fontB,color:rgb(.3,.3,.3)});
+    y-=24;
+
+    survey.forEach((s,si)=>{
+      const rowH=s.desc?48:40;
+      ensureSpace(rowH);
+      page.drawRectangle({x:M,y:y-rowH,width:CW,height:rowH,borderColor:rgb(.85,.85,.85),borderWidth:.5,color:si%2===0?rgb(.99,.99,.99):rgb(1,1,1)});
+      // Question text
+      page.drawText(`${si+1}. ${s.q}`,{x:M+10,y:y-18,size:10,font:fontB,color:rgb(.2,.2,.2)});
+      // Checkboxes
+      const boxSz=12,boxY=y-20;
+      ["N/A","No","Yes"].forEach((opt,oi)=>{
+        const bx=M+sqW+scW*oi+(scW-boxSz)/2;
+        page.drawRectangle({x:bx,y:boxY,width:boxSz,height:boxSz,borderColor:rgb(.5,.5,.5),borderWidth:1,color:rgb(1,1,1)});
+        if(s.answer===opt){
+          page.drawText("✓",{x:bx+2,y:boxY+1,size:11,font:fontB,color:rgb(.15,.15,.15)});
+        }
+      });
+      // Description
+      if(s.desc){
+        page.drawText(s.desc,{x:M+sqW+scW*3+8,y:y-18,size:9,font,color:rgb(.3,.3,.3)});
+      }
+      y-=rowH;
+    });
+    y-=10;
 
     // ── Work Log Photos — Raken-style: grouped by contractor, 2-up, date stamps ──
     const contractorsWithPhotos=contractors.filter(c=>(c.photos||[]).length>0);
@@ -1819,7 +1952,7 @@ function WorkLogEditor({job, user, onBack, reportDate}){
     if(contractors.length===0)return;
     const t=setInterval(()=>saveWorking(),30000);
     return()=>clearInterval(t);
-  },[contractors,generalNotes,safetyNotes,weatherEnabled,weatherAM,weatherMid,weatherPM]);
+  },[contractors,generalNotes,safetyNotes,materials,equipment,qualityControl,survey,weatherEnabled,weatherAM,weatherMid,weatherPM]);
 
   const totalHours=contractors.reduce((sum,c)=>{
     const h=parseFloat(c.hours)||0;
@@ -1877,20 +2010,19 @@ function WorkLogEditor({job, user, onBack, reportDate}){
 
       <div style={{maxWidth:560,margin:"0 auto",padding:"20px 16px 120px"}}>
 
-        {/* Weather Toggle */}
-        <div style={{background:C.card,border:`1px solid ${weatherEnabled?C.org:C.brd}`,borderRadius:12,overflow:"hidden",marginBottom:16}}>
-          <div style={{display:"flex",alignItems:"center",padding:16}}>
-            <span style={{fontSize:18,marginRight:10}}>🌤</span>
-            <div style={{flex:1}}>
-              <span style={{fontWeight:700,fontSize:15}}>Weather</span>
-              {!weatherEnabled&&<div style={{fontSize:11,color:C.mut,marginTop:2}}>Include weather conditions on this report</div>}
-            </div>
-            <button onClick={()=>toggleWeather(!weatherEnabled)} style={{width:48,height:28,borderRadius:14,border:"none",cursor:"pointer",background:weatherEnabled?C.org:C.brd,position:"relative"}}>
-              <div style={{width:22,height:22,borderRadius:"50%",background:"#fff",position:"absolute",top:3,left:weatherEnabled?23:3,transition:"left 0.2s"}}/>
+        {/* Weather — Collapsible */}
+        <div style={{background:C.card,border:`1px solid ${expandedSections.weather?C.org:C.brd}`,borderRadius:12,overflow:"hidden",marginBottom:10,transition:"border-color 0.2s"}}>
+          <button onClick={()=>{if(!weatherEnabled)toggleWeather(true);toggleSection("weather");}} style={{width:"100%",display:"flex",alignItems:"center",gap:10,padding:"14px 16px",background:"none",border:"none",cursor:"pointer",textAlign:"left"}}>
+            <span style={{fontSize:16}}>🌤</span>
+            <span style={{flex:1,fontWeight:700,fontSize:14,color:C.txt}}>Weather</span>
+            <button onClick={(ev)=>{ev.stopPropagation();toggleWeather(!weatherEnabled);}} style={{width:42,height:24,borderRadius:12,border:"none",cursor:"pointer",background:weatherEnabled?C.org:C.brd,position:"relative",flexShrink:0}}>
+              <div style={{width:18,height:18,borderRadius:"50%",background:"#fff",position:"absolute",top:3,left:weatherEnabled?21:3,transition:"left 0.2s"}}/>
             </button>
-          </div>
-          {weatherEnabled&&(
-            <div style={{padding:"0 16px 16px",borderTop:`1px solid ${C.brd}`}}>
+            <span style={{fontSize:11,color:C.mut}}>{weatherEnabled?(weatherAM?"Has data":"Fetching..."):"Off"}</span>
+            <span style={{color:expandedSections.weather?C.org:C.mut,fontSize:18,transform:expandedSections.weather?"rotate(180deg)":"none",transition:"transform 0.2s",padding:"4px 8px"}}>▼</span>
+          </button>
+          {expandedSections.weather&&weatherEnabled&&(
+            <div style={{padding:"0 16px 16px"}}>
               {weatherLoading&&!weatherAM?(
                 <div style={{textAlign:"center",padding:"16px 0",color:C.mut,fontSize:13}}>
                   <div style={{width:24,height:24,border:`2px solid ${C.brd}`,borderTop:`2px solid ${C.org}`,borderRadius:"50%",margin:"0 auto 8px",animation:"spin 1s linear infinite"}}/>
@@ -1898,7 +2030,7 @@ function WorkLogEditor({job, user, onBack, reportDate}){
                 </div>
               ):(
                 <>
-                  <div style={{display:"flex",flexDirection:"column",gap:8,marginTop:12}}>
+                  <div style={{display:"flex",flexDirection:"column",gap:8}}>
                     {[{label:"Morning (7 AM)",val:weatherAM,set:setWeatherAM,icon:"🌅"},
                       {label:"Midday (12 PM)",val:weatherMid,set:setWeatherMid,icon:"☀️"},
                       {label:"Afternoon (4 PM)",val:weatherPM,set:setWeatherPM,icon:"🌇"}
@@ -1939,10 +2071,14 @@ function WorkLogEditor({job, user, onBack, reportDate}){
             <button onClick={()=>setActiveId(activeId===c.id?null:c.id)} style={{width:"100%",display:"flex",alignItems:"center",gap:12,padding:"14px 16px",background:"none",border:"none",cursor:"pointer",textAlign:"left"}}>
               <div style={{width:36,height:36,borderRadius:10,background:C.org+"22",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,flexShrink:0}}>👷</div>
               <div style={{flex:1,minWidth:0}}>
-                <div style={{fontSize:14,fontWeight:700,color:C.txt,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{c.name}</div>
+                <div style={{display:"flex",alignItems:"center",gap:6}}>
+                  <div style={{fontSize:14,fontWeight:700,color:C.txt,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",flex:1}}>{c.name}</div>
+                  <button onClick={(ev)=>{ev.stopPropagation();updateContractor(c.id,"locked",!c.locked);}} style={{background:"none",border:"none",cursor:"pointer",padding:"2px 6px",fontSize:16,opacity:c.locked?1:0.35}} title={c.locked?"Locked — will carry over to next day":"Unlocked — tap to lock for carry-over"}>🔒</button>
+                </div>
                 <div style={{fontSize:11,color:C.mut}}>
                   {c.hours?`${c.hours} hrs`:"No hours"} · {c.quantity||1} {parseInt(c.quantity||1)===1?"person":"people"}
                   {(c.photos||[]).length>0&&` · ${c.photos.length} photo${c.photos.length>1?"s":""}`}
+                  {c.locked&&" · Locked"}
                 </div>
               </div>
               <span style={{color:activeId===c.id?C.org:C.mut,fontSize:18,transform:activeId===c.id?"rotate(180deg)":"none",transition:"transform 0.2s",padding:"4px 8px"}}>▼</span>
@@ -2016,22 +2152,57 @@ function WorkLogEditor({job, user, onBack, reportDate}){
           </button>
         )}
 
-        {/* General Notes */}
-        <div style={{background:C.card,border:`1px solid ${C.brd}`,borderRadius:12,padding:16,marginBottom:16}}>
-          <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:10}}>
-            <span style={{fontSize:16}}>📝</span>
-            <span style={{fontWeight:700,fontSize:14}}>General Notes</span>
+        {/* ── Collapsible Report Sections ── */}
+        {[
+          {key:"materials",icon:"🧱",title:"Materials",val:materials,set:setMaterials,placeholder:"Materials used or delivered today..."},
+          {key:"equipment",icon:"🚜",title:"Equipment",val:equipment,set:setEquipment,placeholder:"Equipment on site or rented..."},
+          {key:"generalNotes",icon:"📝",title:"General Notes",val:generalNotes,set:setGeneralNotes,placeholder:"Tap here and use your keyboard mic to dictate..."},
+          {key:"safetyNotes",icon:"🦺",title:"Site Safety Observations",val:safetyNotes,set:setSafetyNotes,placeholder:"Safety observations, incidents, precautions..."},
+          {key:"qualityControl",icon:"✅",title:"Quality Control Observations",val:qualityControl,set:setQualityControl,placeholder:"Quality control notes, inspections performed..."},
+        ].map(sec=>(
+          <div key={sec.key} style={{background:C.card,border:`1px solid ${expandedSections[sec.key]?C.org:C.brd}`,borderRadius:12,marginBottom:10,overflow:"hidden",transition:"border-color 0.2s"}}>
+            <button onClick={()=>toggleSection(sec.key)} style={{width:"100%",display:"flex",alignItems:"center",gap:10,padding:"14px 16px",background:"none",border:"none",cursor:"pointer",textAlign:"left"}}>
+              <span style={{fontSize:16}}>{sec.icon}</span>
+              <span style={{flex:1,fontWeight:700,fontSize:14,color:C.txt}}>{sec.title}</span>
+              <span style={{fontSize:11,color:C.mut}}>{sec.val?"Has entry":"No entry"}</span>
+              <span style={{color:expandedSections[sec.key]?C.org:C.mut,fontSize:18,transform:expandedSections[sec.key]?"rotate(180deg)":"none",transition:"transform 0.2s",padding:"4px 8px"}}>▼</span>
+            </button>
+            {expandedSections[sec.key]&&(
+              <div style={{padding:"0 16px 16px"}}>
+                <textarea value={sec.val} onChange={e=>sec.set(e.target.value)} placeholder={sec.placeholder} rows={3} style={{...fs,resize:"vertical",minHeight:70,lineHeight:1.5}}/>
+              </div>
+            )}
           </div>
-          <textarea value={generalNotes} onChange={e=>setGeneralNotes(e.target.value)} placeholder="Tap here and use your keyboard mic to dictate..." rows={3} style={{...fs,resize:"vertical",minHeight:70,lineHeight:1.5}}/>
-        </div>
+        ))}
 
-        {/* Safety Notes */}
-        <div style={{background:C.card,border:`1px solid ${C.brd}`,borderRadius:12,padding:16,marginBottom:16}}>
-          <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:10}}>
-            <span style={{fontSize:16}}>🦺</span>
-            <span style={{fontWeight:700,fontSize:14}}>Site Safety Observations</span>
-          </div>
-          <textarea value={safetyNotes} onChange={e=>setSafetyNotes(e.target.value)} placeholder="Safety observations, incidents, precautions..." rows={3} style={{...fs,resize:"vertical",minHeight:70,lineHeight:1.5}}/>
+        {/* Survey Section */}
+        <div style={{background:C.card,border:`1px solid ${expandedSections.survey?C.org:C.brd}`,borderRadius:12,marginBottom:10,overflow:"hidden",transition:"border-color 0.2s"}}>
+          <button onClick={()=>toggleSection("survey")} style={{width:"100%",display:"flex",alignItems:"center",gap:10,padding:"14px 16px",background:"none",border:"none",cursor:"pointer",textAlign:"left"}}>
+            <span style={{fontSize:16}}>📋</span>
+            <span style={{flex:1,fontWeight:700,fontSize:14,color:C.txt}}>Survey</span>
+            <span style={{fontSize:11,color:C.mut}}>{survey.some(s=>s.answer)?"Answered":"No entry"}</span>
+            <span style={{color:expandedSections.survey?C.org:C.mut,fontSize:18,transform:expandedSections.survey?"rotate(180deg)":"none",transition:"transform 0.2s",padding:"4px 8px"}}>▼</span>
+          </button>
+          {expandedSections.survey&&(
+            <div style={{padding:"0 16px 16px"}}>
+              {survey.map((s,si)=>(
+                <div key={si} style={{padding:"10px 0",borderTop:si>0?`1px solid ${C.brd}`:"none"}}>
+                  <div style={{fontSize:13,fontWeight:600,color:C.txt,marginBottom:8}}>{si+1}. {s.q}</div>
+                  <div style={{display:"flex",gap:8,marginBottom:6}}>
+                    {["N/A","No","Yes"].map(opt=>(
+                      <button key={opt} onClick={()=>setSurvey(p=>p.map((sv,i)=>i===si?{...sv,answer:sv.answer===opt?"":opt}:sv))}
+                        style={{flex:1,padding:"8px 0",borderRadius:8,border:`1px solid ${s.answer===opt?C.org:C.brd}`,background:s.answer===opt?C.org+"18":"none",color:s.answer===opt?C.org:C.mut,fontSize:13,fontWeight:600,cursor:"pointer"}}>
+                        {opt}
+                      </button>
+                    ))}
+                  </div>
+                  {s.answer==="Yes"&&(
+                    <input value={s.desc||""} onChange={e=>setSurvey(p=>p.map((sv,i)=>i===si?{...sv,desc:e.target.value}:sv))} placeholder="Description..." style={{...fs,padding:"8px 12px"}}/>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
         </div>
 
       </div>
