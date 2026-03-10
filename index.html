@@ -1945,12 +1945,17 @@ function WorkLogEditor({job, user, onBack, reportDate}){
                   {(c.photos||[]).length>0&&` · ${c.photos.length} photo${c.photos.length>1?"s":""}`}
                 </div>
               </div>
-              <span style={{color:C.mut,fontSize:14,transform:activeId===c.id?"rotate(180deg)":"none",transition:"transform 0.2s"}}>▼</span>
+              <span style={{color:activeId===c.id?C.org:C.mut,fontSize:18,transform:activeId===c.id?"rotate(180deg)":"none",transition:"transform 0.2s",padding:"4px 8px"}}>▼</span>
             </button>
 
             {/* Expanded entry area */}
             {activeId===c.id&&(
               <div style={{padding:"0 16px 16px",borderTop:`1px solid ${C.brd}`}}>
+                {/* Collapse bar — easy tap target to close */}
+                <button onClick={()=>setActiveId(null)} style={{width:"100%",padding:"10px 0",background:"none",border:"none",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",gap:6}}>
+                  <span style={{fontSize:11,color:C.mut,fontWeight:600}}>Collapse</span>
+                  <span style={{fontSize:12,color:C.mut}}>▲</span>
+                </button>
                 <div style={{marginTop:14,marginBottom:14}}>
                   <label style={{display:"block",fontSize:12,color:C.lt,fontWeight:600,marginBottom:4}}>Work Description</label>
                   <textarea value={c.description} onChange={e=>updateContractor(c.id,"description",e.target.value)} placeholder="Tap here and use your keyboard mic to dictate..." rows={3} style={{...fs,resize:"vertical",minHeight:70,lineHeight:1.5}}/>
