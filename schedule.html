@@ -291,7 +291,7 @@ function showDay(d){
                 html+='<div class="evt-actions">';
                 html+='<button class="btn-edit" onclick="editInsp(\''+e.id+'\',\''+e.inspection_date+'\',\''+e.inspection_time.substring(0,5)+'\')">Edit</button>';
                 html+='<button class="btn-cancel" onclick="cancelInsp(\''+e.id+'\',\''+e.project+'\',\'Regular\',\''+e.inspection_date+'\',\''+e.inspection_time.substring(0,5)+'\')">Cancel</button>';
-                if(isAdmin && e.status!=='scheduled') html+='<button class="btn-scheduled" onclick="scheduleInsp(\''+e.id+'\')">Scheduled</button>';
+                if(isAdmin && e.status!=='scheduled') html+='<button class="btn-scheduled" onclick="scheduleInsp(\''+e.id+'\')">Schedule</button>';
                 html+='</div>';
             }
             html+='</div>';
