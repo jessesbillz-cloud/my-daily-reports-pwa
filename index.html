@@ -590,12 +590,49 @@ function CreateJob({user, onBack, onCreated}){
   const [savingTpl,setSavingTpl]=useState(false);
   const [tplSaved,setTplSaved]=useState(false); // whether current parse was saved
   const [jobType,setJobType]=useState("template"); // "template" or "worklog"
+  // Company autocomplete for job-level company (whose template we use)
+  const [jobCompanyName,setJobCompanyName]=useState("");
+  const [jobCompanyMatches,setJobCompanyMatches]=useState([]);
+  const [jobSelectedCompany,setJobSelectedCompany]=useState(null); // {id,name}
+  const [jobCompanyTemplates,setJobCompanyTemplates]=useState([]);
+  const jobCompanyDebounce=useRef(null);
   const trackParseAttempt=()=>{};
 
   // Load saved templates on mount
   useEffect(()=>{
     db.getSavedTemplates(user.id).then(t=>{setSavedTpls(t);setLoadingSaved(false);}).catch(()=>setLoadingSaved(false));
   },[user.id]);
+
+  // Company name search — debounced lookup as user types
+  const handleJobCompanyChange=(val)=>{
+    setJobCompanyName(val);
+    setJobSelectedCompany(null);
+    setJobCompanyTemplates([]);
+    if(jobCompanyDebounce.current)clearTimeout(jobCompanyDebounce.current);
+    if(val.trim().length<2){setJobCompanyMatches([]);return;}
+    jobCompanyDebounce.current=setTimeout(async()=>{
+      try{
+        const matches=await db.searchCompanies(val.trim());
+        setJobCompanyMatches(matches);
+      }catch(e){setJobCompanyMatches([]);}
+    },400);
+  };
+
+  const selectJobCompany=async(company)=>{
+    setJobSelectedCompany(company);
+    setJobCompanyName(company.name);
+    setJobCompanyMatches([]);
+    // Fetch company templates
+    try{
+      const tpls=await db.getCompanyTemplates(company.id);
+      setJobCompanyTemplates(tpls);
+    }catch(e){setJobCompanyTemplates([]);}
+  };
+
+  const clearJobCompany=()=>{
+    setJobSelectedCompany(null);
+    setJobCompanyTemplates([]);
+  };
 
   const DS=["Mon","Tue","Wed","Thu","Fri","Sat","Sun"];
   const TS=["12:00 PM","1:00 PM","2:00 PM","3:00 PM","4:00 PM","5:00 PM","6:00 PM","7:00 PM","8:00 PM","9:00 PM"];
@@ -826,7 +863,7 @@ function CreateJob({user, onBack, onCreated}){
       const lockFields=[...fields.filter(f=>f.mode==="lock"),...fields.filter(f=>f.mode==="edit"&&f.lockAfterCreate)].map(f=>({name:f.name,value:f.value,...coords(f)}));
       const autoFields=fields.filter(f=>f.mode==="auto-date"||f.mode==="auto-num").map(f=>({name:f.name,value:f.value,originalValue:f.value||"",autoFill:f.mode==="auto-date"?"date":"increment",...coords(f)}));
       const fc={editable:[...editFields,...autoFields],locked:lockFields,filenameConvention:convention};
-      const job=await db.mkJob({user_id:user.id,name:jn.trim(),site_address:addr.trim()||null,job_type:jobType,report_filename_pattern:filePattern,schedule:es,schedule_days:es==="custom"?days:[],reminder_enabled:remOn,reminder_time:remOn?remT:null,reminder_hours_before:remOn?remH:null,scheduling_enabled:schedOn,field_config:fc});
+      const job=await db.mkJob({user_id:user.id,name:jn.trim(),site_address:addr.trim()||null,company_id:jobSelectedCompany?.id||null,job_type:jobType,report_filename_pattern:filePattern,schedule:es,schedule_days:es==="custom"?days:[],reminder_enabled:remOn,reminder_time:remOn?remT:null,reminder_hours_before:remOn?remH:null,scheduling_enabled:schedOn,field_config:fc});
       if(tf&&job?.id){
         try{
           const ext=tf.name.split(".").pop().toLowerCase();
@@ -902,6 +939,38 @@ function CreateJob({user, onBack, onCreated}){
         {/* Site Address — optional */}
         <div style={{marginBottom:20}}><label style={ls}>Site Address</label><input type="text" value={addr} onChange={e=>setAddr(e.target.value)} style={fs}/></div>
 
+        {/* Company — links to company template library */}
+        <div style={{marginBottom:20,position:"relative"}}>
+          <label style={ls}>Company</label>
+          <input type="text" value={jobCompanyName} onChange={e=>handleJobCompanyChange(e.target.value)} placeholder="Type to search companies..." style={fs}/>
+          <div style={{fontSize:11,color:C.mut,marginTop:4}}>The company this job belongs to. Templates from this company will be available below.</div>
+          {/* Company match dropdown */}
+          {jobCompanyMatches.length>0&&!jobSelectedCompany&&(
+            <div style={{position:"absolute",left:0,right:0,top:"100%",zIndex:50,background:C.card,border:`1px solid ${C.brd}`,borderRadius:10,marginTop:4,overflow:"hidden",boxShadow:"0 8px 24px rgba(0,0,0,0.15)"}}>
+              {jobCompanyMatches.map(m=>(
+                <button key={m.id} onClick={()=>selectJobCompany(m)} style={{display:"flex",alignItems:"center",gap:10,width:"100%",padding:"12px 14px",background:"transparent",border:"none",borderBottom:`1px solid ${C.brd}`,cursor:"pointer",textAlign:"left"}}>
+                  <span style={{fontSize:18}}>🏢</span>
+                  <div style={{flex:1}}>
+                    <div style={{fontSize:14,fontWeight:600,color:C.txt}}>{m.name}</div>
+                    <div style={{fontSize:11,color:C.mut}}>Tap to select — their templates will be available</div>
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
+          {/* Selected company badge */}
+          {jobSelectedCompany&&(
+            <div style={{display:"flex",alignItems:"center",gap:8,marginTop:6,padding:"8px 12px",background:"rgba(232,116,42,0.08)",border:"1px solid rgba(232,116,42,0.25)",borderRadius:8}}>
+              <span style={{fontSize:14}}>🏢</span>
+              <div style={{flex:1}}>
+                <div style={{fontSize:13,fontWeight:600,color:C.txt}}>{jobSelectedCompany.name}</div>
+                {jobCompanyTemplates.length>0&&<div style={{fontSize:11,color:C.ok}}>{jobCompanyTemplates.length} template{jobCompanyTemplates.length>1?"s":""} available</div>}
+              </div>
+              <button onClick={clearJobCompany} style={{background:"none",border:"none",color:C.mut,cursor:"pointer",fontSize:16,padding:"0 4px"}}>✕</button>
+            </div>
+          )}
+        </div>
+
         {/* Job Type Toggle */}
         <div style={{marginBottom:20}}>
           <label style={ls}>Report Type</label>
@@ -951,15 +1020,39 @@ function CreateJob({user, onBack, onCreated}){
         <div style={{marginBottom:20}}>
           <label style={ls}>Template</label>
 
-          {/* Saved Templates picker */}
-          {!tf&&savedTpls.length>0&&(
+          {/* Saved & Company Templates picker */}
+          {!tf&&(savedTpls.length>0||jobCompanyTemplates.length>0)&&(
             <div style={{marginBottom:12}}>
               <button onClick={()=>setShowSaved(!showSaved)} style={{width:"100%",padding:"14px 18px",background:showSaved?C.blu+"18":C.card,border:`2px solid ${C.blu}`,borderRadius:12,color:C.blu,fontSize:15,fontWeight:700,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
-                <span>📋 Use a Saved Template ({savedTpls.length})</span>
+                <span>📋 Use a Saved Template ({savedTpls.length+jobCompanyTemplates.length})</span>
                 <span style={{fontSize:14}}>{showSaved?"▲":"▼"}</span>
               </button>
               {showSaved&&(
-                <div style={{marginTop:8,background:C.inp,border:`1px solid ${C.brd}`,borderRadius:10,overflow:"hidden",maxHeight:250,overflowY:"auto"}}>
+                <div style={{marginTop:8,background:C.inp,border:`1px solid ${C.brd}`,borderRadius:10,overflow:"hidden",maxHeight:300,overflowY:"auto"}}>
+                  {/* Company templates first */}
+                  {jobCompanyTemplates.length>0&&(
+                    <div style={{padding:"8px 14px",borderBottom:`1px solid ${C.brd}`,background:"rgba(232,116,42,0.06)"}}>
+                      <div style={{fontSize:11,fontWeight:700,color:C.org,textTransform:"uppercase",letterSpacing:1}}>🏢 {jobSelectedCompany?.name||"Company"} Templates</div>
+                    </div>
+                  )}
+                  {jobCompanyTemplates.map(t=>(
+                    <div key={"co-"+t.id} style={{padding:"12px 16px",borderBottom:`1px solid ${C.brd}`,display:"flex",alignItems:"center",gap:10}}>
+                      <div onClick={()=>useSavedTemplate({...t,name:t.template_name||t.name||t.file_name})} style={{display:"flex",alignItems:"center",gap:10,flex:1,cursor:"pointer"}}>
+                        <span style={{fontSize:18}}>🏢</span>
+                        <div style={{flex:1}}>
+                          <div style={{fontSize:13,fontWeight:600,color:C.txt}}>{t.template_name||t.name||t.file_name||"Template"}</div>
+                          <div style={{fontSize:11,color:C.mut}}>{(t.field_config||[]).length} fields{t.file_type?" — "+t.file_type.toUpperCase():""}</div>
+                        </div>
+                        <span style={{color:C.org,fontSize:12,fontWeight:600}}>Use</span>
+                      </div>
+                    </div>
+                  ))}
+                  {/* User's saved templates */}
+                  {savedTpls.length>0&&jobCompanyTemplates.length>0&&(
+                    <div style={{padding:"8px 14px",borderBottom:`1px solid ${C.brd}`,background:"rgba(90,143,192,0.06)"}}>
+                      <div style={{fontSize:11,fontWeight:700,color:C.blu,textTransform:"uppercase",letterSpacing:1}}>📋 Your Saved Templates</div>
+                    </div>
+                  )}
                   {savedTpls.map(t=>(
                     <div key={t.id} style={{padding:"12px 16px",borderBottom:`1px solid ${C.brd}`,display:"flex",alignItems:"center",gap:10}}>
                       <div onClick={()=>useSavedTemplate(t)} style={{display:"flex",alignItems:"center",gap:10,flex:1,cursor:"pointer"}}>
@@ -4497,12 +4590,6 @@ function SetupWizard({user, onComplete}){
   const [companyMatches,setCompanyMatches]=useState([]);
   const [selectedCompany,setSelectedCompany]=useState(null); // {id,name} if user chose to join
   const [companySearching,setCompanySearching]=useState(false);
-  // Template picker state (shown after company join when templates exist)
-  const [showTemplatePicker,setShowTemplatePicker]=useState(false);
-  const [availableTemplates,setAvailableTemplates]=useState([]);
-  const [selectedTemplates,setSelectedTemplates]=useState(new Set());
-  const [templatePickerLoading,setTemplatePickerLoading]=useState(false);
-
   const companyDebounce=useRef(null);
   const SECTION_ORDER=["parsing","cleanDoc","notes","photos","bestPractices"];
   const toggleSection=(key)=>{setReadSections(p=>({...p,[key]:true}));setOpenSections(p=>{const wasOpen=p[key];if(wasOpen){const idx=SECTION_ORDER.indexOf(key);const nextKey=idx>=0&&idx<SECTION_ORDER.length-1?SECTION_ORDER[idx+1]:null;const next={};if(nextKey)next[nextKey]=true;return next;}return{[key]:true};});};
@@ -4607,52 +4694,11 @@ function SetupWizard({user, onComplete}){
       }
       setSlug(slugVal);
 
-      // If joining an existing company, check for templates to offer
-      if(selectedCompany&&companyId){
-        try{
-          const companyTpls=await db.getCompanyTemplates(companyId);
-          if(companyTpls.length>0){
-            // Show template picker instead of auto-copying all
-            setAvailableTemplates(companyTpls);
-            setSelectedTemplates(new Set(companyTpls.map(t=>t.id))); // all selected by default
-            setShowTemplatePicker(true);
-            setSaving(false);
-            return; // don't finish wizard yet — template picker will call finishWizard
-          }
-        }catch(e){console.error("Fetch company templates:",e);}
-      }
-
-      await finishWizard([]);
-    }catch(e){alert("Error saving profile: "+e.message);}
-    finally{setSaving(false);}
-  };
-
-  // Called after template picker confirmation (or directly if no templates)
-  const finishWizard=async(templatesToCopy)=>{
-    setSaving(true);
-    try{
-      if(templatesToCopy&&templatesToCopy.length>0){
-        await db.copyCompanyTemplatesToUser(templatesToCopy,user.id);
-      }
+      // Mark wizard complete
       try{await db.upsertProfile({id:user.id,setup_complete:true,wizard_completed_at:new Date().toISOString()});}catch(_){}
       onComplete();
-    }catch(e){alert("Error finishing setup: "+e.message);}
+    }catch(e){alert("Error saving profile: "+e.message);}
     finally{setSaving(false);}
-  };
-
-  const confirmTemplatePicker=async()=>{
-    setTemplatePickerLoading(true);
-    const chosen=availableTemplates.filter(t=>selectedTemplates.has(t.id));
-    await finishWizard(chosen);
-    setTemplatePickerLoading(false);
-  };
-
-  const toggleTemplateSelection=(id)=>{
-    setSelectedTemplates(prev=>{
-      const next=new Set(prev);
-      if(next.has(id))next.delete(id);else next.add(id);
-      return next;
-    });
   };
 
   const next=()=>{if(step<WIZARD_STEPS.length-1)setStep(step+1);};
@@ -4668,38 +4714,6 @@ function SetupWizard({user, onComplete}){
         <span style={{fontSize:12,color:C.mut,fontWeight:600}}>Step {step+1} of {WIZARD_STEPS.length}</span>
       </div>
       <div style={{height:3,background:C.brd}}><div style={{height:3,background:C.org,width:pct+"%",transition:"width 0.3s ease"}}/></div>
-
-      {/* Template Picker Modal */}
-      {showTemplatePicker&&(
-        <div style={{position:"fixed",inset:0,zIndex:999,background:"rgba(0,0,0,0.6)",display:"flex",alignItems:"center",justifyContent:"center",padding:20}}>
-          <div style={{background:C.card,border:`1px solid ${C.brd}`,borderRadius:16,maxWidth:480,width:"100%",maxHeight:"80vh",overflow:"auto",padding:24}}>
-            <div style={{textAlign:"center",marginBottom:20}}>
-              <span style={{fontSize:32}}>📋</span>
-              <h2 style={{fontSize:20,fontWeight:700,marginTop:8}}>Company Templates</h2>
-              <p style={{fontSize:13,color:C.mut,marginTop:6,lineHeight:1.5}}>Your company has report templates ready to go. Select the ones you want added to your account.</p>
-            </div>
-            <div style={{display:"flex",flexDirection:"column",gap:8,marginBottom:20}}>
-              {availableTemplates.map(t=>(
-                <button key={t.id} onClick={()=>toggleTemplateSelection(t.id)} style={{display:"flex",alignItems:"center",gap:12,padding:"14px 16px",background:selectedTemplates.has(t.id)?"rgba(232,116,42,0.08)":C.inp,border:`1px solid ${selectedTemplates.has(t.id)?"rgba(232,116,42,0.4)":C.brd}`,borderRadius:10,cursor:"pointer",textAlign:"left",transition:"all 0.15s"}}>
-                  <div style={{width:22,height:22,borderRadius:6,border:`2px solid ${selectedTemplates.has(t.id)?C.org:C.brd}`,background:selectedTemplates.has(t.id)?C.org:"transparent",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>
-                    {selectedTemplates.has(t.id)&&<span style={{color:"#fff",fontSize:14,fontWeight:700}}>✓</span>}
-                  </div>
-                  <div style={{flex:1}}>
-                    <div style={{fontSize:14,fontWeight:600,color:C.txt}}>{t.template_name||t.name||t.file_name||"Report Template"}</div>
-                    {t.file_type&&<div style={{fontSize:11,color:C.mut,marginTop:2}}>{t.file_type.toUpperCase()} template</div>}
-                  </div>
-                </button>
-              ))}
-            </div>
-            <button onClick={confirmTemplatePicker} disabled={templatePickerLoading} style={{width:"100%",padding:"14px 0",background:C.org,border:"none",borderRadius:10,color:"#fff",fontSize:15,fontWeight:700,cursor:templatePickerLoading?"default":"pointer",opacity:templatePickerLoading?0.7:1}}>
-              {templatePickerLoading?"Setting up...":(selectedTemplates.size>0?`Add ${selectedTemplates.size} Template${selectedTemplates.size>1?"s":""} & Finish`:"Skip & Finish Without Templates")}
-            </button>
-            <button onClick={()=>{setShowTemplatePicker(false);finishWizard([]);}} style={{width:"100%",padding:"10px 0",background:"transparent",border:"none",color:C.mut,fontSize:13,cursor:"pointer",marginTop:8}}>
-              Skip for now
-            </button>
-          </div>
-        </div>
-      )}
 
       <div style={{maxWidth:560,margin:"0 auto",padding:"20px 16px 40px"}}>
 
