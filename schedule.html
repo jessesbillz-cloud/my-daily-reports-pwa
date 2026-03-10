@@ -75,20 +75,9 @@ details[open] .collapsible-summary::after { content: '−'; }
 </style>
 </head>
 <body>
-<!-- BRANDING + SHARE BUTTON AT TOP -->
-<div style="display:flex;align-items:center;justify-content:space-between;padding:12px 0;margin-bottom:8px;">
-    <div style="display:flex;align-items:center;gap:10px;">
-        <img src="logo.jpg" alt="Logo" style="width:45px;height:45px;border-radius:8px;">
-        <div>
-            <div style="font-size:18px;font-weight:bold;color:#5a8fc0;">My Daily Reports</div>
-            <button style="padding:4px 12px;font-size:11px;font-weight:600;color:#fff;background:#e8742a;border:none;border-radius:4px;cursor:pointer;margin-top:2px;" onclick="window.open('https://mydailyreports.org','_blank')">Learn More</button>
-        </div>
-    </div>
-    <button onclick="document.getElementById('shareCalSection').style.display=document.getElementById('shareCalSection').style.display==='none'?'block':'none';" style="padding:8px 14px;font-size:12px;font-weight:700;color:#fff;background:#5a8fc0;border:none;border-radius:20px;cursor:pointer;white-space:nowrap;">Share Calendar</button>
-</div>
-
+<!-- SCHEDULING HEADER (primary) -->
 <div style="text-align:center;padding:4px 0;margin-bottom:8px;">
-<a href="hub.html" style="color:#5a8fc0;text-decoration:none;font-size:13px;font-weight:600;border:1px solid #5a8fc0;padding:6px 14px;border-radius:20px;background:rgba(90,143,192,0.08);">&larr; Back to Project List</a>
+<a id="backToHub" href="hub.html" style="color:#5a8fc0;text-decoration:none;font-size:13px;font-weight:600;border:1px solid #5a8fc0;padding:6px 14px;border-radius:20px;background:rgba(90,143,192,0.08);">&larr; Back to Project List</a>
 </div>
 <div class="header">
     <img src="logo.jpg" alt="Logo" style="width:45px;height:45px;border-radius:6px;">
@@ -96,6 +85,9 @@ details[open] .collapsible-summary::after { content: '−'; }
         <h2>Scheduling Request</h2>
         <p id="projectSubtitle">Loading...</p>
     </div>
+</div>
+<div style="display:flex;justify-content:center;gap:8px;margin-bottom:12px;">
+    <button onclick="document.getElementById('shareCalSection').style.display=document.getElementById('shareCalSection').style.display==='none'?'block':'none';" style="padding:8px 14px;font-size:12px;font-weight:700;color:#fff;background:#5a8fc0;border:none;border-radius:20px;cursor:pointer;white-space:nowrap;">Share Calendar</button>
 </div>
 <div class="tabs" id="tabBar">
 <div class="tab active" onclick="switchTab('calendar')">Calendar</div>
@@ -135,6 +127,12 @@ details[open] .collapsible-summary::after { content: '−'; }
 <details class="collapsible-section"><summary class="collapsible-summary">Outlook Web (outlook.com)</summary><div style="padding:10px;font-size:14px;color:#ccc;line-height:1.5;">1. Go to outlook.com &rarr; Calendar<br>2. Click "Add calendar" in the left sidebar<br>3. Select "Subscribe from web"<br>4. Paste the URL above<br>5. Name it and click "Import"</div></details>
 </div>
 </div>
+</div>
+<!-- BRANDING (below the calendar) -->
+<div style="display:flex;align-items:center;justify-content:center;gap:10px;padding:12px 0;margin-bottom:8px;">
+    <img src="logo.jpg" alt="Logo" style="width:30px;height:30px;border-radius:6px;">
+    <span style="font-size:13px;color:#888;">Powered by</span>
+    <a href="https://mydailyreports.org" target="_blank" style="font-size:13px;font-weight:700;color:#e8742a;text-decoration:none;">My Daily Reports</a>
 </div>
 <div id="requestView" class="form-wrap">
 <label class="field-label">Photos or PDFs *</label>
@@ -233,12 +231,26 @@ details[open] .collapsible-summary::after { content: '−'; }
 var SB='https://wluvkmpncafugdbunlkw.supabase.co';
 var params=new URLSearchParams(window.location.search);
 var hashSlug=window.location.hash?window.location.hash.substring(1):'';
-var PROJ=params.get('project')||hashSlug||'Demo';
+var PROJ=params.get('project')||hashSlug||'';
+var inspSlug=params.get('i')||'';
 var cleanName=PROJ.replace(/-/g,' ');
-document.getElementById('projectSubtitle').textContent=cleanName;
-document.title=cleanName+' - Scheduling Request';
 var AK='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndsdXZrbXBuY2FmdWdkYnVubGt3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzIzMDU1MTUsImV4cCI6MjA4Nzg4MTUxNX0.HZpQ2xVGpf4EQ0BVDmIEuPqW5T_eNG5OqBNAqT03rH8';
 var isAdmin=params.get('admin')==='true';
+
+// If no project selected, redirect to hub to pick one
+if(!PROJ && inspSlug){
+    window.location.href='hub.html?i='+encodeURIComponent(inspSlug);
+} else if(!PROJ && !inspSlug){
+    document.getElementById('projectSubtitle').textContent='No project selected';
+}
+
+// Set up back button with inspector slug
+if(inspSlug){
+    document.getElementById('backToHub').href='hub.html?i='+encodeURIComponent(inspSlug);
+}
+
+document.getElementById('projectSubtitle').textContent=cleanName||'Loading...';
+document.title=(cleanName||'Schedule')+' - Scheduling Request';
 var allFiles=[], inspType='', inspDur='', cM=new Date().getMonth(), cY=new Date().getFullYear(), mD={};
 var savedContacts=[];
 function handleFileSelection(input) {
@@ -507,6 +519,8 @@ function resetForm(){ location.reload(); }
 loadContacts();
 renderCal();
 loadMD();
+// Auto-refresh calendar data every 30 seconds so status changes appear
+setInterval(function(){ loadMD(); }, 30000);
 </script>
 </body>
 </html>
