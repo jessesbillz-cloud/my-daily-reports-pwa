@@ -130,13 +130,37 @@ serve(async (req) => {
       );
     }
 
-    // Send email notifications if recipients provided
-    if (emailRecipients.length > 0) {
-      const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY");
-      const FROM_EMAIL =
-        Deno.env.get("FROM_EMAIL") || "reports@mydailyreports.com";
+    // Send email notifications — always notify the job owner + any checked recipients
+    const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY");
+    const FROM_EMAIL =
+      Deno.env.get("FROM_EMAIL") || "reports@mydailyreports.org";
 
-      if (RESEND_API_KEY) {
+    if (RESEND_API_KEY) {
+      // Look up the job owner's email via the profile slug (project = slug)
+      let ownerEmail = "";
+      try {
+        const { data: profile } = await supabase
+          .from("profiles")
+          .select("id")
+          .eq("slug", project)
+          .single();
+        if (profile) {
+          const { data: authUser } = await supabase.auth.admin.getUserById(
+            profile.id
+          );
+          if (authUser?.user?.email) ownerEmail = authUser.user.email;
+        }
+      } catch (e) {
+        console.error("Owner lookup failed:", e);
+      }
+
+      // Combine owner email + checked recipients, deduplicate
+      const allRecipients = [...emailRecipients];
+      if (ownerEmail && !allRecipients.includes(ownerEmail)) {
+        allRecipients.push(ownerEmail);
+      }
+
+      if (allRecipients.length > 0) {
         const typeLabel = inspectionTypes.join(", ");
         const timeLabel =
           flexibleDisplay === "flexible"
@@ -184,7 +208,7 @@ serve(async (req) => {
         `;
 
         try {
-          await fetch("https://api.resend.com/emails", {
+          const emailRes = await fetch("https://api.resend.com/emails", {
             method: "POST",
             headers: {
               "Content-Type": "application/json",
@@ -192,14 +216,14 @@ serve(async (req) => {
             },
             body: JSON.stringify({
               from: `My Daily Reports <${FROM_EMAIL}>`,
-              to: emailRecipients,
+              to: allRecipients,
               subject: `Scheduling Request: ${project.replace(/-/g, " ")} — ${typeLabel} on ${inspectionDate}`,
               html: emailHtml,
             }),
           });
+          console.log("Email send result:", emailRes.status, await emailRes.text());
         } catch (emailErr) {
           console.error("Email send error:", emailErr);
-          // Don't fail the whole request if email fails
         }
       }
     }
