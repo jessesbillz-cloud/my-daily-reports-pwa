@@ -1320,7 +1320,6 @@ function WorkLogEditor({job, user, onBack, reportDate}){
     let hasTemplate=false;
 
     // ── Check for uploaded template to use as background ──
-    let tplInfoBarY=0; // PDF y-coord of the info bar (for overlaying date/prepared by)
     try{
       const tpl=await db.getTemplate(job.id);
       if(tpl&&tpl.storage_path){
@@ -1334,54 +1333,64 @@ function WorkLogEditor({job, user, onBack, reportDate}){
           doc.addPage(copiedPage);
           page=doc.getPages()[0];
           hasTemplate=true;
-          // Analyze template text to find where branding header + info bar end
-          // We want to preserve: dark header (logo+name+address) + orange info bar (Date/Job#/Prepared By)
-          // Then white-out everything below that
-          let headerCutoff=200; // generous default: keep top 200pt
+
+          // Analyze template text to find the dark header bar and the info bar below it
+          let darkHeaderBottom=0; // bottom of dark header (logo area) in top-down coords
+          let infoBarTop=0;      // top of info bar in top-down coords
+          let infoBarBottom=0;   // bottom of info bar in top-down coords
           try{
             const textItems=await extractPdfTextStructure(new Uint8Array(tplBytes));
             const pg1Items=textItems.filter(t=>t.page===1).sort((a,b)=>a.y-b.y);
-            if(pg1Items.length>4){
-              // Find the info bar items (Date, Job #, Prepared By) — they're typically in the
-              // first ~200pt and contain keywords like "Date", "Job", "Prepared"
-              let infoBarBottom=0;
-              for(const item of pg1Items){
-                const txt=(item.str||"").toLowerCase();
-                if(item.y<H*0.35&&(txt.includes("date")||txt.includes("job")||txt.includes("prepared"))){
-                  const bottom=item.y+item.h;
-                  if(bottom>infoBarBottom)infoBarBottom=bottom;
-                }
-              }
-              if(infoBarBottom>0){
-                headerCutoff=infoBarBottom+12; // 12pt padding below info bar
-                tplInfoBarY=H-infoBarBottom+4; // PDF y-coord for overlaying text on info bar
-              }else{
-                // Fallback: find the biggest gap in the top 40% of the page
-                let bestGapEnd=0;
-                for(let i=0;i<pg1Items.length-1;i++){
-                  const gap=pg1Items[i+1].y-(pg1Items[i].y+pg1Items[i].h);
-                  const itemBottom=pg1Items[i].y+pg1Items[i].h;
-                  if(gap>20&&itemBottom<H*0.4&&itemBottom>bestGapEnd){
-                    bestGapEnd=itemBottom;
-                  }
-                }
-                if(bestGapEnd>0)headerCutoff=bestGapEnd+12;
-              }
+            console.log("[tpl] pg1 text items:",pg1Items.length,pg1Items.slice(0,10).map(t=>({str:t.str,y:Math.round(t.y),h:Math.round(t.h)})));
+
+            // Find info bar items by keyword
+            const infoItems=pg1Items.filter(t=>{
+              const txt=(t.str||"").toLowerCase();
+              return t.y<H*0.35&&(txt.includes("date")||txt.includes("job")||txt.includes("prepared")||txt.match(/^\d{2}[\/-]\d/));
+            });
+            // Find dark header items (company name, address — before info bar)
+            const headerItems=pg1Items.filter(t=>t.y<H*0.25&&!infoItems.includes(t));
+
+            if(headerItems.length>0){
+              darkHeaderBottom=Math.max(...headerItems.map(t=>t.y+t.h));
             }
+            if(infoItems.length>0){
+              infoBarTop=Math.min(...infoItems.map(t=>t.y));
+              infoBarBottom=Math.max(...infoItems.map(t=>t.y+t.h));
+            }
+            console.log("[tpl] darkHeaderBottom:",darkHeaderBottom,"infoBarTop:",infoBarTop,"infoBarBottom:",infoBarBottom);
           }catch(e){console.log("Template text analysis failed:",e);}
-          // White-out everything below the header+info bar
-          const clearY=H-headerCutoff;
-          page.drawRectangle({x:0,y:0,width:W,height:clearY,color:rgb(1,1,1)});
-          y=clearY-10;
-          // Overlay dynamic Date and Prepared By on the info bar
-          if(tplInfoBarY>0){
-            // White-out the old date/job#/prepared by text values (keep labels visible)
-            // Overlay our date after "Date" label
-            const dateStr=new Date(todayISO+"T12:00:00").toLocaleDateString("en-US",{weekday:"short",month:"2-digit",day:"2-digit",year:"numeric",timeZone:tz});
-            page.drawText(dateStr,{x:M+50,y:tplInfoBarY,size:10,font:fontB,color:rgb(1,1,1)});
-            // Overlay prepared by name near the right area
-            if(userName)page.drawText(userName,{x:W-M-font.widthOfTextAtSize(userName,10)-10,y:tplInfoBarY,size:10,font:fontB,color:rgb(1,1,1)});
-          }
+
+          // Use detected positions, with sensible fallbacks
+          if(!infoBarBottom)infoBarBottom=200;
+          if(!infoBarTop)infoBarTop=darkHeaderBottom||150;
+          if(!darkHeaderBottom)darkHeaderBottom=infoBarTop-5;
+
+          // White-out everything from just below the dark header (covering the old info bar + all content below)
+          const clearTopY=H-darkHeaderBottom; // PDF y-coord of bottom edge of dark header
+          page.drawRectangle({x:0,y:0,width:W,height:clearTopY,color:rgb(1,1,1)});
+
+          // Redraw a fresh info bar (orange/dark bar with our own Date / Job # / Prepared By)
+          const infoBarH=28;
+          const infoBarPdfY=clearTopY-infoBarH;
+          page.drawRectangle({x:0,y:infoBarPdfY,width:W,height:infoBarH,color:rgb(.15,.15,.15)});
+
+          const dateStr=new Date(todayISO+"T12:00:00").toLocaleDateString("en-US",{weekday:"short",month:"2-digit",day:"2-digit",year:"numeric",timeZone:tz});
+          const infoTextY=infoBarPdfY+9;
+          // Date
+          page.drawText("Date",{x:M,y:infoTextY,size:9,font:fontB,color:rgb(.6,.6,.6)});
+          page.drawText(dateStr,{x:M+30,y:infoTextY,size:9,font:fontB,color:rgb(1,1,1)});
+          // Job #
+          const jobNum=job.job_number||job.name||"";
+          const jx=W*0.38;
+          page.drawText("Job #",{x:jx,y:infoTextY,size:9,font:fontB,color:rgb(.6,.6,.6)});
+          page.drawText(jobNum,{x:jx+34,y:infoTextY,size:9,font:fontB,color:rgb(1,1,1)});
+          // Prepared By
+          const px=W*0.62;
+          page.drawText("Prepared By",{x:px,y:infoTextY,size:9,font:fontB,color:rgb(.6,.6,.6)});
+          page.drawText(userName||"—",{x:px+66,y:infoTextY,size:9,font:fontB,color:rgb(1,1,1)});
+
+          y=infoBarPdfY-10; // start dynamic content below the fresh info bar
         }
       }
     }catch(e){console.log("No template found, using default header");}
