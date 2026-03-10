@@ -1418,66 +1418,104 @@ function WorkLogEditor({job, user, onBack, reportDate}){
       y-=58;
     }
 
-    // ── Work Logs Table ──
-    page.drawRectangle({x:M,y:y-24,width:CW,height:24,color:rgb(.3,.3,.3)});
-    page.drawText("WORK LOGS",{x:M+8,y:y-16,size:11,font:fontB,color:rgb(1,1,1)});
-    y-=28;
+    // ── Work Logs — Raken-style table ──
+    // Section header bar
+    ensureSpace(40);
+    page.drawRectangle({x:M,y:y-30,width:CW,height:30,color:rgb(.45,.45,.45)});
+    page.drawText("Work Logs",{x:M+(CW-fontB.widthOfTextAtSize("Work Logs",16))/2,y:y-22,size:16,font:fontB,color:rgb(.92,.57,.17)});
+    y-=36;
 
-    // Table header
-    const cols=[{label:"Name",w:120},{label:"Description",w:CW-120-60-70},{label:"Qty",w:60},{label:"Hours",w:70}];
-    let cx=M;
-    page.drawRectangle({x:M,y:y-20,width:CW,height:20,color:rgb(.95,.95,.95)});
-    cols.forEach(c=>{page.drawText(c.label,{x:cx+4,y:y-14,size:9,font:fontB,color:rgb(.3,.3,.3)});cx+=c.w;});
-    y-=22;
+    // Column header row
+    const nameW=150,qtyW=65,hrsW=80;
+    const descW=CW-nameW-qtyW-hrsW;
+    page.drawRectangle({x:M,y:y-22,width:CW,height:22,color:rgb(.97,.97,.97)});
+    page.drawLine({start:{x:M,y:y-22},end:{x:M+CW,y:y-22},thickness:.5,color:rgb(.85,.85,.85)});
+    page.drawText("Name",{x:M+10,y:y-15,size:10,font:fontB,color:rgb(.3,.3,.3)});
+    page.drawText("Description",{x:M+nameW+10,y:y-15,size:10,font:fontB,color:rgb(.3,.3,.3)});
+    page.drawText("Quantity",{x:M+nameW+descW+8,y:y-15,size:10,font:fontB,color:rgb(.3,.3,.3)});
+    page.drawText("Total Hours",{x:M+nameW+descW+qtyW+6,y:y-15,size:10,font:fontB,color:rgb(.3,.3,.3)});
+    y-=24;
 
     let totalHrs=0;
+    const lineH=15; // line height for description text
+    const descFontSz=11;
+    const attrSz=8; // attribution line size
+
     contractors.forEach((c,ri)=>{
       const hrs=parseFloat(c.hours)||0;
       const qty=parseInt(c.quantity)||1;
       totalHrs+=hrs*qty;
 
-      // Wrap description text
+      // Wrap description text at larger font size
       const descLines=[];
       if(c.description){
-        const words=c.description.split(" ");
-        let line="";
-        const maxW=cols[1].w-10;
-        words.forEach(w=>{
-          const test=line?line+" "+w:w;
-          if(font.widthOfTextAtSize(test,9)>maxW&&line){descLines.push(line);line=w;}
-          else line=test;
+        // Split on newlines first, then wrap each line
+        c.description.split("\n").forEach(paragraph=>{
+          if(!paragraph.trim()){descLines.push("");return;}
+          const words=paragraph.split(" ");
+          let line="";
+          const maxW=descW-16;
+          words.forEach(w=>{
+            const test=line?line+" "+w:w;
+            if(font.widthOfTextAtSize(test,descFontSz)>maxW&&line){descLines.push(line);line=w;}
+            else line=test;
+          });
+          if(line)descLines.push(line);
         });
-        if(line)descLines.push(line);
       }
       if(descLines.length===0)descLines.push("—");
 
-      const rowH=Math.max(18,descLines.length*12+6);
+      // Attribution line: "UserName | date | time"
+      const now=new Date();
+      const attrText=(userName||"Inspector")+" | "+new Date(todayISO+"T12:00:00").toLocaleDateString("en-US",{month:"2-digit",day:"2-digit",year:"2-digit",timeZone:tz})+", "+now.toLocaleTimeString("en-US",{hour:"numeric",minute:"2-digit",hour12:true,timeZone:tz});
+
+      // Row height: top padding(12) + name line + desc lines + attribution + bottom padding(12)
+      const rowH=Math.max(50, 14 + descLines.length*lineH + 20 + 14);
       ensureSpace(rowH);
 
-      // Alternating row background
-      if(ri%2===0)page.drawRectangle({x:M,y:y-rowH,width:CW,height:rowH,color:rgb(.98,.98,.98)});
-      // Bottom border
-      page.drawLine({start:{x:M,y:y-rowH},end:{x:M+CW,y:y-rowH},thickness:.5,color:rgb(.88,.88,.88)});
+      // Row border box
+      page.drawRectangle({x:M,y:y-rowH,width:CW,height:rowH,borderColor:rgb(.85,.85,.85),borderWidth:.5,color:ri%2===0?rgb(.99,.99,.99):rgb(1,1,1)});
 
-      let rx=M;
-      page.drawText(c.name||"—",{x:rx+4,y:y-13,size:9,font:fontB,color:rgb(.2,.2,.2)});
-      rx+=cols[0].w;
-      descLines.forEach((ln,li)=>{page.drawText(ln,{x:rx+4,y:y-13-li*12,size:9,font,color:rgb(.3,.3,.3)});});
-      rx+=cols[1].w;
-      page.drawText(String(qty),{x:rx+4,y:y-13,size:9,font,color:rgb(.3,.3,.3)});
-      rx+=cols[2].w;
-      page.drawText(hrs?String(hrs):"—",{x:rx+4,y:y-13,size:9,font,color:rgb(.3,.3,.3)});
+      // Name column — bold, vertically centered-ish near top
+      const nameLines=[];
+      const nameWords=(c.name||"—").split(" ");
+      let nl="";
+      nameWords.forEach(w=>{const t=nl?nl+" "+w:w;if(fontB.widthOfTextAtSize(t,11)>(nameW-16)&&nl){nameLines.push(nl);nl=w;}else nl=t;});
+      if(nl)nameLines.push(nl);
+      nameLines.forEach((ln,li)=>{
+        page.drawText(ln,{x:M+10,y:y-18-li*14,size:11,font:fontB,color:rgb(.15,.15,.15)});
+      });
+
+      // Description lines
+      let dy=y-18;
+      descLines.forEach((ln,li)=>{
+        if(ln===""){dy-=lineH*0.5;return;} // blank line = half spacing
+        page.drawText(ln,{x:M+nameW+10,y:dy,size:descFontSz,font,color:rgb(.25,.25,.25)});
+        dy-=lineH;
+      });
+
+      // Attribution line below description
+      dy-=6;
+      page.drawText(attrText,{x:M+nameW+10,y:dy,size:attrSz,font,color:rgb(.65,.65,.65)});
+
+      // Quantity — centered in column
+      page.drawText(String(qty),{x:M+nameW+descW+(qtyW-font.widthOfTextAtSize(String(qty),11))/2,y:y-18,size:11,font,color:rgb(.2,.2,.2)});
+
+      // Total Hours — centered in column
+      const hrsStr=hrs?String(hrs):"0";
+      page.drawText(hrsStr,{x:M+nameW+descW+qtyW+(hrsW-font.widthOfTextAtSize(hrsStr,11))/2,y:y-18,size:11,font,color:rgb(.2,.2,.2)});
 
       y-=rowH;
     });
 
-    // Totals row
-    ensureSpace(22);
-    page.drawRectangle({x:M,y:y-22,width:CW,height:22,color:rgb(.92,.92,.92)});
-    page.drawText("TOTAL",{x:M+4,y:y-15,size:9,font:fontB,color:rgb(.2,.2,.2)});
-    page.drawText(String(contractors.length)+" contractor"+(contractors.length!==1?"s":""),{x:M+cols[0].w+4,y:y-15,size:9,font,color:rgb(.4,.4,.4)});
-    page.drawText(String(totalHrs),{x:M+cols[0].w+cols[1].w+cols[2].w+4,y:y-15,size:9,font:fontB,color:rgb(.2,.2,.2)});
-    y-=30;
+    // Totals row (dark background like Raken)
+    ensureSpace(28);
+    page.drawRectangle({x:M,y:y-28,width:CW,height:28,color:rgb(.35,.35,.35)});
+    page.drawText("Total",{x:M+10,y:y-19,size:12,font:fontB,color:rgb(1,1,1)});
+    const totalQty=contractors.reduce((s,c)=>s+(parseInt(c.quantity)||1),0);
+    page.drawText(String(totalQty),{x:M+nameW+descW+(qtyW-fontB.widthOfTextAtSize(String(totalQty),12))/2,y:y-19,size:12,font:fontB,color:rgb(1,1,1)});
+    page.drawText(String(totalHrs),{x:M+nameW+descW+qtyW+(hrsW-fontB.widthOfTextAtSize(String(totalHrs),12))/2,y:y-19,size:12,font:fontB,color:rgb(1,1,1)});
+    y-=36;
 
     // ── General Notes ──
     if(generalNotes){
