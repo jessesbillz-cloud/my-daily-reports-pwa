@@ -1316,6 +1316,7 @@ function WorkLogEditor({job, user, onBack, reportDate}){
     let hasTemplate=false;
 
     // ── Check for uploaded template to use as background ──
+    let tplInfoBarY=0; // PDF y-coord of the info bar (for overlaying date/prepared by)
     try{
       const tpl=await db.getTemplate(job.id);
       if(tpl&&tpl.storage_path){
@@ -1329,33 +1330,54 @@ function WorkLogEditor({job, user, onBack, reportDate}){
           doc.addPage(copiedPage);
           page=doc.getPages()[0];
           hasTemplate=true;
-          // Figure out where the branding header ends, then white-out everything below
-          let headerCutoff=160; // default: keep top 160pt as branding
+          // Analyze template text to find where branding header + info bar end
+          // We want to preserve: dark header (logo+name+address) + orange info bar (Date/Job#/Prepared By)
+          // Then white-out everything below that
+          let headerCutoff=200; // generous default: keep top 200pt
           try{
             const textItems=await extractPdfTextStructure(new Uint8Array(tplBytes));
             const pg1Items=textItems.filter(t=>t.page===1).sort((a,b)=>a.y-b.y);
-            if(pg1Items.length>2){
-              // Find the first big gap (>30pt) between text items — that's where header ends
-              for(let i=0;i<pg1Items.length-1;i++){
-                const gap=pg1Items[i+1].y-(pg1Items[i].y+pg1Items[i].h);
-                const itemY=pg1Items[i].y+pg1Items[i].h;
-                // Only consider gaps in the top third of the page as header boundaries
-                if(gap>25&&itemY<H*0.45){
-                  headerCutoff=itemY+8;
-                  break;
+            if(pg1Items.length>4){
+              // Find the info bar items (Date, Job #, Prepared By) — they're typically in the
+              // first ~200pt and contain keywords like "Date", "Job", "Prepared"
+              let infoBarBottom=0;
+              for(const item of pg1Items){
+                const txt=(item.str||"").toLowerCase();
+                if(item.y<H*0.35&&(txt.includes("date")||txt.includes("job")||txt.includes("prepared"))){
+                  const bottom=item.y+item.h;
+                  if(bottom>infoBarBottom)infoBarBottom=bottom;
                 }
               }
-              // If no big gap found, use the bottom of the first 3-4 items
-              if(headerCutoff===160&&pg1Items.length>=3){
-                headerCutoff=Math.min(pg1Items[3]?.y||160, pg1Items[2].y+pg1Items[2].h+10);
+              if(infoBarBottom>0){
+                headerCutoff=infoBarBottom+12; // 12pt padding below info bar
+                tplInfoBarY=H-infoBarBottom+4; // PDF y-coord for overlaying text on info bar
+              }else{
+                // Fallback: find the biggest gap in the top 40% of the page
+                let bestGapEnd=0;
+                for(let i=0;i<pg1Items.length-1;i++){
+                  const gap=pg1Items[i+1].y-(pg1Items[i].y+pg1Items[i].h);
+                  const itemBottom=pg1Items[i].y+pg1Items[i].h;
+                  if(gap>20&&itemBottom<H*0.4&&itemBottom>bestGapEnd){
+                    bestGapEnd=itemBottom;
+                  }
+                }
+                if(bestGapEnd>0)headerCutoff=bestGapEnd+12;
               }
             }
-          }catch(e){}
-          // White-out everything below the header branding area
-          const clearY=H-headerCutoff; // convert from top-left to PDF bottom-left coords
+          }catch(e){console.log("Template text analysis failed:",e);}
+          // White-out everything below the header+info bar
+          const clearY=H-headerCutoff;
           page.drawRectangle({x:0,y:0,width:W,height:clearY,color:rgb(1,1,1)});
-          // Start dynamic content just below the header
           y=clearY-10;
+          // Overlay dynamic Date and Prepared By on the info bar
+          if(tplInfoBarY>0){
+            // White-out the old date/job#/prepared by text values (keep labels visible)
+            // Overlay our date after "Date" label
+            const dateStr=new Date(todayISO+"T12:00:00").toLocaleDateString("en-US",{weekday:"short",month:"2-digit",day:"2-digit",year:"numeric",timeZone:tz});
+            page.drawText(dateStr,{x:M+50,y:tplInfoBarY,size:10,font:fontB,color:rgb(1,1,1)});
+            // Overlay prepared by name near the right area
+            if(userName)page.drawText(userName,{x:W-M-font.widthOfTextAtSize(userName,10)-10,y:tplInfoBarY,size:10,font:fontB,color:rgb(1,1,1)});
+          }
         }
       }
     }catch(e){console.log("No template found, using default header");}
@@ -1392,30 +1414,68 @@ function WorkLogEditor({job, user, onBack, reportDate}){
       pg.drawText(job.name||"Work Log",{x:M,y:20,size:8,font,color:rgb(.5,.5,.5)});
     };
 
-    // ── Weather section ──
+    // ── Weather section — Raken-style: 3 time slots with big temp, condition, details ──
     if(weatherEnabled&&(weatherAM||weatherMid||weatherPM)){
-      page.drawRectangle({x:M,y:y-24,width:CW,height:24,color:rgb(.3,.3,.3)});
-      page.drawText("WEATHER",{x:M+8,y:y-16,size:11,font:fontB,color:rgb(1,1,1)});
-      y-=30;
+      // Parse weather string like "78°F Clear, Wind 19 mph, 14% humidity, 0.1" precip"
+      const parseWx=(str)=>{
+        if(!str)return{temp:"—",cond:"",wind:"",precip:"0\"",humidity:""};
+        const m=str.match(/^(\d+)°F\s+([^,]+)/);
+        const temp=m?m[1]+"°":"—";
+        const cond=m?m[2].trim():"";
+        const windM=str.match(/Wind\s+(\d+)\s*mph/i);
+        const wind=windM?windM[1]+" MPH":"0 MPH";
+        const humM=str.match(/(\d+)%\s*humidity/i);
+        const humidity=humM?humM[1]+"%":"";
+        const precM=str.match(/([\d.]+)"\s*precip/i);
+        const precip=precM?precM[1]+"\"":"0\"";
+        return{temp,cond,wind,precip,humidity};
+      };
 
-      const wxSlots=[{label:"Morning (7 AM)",val:weatherAM},{label:"Midday (12 PM)",val:weatherMid},{label:"Afternoon (4 PM)",val:weatherPM}];
+      // Section header bar
+      ensureSpace(140);
+      page.drawRectangle({x:M,y:y-30,width:CW,height:30,color:rgb(.45,.45,.45)});
+      page.drawText("Weather",{x:M+(CW-fontB.widthOfTextAtSize("Weather",16))/2,y:y-22,size:16,font:fontB,color:rgb(.92,.57,.17)});
+      y-=36;
+
+      const wxSlots=[
+        {label:"6:00 AM",val:weatherAM},
+        {label:"12:00 PM",val:weatherMid},
+        {label:"4:00 PM",val:weatherPM}
+      ];
       const slotW=CW/3;
+      const slotH=100; // height of each weather box
+      ensureSpace(slotH+20);
+
       wxSlots.forEach((wx,i)=>{
         const sx=M+i*slotW;
-        page.drawRectangle({x:sx,y:y-50,width:slotW,height:50,color:rgb(.97,.97,.97),borderColor:rgb(.85,.85,.85),borderWidth:.5});
-        page.drawText(wx.label,{x:sx+6,y:y-14,size:8,font:fontB,color:rgb(.4,.4,.4)});
-        // Wrap weather text
-        const val=wx.val||"—";
-        const lines=[];let cur="";
-        val.split(",").forEach((part,pi)=>{
-          const test=cur?(cur+","+part):part;
-          if(font.widthOfTextAtSize(test.trim(),8)>slotW-14&&cur){lines.push(cur.trim());cur=part;}
-          else cur=test;
-        });
-        if(cur)lines.push(cur.trim());
-        lines.slice(0,3).forEach((ln,li)=>{page.drawText(ln,{x:sx+6,y:y-28-li*10,size:8,font,color:rgb(.2,.2,.2)});});
+        const px=parseWx(wx.val);
+        // Box with light border
+        page.drawRectangle({x:sx,y:y-slotH,width:slotW,height:slotH,color:rgb(1,1,1),borderColor:rgb(.88,.88,.88),borderWidth:.5});
+        // Time label centered at top
+        const labelW=fontB.widthOfTextAtSize(wx.label,9);
+        page.drawText(wx.label,{x:sx+(slotW-labelW)/2,y:y-14,size:9,font:fontB,color:rgb(.35,.35,.35)});
+        // Big temperature number centered
+        const tempStr=px.temp;
+        const tempW=fontB.widthOfTextAtSize(tempStr,28);
+        page.drawText(tempStr,{x:sx+(slotW-tempW)/2,y:y-46,size:28,font:fontB,color:rgb(.15,.15,.15)});
+        // Condition name centered below temp
+        if(px.cond){
+          const condW=font.widthOfTextAtSize(px.cond,10);
+          page.drawText(px.cond,{x:sx+(slotW-condW)/2,y:y-60,size:10,font,color:rgb(.3,.3,.3)});
+        }
+        // Details row: Wind | Precipitation | Humidity
+        const detY=y-slotH+12;
+        const detFontSz=7;
+        const sep=" | ";
+        const detParts=[];
+        if(px.wind)detParts.push("Wind: "+px.wind);
+        detParts.push("Precipitation: "+px.precip);
+        if(px.humidity)detParts.push("Humidity: "+px.humidity);
+        const detStr=detParts.join("  "+sep+"  ");
+        const detW=font.widthOfTextAtSize(detStr,detFontSz);
+        page.drawText(detStr,{x:sx+(slotW-detW)/2,y:detY,size:detFontSz,font,color:rgb(.45,.45,.45)});
       });
-      y-=58;
+      y-=(slotH+8);
     }
 
     // ── Work Logs — Raken-style table ──
