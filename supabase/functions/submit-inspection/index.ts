@@ -99,24 +99,48 @@ serve(async (req) => {
       fileUrls.push(publicUrl);
     }
 
-    // Insert inspection request
+    // Look up the job owner via profile slug so we can link the request to them
+    let ownerId = "";
+    let ownerEmail = "";
+    try {
+      const { data: profile } = await supabase
+        .from("profiles")
+        .select("id")
+        .eq("slug", project)
+        .single();
+      if (profile) {
+        ownerId = profile.id;
+        const { data: authUser } = await supabase.auth.admin.getUserById(
+          profile.id
+        );
+        if (authUser?.user?.email) ownerEmail = authUser.user.email;
+      }
+    } catch (e) {
+      console.error("Owner lookup failed:", e);
+    }
+
+    // Insert inspection request — include user_id and requested_date so it shows on owner's calendar
+    const insertData: Record<string, any> = {
+      project,
+      inspection_date: inspectionDate,
+      inspection_time: actualTime,
+      inspection_types: inspectionTypes,
+      duration,
+      submitted_by: submittedBy,
+      notes,
+      subcontractor,
+      location_detail: locationDetail,
+      inspection_identifier: inspectionIdentifier,
+      email_recipients: emailRecipients,
+      flexible_display: flexibleDisplay,
+      status: "pending",
+      requested_date: inspectionDate, // mirror for main app calendar query
+    };
+    if (ownerId) insertData.user_id = ownerId;
+
     const { data: inserted, error: insertError } = await supabase
       .from("inspection_requests")
-      .insert({
-        project,
-        inspection_date: inspectionDate,
-        inspection_time: actualTime,
-        inspection_types: inspectionTypes,
-        duration,
-        submitted_by: submittedBy,
-        notes,
-        subcontractor,
-        location_detail: locationDetail,
-        inspection_identifier: inspectionIdentifier,
-        email_recipients: emailRecipients,
-        flexible_display: flexibleDisplay,
-        status: "pending",
-      })
+      .insert(insertData)
       .select()
       .single();
 
@@ -136,25 +160,7 @@ serve(async (req) => {
       Deno.env.get("FROM_EMAIL") || "reports@mydailyreports.org";
 
     if (RESEND_API_KEY) {
-      // Look up the job owner's email via the profile slug (project = slug)
-      let ownerEmail = "";
-      try {
-        const { data: profile } = await supabase
-          .from("profiles")
-          .select("id")
-          .eq("slug", project)
-          .single();
-        if (profile) {
-          const { data: authUser } = await supabase.auth.admin.getUserById(
-            profile.id
-          );
-          if (authUser?.user?.email) ownerEmail = authUser.user.email;
-        }
-      } catch (e) {
-        console.error("Owner lookup failed:", e);
-      }
-
-      // Combine owner email + checked recipients, deduplicate
+      // Combine owner email (looked up above) + checked recipients, deduplicate
       const allRecipients = [...emailRecipients];
       if (ownerEmail && !allRecipients.includes(ownerEmail)) {
         allRecipients.push(ownerEmail);
