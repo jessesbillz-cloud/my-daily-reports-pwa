@@ -1263,18 +1263,22 @@ function WorkLogEditor({job, user, onBack, reportDate}){
   };
 
   const handlePhotoUpload=(e)=>{
-    const file=e.target.files[0];
-    if(!file||!photoTarget)return;
-    const reader=new FileReader();
-    reader.onload=(ev)=>{
-      setContractors(p=>p.map(c=>{
-        if(c.id!==photoTarget)return c;
-        return{...c,photos:[...(c.photos||[]),{data:ev.target.result,name:file.name,ts:Date.now()}]};
-      }));
-    };
-    reader.readAsDataURL(file);
+    const files=Array.from(e.target.files||[]);
+    if(!files.length||!photoTarget)return;
+    files.forEach(file=>{
+      const reader=new FileReader();
+      reader.onload=(ev)=>{
+        setContractors(p=>p.map(c=>{
+          if(c.id!==photoTarget)return c;
+          return{...c,photos:[...(c.photos||[]),{data:ev.target.result,name:file.name,ts:Date.now()}]};
+        }));
+      };
+      reader.readAsDataURL(file);
+    });
     e.target.value="";
   };
+  const cameraRef=useRef(null);
+  const libraryRef=useRef(null);
 
   const removePhoto=(contractorId,photoIdx)=>{
     setContractors(p=>p.map(c=>{
@@ -1958,8 +1962,8 @@ function WorkLogEditor({job, user, onBack, reportDate}){
                   <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:8}}>
                     <label style={{fontSize:12,color:C.lt,fontWeight:600}}>Photos ({(c.photos||[]).length})</label>
                     <div style={{display:"flex",gap:6}}>
-                      <button onClick={()=>{setPhotoTarget(c.id);setTimeout(()=>{photoRef.current?.setAttribute("capture","environment");photoRef.current?.click();},100);}} style={{padding:"6px 10px",background:C.org,border:"none",borderRadius:6,color:"#fff",fontSize:12,fontWeight:600,cursor:"pointer"}}>📷 Photo</button>
-                      <button onClick={()=>{setPhotoTarget(c.id);setTimeout(()=>{photoRef.current?.removeAttribute("capture");photoRef.current?.click();},100);}} style={{padding:"6px 10px",background:C.card,border:`1px solid ${C.brd}`,borderRadius:6,color:C.lt,fontSize:12,fontWeight:600,cursor:"pointer"}}>🖼️ Library</button>
+                      <button onClick={()=>{setPhotoTarget(c.id);setTimeout(()=>cameraRef.current?.click(),100);}} style={{padding:"6px 10px",background:C.org,border:"none",borderRadius:6,color:"#fff",fontSize:12,fontWeight:600,cursor:"pointer"}}>📷 Photo</button>
+                      <button onClick={()=>{setPhotoTarget(c.id);setTimeout(()=>libraryRef.current?.click(),100);}} style={{padding:"6px 10px",background:C.card,border:`1px solid ${C.brd}`,borderRadius:6,color:C.lt,fontSize:12,fontWeight:600,cursor:"pointer"}}>🖼️ Library</button>
                     </div>
                   </div>
                   {(c.photos||[]).length>0&&(
@@ -2018,8 +2022,9 @@ function WorkLogEditor({job, user, onBack, reportDate}){
 
       </div>
 
-      {/* Hidden photo input */}
-      <input ref={photoRef} type="file" accept="image/*" style={{display:"none"}} onChange={handlePhotoUpload}/>
+      {/* Hidden photo inputs — separate for camera vs library */}
+      <input ref={cameraRef} type="file" accept="image/*" capture="environment" style={{display:"none"}} onChange={handlePhotoUpload}/>
+      <input ref={libraryRef} type="file" accept="image/*" multiple style={{display:"none"}} onChange={handlePhotoUpload}/>
 
       {/* Toast */}
       {toast&&<div style={{position:"fixed",top:60,left:"50%",transform:"translateX(-50%)",background:C.card,border:`1px solid ${C.ok}`,borderRadius:10,padding:"10px 20px",fontSize:14,fontWeight:600,color:C.ok,zIndex:9999}}>{toast}</div>}
