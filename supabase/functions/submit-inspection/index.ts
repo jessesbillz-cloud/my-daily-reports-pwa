@@ -154,6 +154,40 @@ serve(async (req) => {
       );
     }
 
+    // Backfill: fix any old requests missing user_id or requested_date for this project
+    if (ownerId) {
+      try {
+        await supabase
+          .from("inspection_requests")
+          .update({ user_id: ownerId })
+          .eq("project", project)
+          .is("user_id", null);
+        await supabase
+          .from("inspection_requests")
+          .update({ requested_date: supabase.rpc ? undefined : null })
+          .eq("project", project)
+          .is("requested_date", null)
+          .not("inspection_date", "is", null);
+        // Use raw SQL-like approach: copy inspection_date to requested_date where missing
+        const { data: orphans } = await supabase
+          .from("inspection_requests")
+          .select("id, inspection_date")
+          .eq("project", project)
+          .is("requested_date", null)
+          .not("inspection_date", "is", null);
+        if (orphans && orphans.length > 0) {
+          for (const o of orphans) {
+            await supabase
+              .from("inspection_requests")
+              .update({ requested_date: o.inspection_date })
+              .eq("id", o.id);
+          }
+        }
+      } catch (e) {
+        console.error("Backfill error (non-fatal):", e);
+      }
+    }
+
     // Send email notifications — always notify the job owner + any checked recipients
     const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY");
     const FROM_EMAIL =
