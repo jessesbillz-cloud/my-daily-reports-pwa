@@ -1437,24 +1437,27 @@ function WorkLogEditor({job, user, onBack, reportDate}){
     y-=24;
 
     let totalHrs=0;
-    const lineH=15; // line height for description text
+    const lineH=17; // line height for description text — generous like Raken
     const descFontSz=11;
+    const nameFontSz=11;
     const attrSz=8; // attribution line size
+    const rowPadTop=16; // top padding inside row
+    const rowPadBot=16; // bottom padding inside row
+    const attrGap=10; // gap between last desc line and attribution
 
     contractors.forEach((c,ri)=>{
       const hrs=parseFloat(c.hours)||0;
       const qty=parseInt(c.quantity)||1;
       totalHrs+=hrs*qty;
 
-      // Wrap description text at larger font size
+      // Wrap description text — split on newlines first, then wrap each paragraph
       const descLines=[];
       if(c.description){
-        // Split on newlines first, then wrap each line
         c.description.split("\n").forEach(paragraph=>{
           if(!paragraph.trim()){descLines.push("");return;}
           const words=paragraph.split(" ");
           let line="";
-          const maxW=descW-16;
+          const maxW=descW-20;
           words.forEach(w=>{
             const test=line?line+" "+w:w;
             if(font.widthOfTextAtSize(test,descFontSz)>maxW&&line){descLines.push(line);line=w;}
@@ -1465,45 +1468,52 @@ function WorkLogEditor({job, user, onBack, reportDate}){
       }
       if(descLines.length===0)descLines.push("—");
 
-      // Attribution line: "UserName | date | time"
-      const now=new Date();
-      const attrText=(userName||"Inspector")+" | "+new Date(todayISO+"T12:00:00").toLocaleDateString("en-US",{month:"2-digit",day:"2-digit",year:"2-digit",timeZone:tz})+", "+now.toLocaleTimeString("en-US",{hour:"numeric",minute:"2-digit",hour12:true,timeZone:tz});
-
-      // Row height: top padding(12) + name line + desc lines + attribution + bottom padding(12)
-      const rowH=Math.max(50, 14 + descLines.length*lineH + 20 + 14);
-      ensureSpace(rowH);
-
-      // Row border box
-      page.drawRectangle({x:M,y:y-rowH,width:CW,height:rowH,borderColor:rgb(.85,.85,.85),borderWidth:.5,color:ri%2===0?rgb(.99,.99,.99):rgb(1,1,1)});
-
-      // Name column — bold, vertically centered-ish near top
+      // Wrap name if long
       const nameLines=[];
       const nameWords=(c.name||"—").split(" ");
-      let nl="";
-      nameWords.forEach(w=>{const t=nl?nl+" "+w:w;if(fontB.widthOfTextAtSize(t,11)>(nameW-16)&&nl){nameLines.push(nl);nl=w;}else nl=t;});
-      if(nl)nameLines.push(nl);
+      let nl2="";
+      nameWords.forEach(w=>{const t=nl2?nl2+" "+w:w;if(fontB.widthOfTextAtSize(t,nameFontSz)>(nameW-20)&&nl2){nameLines.push(nl2);nl2=w;}else nl2=t;});
+      if(nl2)nameLines.push(nl2);
+
+      // Attribution line: "UserName | date, time"
+      const now=new Date();
+      const attrText=(userName||"Inspector")+" | "+new Date(todayISO+"T12:00:00").toLocaleDateString("en-US",{month:"numeric",day:"numeric",year:"2-digit",timeZone:tz})+", "+now.toLocaleTimeString("en-US",{hour:"numeric",minute:"2-digit",hour12:true,timeZone:tz});
+
+      // Calculate content height: desc lines + attribution
+      const descH=descLines.reduce((h,ln)=>h+(ln===""?lineH*0.6:lineH),0);
+      const nameH=nameLines.length*16;
+      const contentH=Math.max(nameH, descH + attrGap + 12); // 12 for attribution line
+      const rowH=Math.max(60, rowPadTop + contentH + rowPadBot);
+      ensureSpace(rowH);
+
+      // Row background + border
+      page.drawRectangle({x:M,y:y-rowH,width:CW,height:rowH,borderColor:rgb(.85,.85,.85),borderWidth:.5,color:ri%2===0?rgb(.99,.99,.99):rgb(1,1,1)});
+      // Bottom border line
+      page.drawLine({start:{x:M,y:y-rowH},end:{x:M+CW,y:y-rowH},thickness:.5,color:rgb(.8,.8,.8)});
+
+      // Name — top-aligned with padding
       nameLines.forEach((ln,li)=>{
-        page.drawText(ln,{x:M+10,y:y-18-li*14,size:11,font:fontB,color:rgb(.15,.15,.15)});
+        page.drawText(ln,{x:M+10,y:y-rowPadTop-12-li*16,size:nameFontSz,font:fontB,color:rgb(.15,.15,.15)});
       });
 
-      // Description lines
-      let dy=y-18;
-      descLines.forEach((ln,li)=>{
-        if(ln===""){dy-=lineH*0.5;return;} // blank line = half spacing
+      // Description — top-aligned with padding
+      let dy=y-rowPadTop-12;
+      descLines.forEach(ln=>{
+        if(ln===""){dy-=lineH*0.6;return;}
         page.drawText(ln,{x:M+nameW+10,y:dy,size:descFontSz,font,color:rgb(.25,.25,.25)});
         dy-=lineH;
       });
 
       // Attribution line below description
-      dy-=6;
-      page.drawText(attrText,{x:M+nameW+10,y:dy,size:attrSz,font,color:rgb(.65,.65,.65)});
+      dy-=attrGap;
+      page.drawText(attrText,{x:M+nameW+10,y:dy,size:attrSz,font,color:rgb(.6,.6,.6)});
 
-      // Quantity — centered in column
-      page.drawText(String(qty),{x:M+nameW+descW+(qtyW-font.widthOfTextAtSize(String(qty),11))/2,y:y-18,size:11,font,color:rgb(.2,.2,.2)});
+      // Quantity — top-aligned matching first desc line
+      page.drawText(String(qty),{x:M+nameW+descW+(qtyW-font.widthOfTextAtSize(String(qty),descFontSz))/2,y:y-rowPadTop-12,size:descFontSz,font,color:rgb(.2,.2,.2)});
 
-      // Total Hours — centered in column
+      // Total Hours — top-aligned
       const hrsStr=hrs?String(hrs):"0";
-      page.drawText(hrsStr,{x:M+nameW+descW+qtyW+(hrsW-font.widthOfTextAtSize(hrsStr,11))/2,y:y-18,size:11,font,color:rgb(.2,.2,.2)});
+      page.drawText(hrsStr,{x:M+nameW+descW+qtyW+(hrsW-font.widthOfTextAtSize(hrsStr,descFontSz))/2,y:y-rowPadTop-12,size:descFontSz,font,color:rgb(.2,.2,.2)});
 
       y-=rowH;
     });
