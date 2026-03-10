@@ -686,7 +686,11 @@ function CreateJob({user, onBack, onCreated}){
       (parsed.locked||[]).forEach(f=>{addUnique(f,"lock");});
       setFields(all);
       // Store AI-detected filename convention (dateFormat, numberPadding) for auto-numbering
-      if(parsed.filenameConvention)setFnConvention(parsed.filenameConvention);
+      if(parsed.filenameConvention){
+        setFnConvention(parsed.filenameConvention);
+        // Use AI pattern with {date}/{report_number} tokens as the display title
+        if(parsed.filenameConvention.pattern)setReportTitle(parsed.filenameConvention.pattern);
+      }
     }catch(e){
       console.error("Parse error:",e);
       setErr("Could not parse template fields. You can still create the job and configure fields later.");
@@ -730,7 +734,10 @@ function CreateJob({user, onBack, onCreated}){
       });
       (parsed.locked||[]).forEach(f=>{addUnique(f,"lock");});
       setFields(all);
-      if(parsed.filenameConvention)setFnConvention(parsed.filenameConvention);
+      if(parsed.filenameConvention){
+        setFnConvention(parsed.filenameConvention);
+        if(parsed.filenameConvention.pattern)setReportTitle(parsed.filenameConvention.pattern);
+      }
     }catch(e){
       console.error("DOCX parse error:",e);
       setErr("Could not parse DOCX fields: "+e.message);
@@ -777,7 +784,9 @@ function CreateJob({user, onBack, onCreated}){
     });
     setFields(adjusted);
     setUsedSavedId(tpl.id);
-    setReportTitle(tpl.original_filename?tpl.original_filename.replace(/\.[^.]+$/,""):(tpl.name||""));
+    // Use stored AI pattern with {date} tokens if available, otherwise raw filename
+    const storedPattern=convEntry?.pattern;
+    setReportTitle(storedPattern||tpl.original_filename?.replace(/\.[^.]+$/,"")||tpl.name||"");
     setTplSaved(true);
     setShowSaved(false);
     setErr("");
@@ -1841,7 +1850,9 @@ function WorkLogEditor({job, user, onBack, reportDate}){
         const bx=M+sqW+scW*oi+(scW-boxSz)/2;
         page.drawRectangle({x:bx,y:boxY,width:boxSz,height:boxSz,borderColor:rgb(.5,.5,.5),borderWidth:1,color:rgb(1,1,1)});
         if(s.answer===opt){
-          page.drawText("✓",{x:bx+2,y:boxY+1,size:11,font:fontB,color:rgb(.15,.15,.15)});
+          // Draw an X checkmark (standard fonts don't support Unicode ✓)
+          page.drawLine({start:{x:bx+2,y:boxY+2},end:{x:bx+boxSz-2,y:boxY+boxSz-2},thickness:1.5,color:rgb(.15,.15,.15)});
+          page.drawLine({start:{x:bx+2,y:boxY+boxSz-2},end:{x:bx+boxSz-2,y:boxY+2},thickness:1.5,color:rgb(.15,.15,.15)});
         }
       });
       // Description
@@ -2166,12 +2177,12 @@ function WorkLogEditor({job, user, onBack, reportDate}){
               <div style={{flex:1,minWidth:0}}>
                 <div style={{display:"flex",alignItems:"center",gap:6}}>
                   <div style={{fontSize:14,fontWeight:700,color:C.txt,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",flex:1}}>{c.name}</div>
-                  <button onClick={(ev)=>{ev.stopPropagation();updateContractor(c.id,"locked",!c.locked);}} style={{background:"none",border:"none",cursor:"pointer",padding:"2px 6px",fontSize:16,opacity:c.locked?1:0.35}} title={c.locked?"Locked — will carry over to next day":"Unlocked — tap to lock for carry-over"}>🔒</button>
+                  <button onClick={(ev)=>{ev.stopPropagation();updateContractor(c.id,"locked",!c.locked);}} style={{background:c.locked?C.org+"22":"transparent",border:`1px solid ${c.locked?C.org:C.brd}`,borderRadius:6,cursor:"pointer",padding:"2px 8px",fontSize:11,fontWeight:700,color:c.locked?C.org:C.mut,display:"flex",alignItems:"center",gap:3}} title={c.locked?"This contractor will carry over to tomorrow's report":"Tap to keep this contractor on tomorrow's report"}>🔒 {c.locked?"Saved":"Save"}</button>
                 </div>
                 <div style={{fontSize:11,color:C.mut}}>
                   {c.hours?`${c.hours} hrs`:"No hours"} · {c.quantity||1} {parseInt(c.quantity||1)===1?"person":"people"}
                   {(c.photos||[]).length>0&&` · ${c.photos.length} photo${c.photos.length>1?"s":""}`}
-                  {c.locked&&" · Locked"}
+                  {c.locked&&<span style={{color:C.org}}> · Carries over tomorrow</span>}
                 </div>
               </div>
               <span style={{color:activeId===c.id?C.org:C.mut,fontSize:18,transform:activeId===c.id?"rotate(180deg)":"none",transition:"transform 0.2s",padding:"4px 8px"}}>▼</span>
