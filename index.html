@@ -1570,9 +1570,7 @@ function WorkLogEditor({job, user, onBack, reportDate}){
       }
     };
 
-    const drawFooter=(pg)=>{
-      pg.drawText(job.name||"Work Log",{x:M,y:20,size:8,font,color:rgb(.5,.5,.5)});
-    };
+    const drawFooter=(pg)=>{}; // footers added in bulk at end
 
     // ── Weather section — MDR-style: 3 time slots with big temp, condition, details ──
     if(weatherEnabled&&(weatherAM||weatherMid||weatherPM)){
@@ -1895,10 +1893,16 @@ function WorkLogEditor({job, user, onBack, reportDate}){
       }
     }
 
-    // Add footers to all pages
+    // Add footers to all pages — job name left, page num center-right, "Powered by" right
     const pages=doc.getPages();
     pages.forEach((pg,i)=>{
-      pg.drawText(`${i+1} of ${pages.length}`,{x:W-M-40,y:20,size:8,font,color:rgb(.5,.5,.5)});
+      pg.drawText(job.name||"Work Log",{x:M,y:20,size:8,font,color:rgb(.5,.5,.5)});
+      const pgTxt=`${i+1} of ${pages.length}`;
+      const pgW=font.widthOfTextAtSize(pgTxt,8);
+      pg.drawText(pgTxt,{x:W-M-pgW,y:20,size:8,font,color:rgb(.5,.5,.5)});
+      const pwrTxt="Powered by My Daily Reports";
+      const pwrW=font.widthOfTextAtSize(pwrTxt,7);
+      pg.drawText(pwrTxt,{x:(W-pwrW)/2,y:10,size:7,font,color:rgb(.6,.6,.6)});
     });
 
     return await doc.save();
