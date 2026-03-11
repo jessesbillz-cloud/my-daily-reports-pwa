@@ -831,7 +831,8 @@ function CreateJob({user, onBack, onCreated}){
       try{
         const bucket=tpl.storage_path.startsWith("company-templates/")?"company-templates":"report-source-docs";
         const path=tpl.storage_path.startsWith("company-templates/")?tpl.storage_path.replace("company-templates/",""):tpl.storage_path;
-        const resp=await fetch(`${SB_URL}/storage/v1/object/${bucket}/${path}`,{headers:{apikey:SB_KEY,Authorization:`Bearer ${AUTH_TOKEN||SB_KEY}`}});
+        const token=AUTH_TOKEN||SB_KEY;
+        const resp=await fetch(`${SB_URL}/storage/v1/object/${bucket}/${path}`,{headers:{apikey:SB_KEY,Authorization:`Bearer ${token}`}});
         if(resp.ok){
           const blob=await resp.blob();
           const ext=tpl.file_type||tpl.original_filename?.split(".").pop().toLowerCase()||"pdf";
@@ -845,8 +846,13 @@ function CreateJob({user, onBack, onCreated}){
             const buf=await blob.arrayBuffer();
             await parseFields(buf,file.name);
           }
+        }else{
+          showToast("Could not load template file. Try uploading manually.");
         }
-      }catch(dlErr){console.error("Auto-download template:",dlErr);/* User can still upload manually */}
+      }catch(dlErr){console.error("Auto-download template:",dlErr);showToast("Template download failed. Try uploading manually.");}
+    }else if(adjusted.length===0){
+      // Company template with no file and no field config — nothing to load
+      showToast("This template doesn't have a file yet. Upload a PDF to get started.");
     }
   };
 
@@ -1539,8 +1545,19 @@ function WorkLogEditor({job, user, onBack, reportDate}){
     page.drawRectangle({x:0,y:H-headerH,width:W,height:headerH,color:rgb(.12,.12,.12)});
     // Job name (large, white, left-aligned — prominent like a company heading)
     const jobTitle=job.name||"Daily Work Log";
-    const titleSize=jobTitle.length>30?16:jobTitle.length>20?18:22;
-    page.drawText(jobTitle,{x:M,y:H-40,size:titleSize,font:fontB,color:rgb(1,1,1)});
+    // Auto-size and wrap title to fit header width
+    let titleSize=jobTitle.length>30?16:jobTitle.length>20?18:22;
+    const maxTitleW=W-2*M;
+    while(titleSize>10&&fontB.widthOfTextAtSize(jobTitle,titleSize)>maxTitleW)titleSize-=1;
+    // If still too wide at 10pt, split into two lines
+    if(fontB.widthOfTextAtSize(jobTitle,titleSize)>maxTitleW){
+      const words=jobTitle.split(" ");let l1="",l2="";
+      for(const w of words){const t=l1?l1+" "+w:w;if(fontB.widthOfTextAtSize(t,titleSize)>maxTitleW&&l1){l2=words.slice(words.indexOf(w)).join(" ");break;}else l1=t;}
+      page.drawText(l1,{x:M,y:H-36,size:titleSize,font:fontB,color:rgb(1,1,1)});
+      if(l2)page.drawText(l2,{x:M,y:H-50,size:titleSize,font:fontB,color:rgb(1,1,1)});
+    }else{
+      page.drawText(jobTitle,{x:M,y:H-40,size:titleSize,font:fontB,color:rgb(1,1,1)});
+    }
     // Site address (smaller, light gray, below job name)
     if(job.site_address)page.drawText(job.site_address,{x:M,y:H-58,size:10,font,color:rgb(.72,.72,.72)});
 
@@ -1762,10 +1779,14 @@ function WorkLogEditor({job, user, onBack, reportDate}){
       page.drawRectangle({x:M,y:y-30,width:CW,height:30,color:rgb(.45,.45,.45)});
       page.drawText(title,{x:M+(CW-fontB.widthOfTextAtSize(title,14))/2,y:y-22,size:14,font:fontB,color:rgb(.92,.57,.17)});
       y-=36;
-      // Wrap and draw text
-      const wrapLines=[];const words=text.split(" ");let wl="";
-      words.forEach(w=>{const t=wl?wl+" "+w:w;if(font.widthOfTextAtSize(t,10)>CW-20&&wl){wrapLines.push(wl);wl=w;}else wl=t;});
-      if(wl)wrapLines.push(wl);
+      // Wrap and draw text (preserving newlines)
+      const wrapLines=[];
+      text.split("\n").forEach(para=>{
+        if(!para.trim()){wrapLines.push("");return;}
+        const words=para.split(" ");let wl="";
+        words.forEach(w=>{const t=wl?wl+" "+w:w;if(font.widthOfTextAtSize(t,10)>CW-20&&wl){wrapLines.push(wl);wl=w;}else wl=t;});
+        if(wl)wrapLines.push(wl);
+      });
       // Draw border box around content
       const boxH=wrapLines.length*14+20;
       ensureSpace(boxH);
@@ -1817,11 +1838,20 @@ function WorkLogEditor({job, user, onBack, reportDate}){
     y-=24;
 
     survey.forEach((s,si)=>{
-      const rowH=s.desc?48:40;
+      // Wrap question text if it exceeds question column width
+      const qFullText=`${si+1}. ${s.q||""}`;
+      const qMaxW=sqW-20;
+      const qLines=[];
+      const qWords=qFullText.split(" ");let ql="";
+      qWords.forEach(w=>{const t=ql?ql+" "+w:w;if(fontB.widthOfTextAtSize(t,10)>qMaxW&&ql){qLines.push(ql);ql=w;}else ql=t;});
+      if(ql)qLines.push(ql);
+      const qLinesH=qLines.length*14;
+      const rowH=Math.max(40,qLinesH+24+(s.desc?14:0));
       ensureSpace(rowH);
       page.drawRectangle({x:M,y:y-rowH,width:CW,height:rowH,borderColor:rgb(.85,.85,.85),borderWidth:.5,color:si%2===0?rgb(.99,.99,.99):rgb(1,1,1)});
-      // Question text
-      page.drawText(`${si+1}. ${s.q}`,{x:M+10,y:y-18,size:10,font:fontB,color:rgb(.2,.2,.2)});
+      // Question text (wrapped)
+      let qy=y-18;
+      qLines.forEach(ln=>{page.drawText(ln,{x:M+10,y:qy,size:10,font:fontB,color:rgb(.2,.2,.2)});qy-=14;});
       // Checkboxes
       const boxSz=12,boxY=y-20;
       ["N/A","No","Yes"].forEach((opt,oi)=>{
