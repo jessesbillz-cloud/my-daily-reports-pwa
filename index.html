@@ -2811,15 +2811,25 @@ function ReportEditor({job, user, onBack, reportDate}){
         if(!genResp.ok)throw new Error("Generate preview failed: "+(await genResp.text()));
         const genData=await genResp.json();
         if(genData.error)throw new Error(genData.error);
-        // Decode filled DOCX and render with mammoth
+        // Create download link for the filled DOCX — mammoth strips form layout,
+        // so instead of a broken preview, give the user the actual filled document
         const filledBytes=Uint8Array.from(atob(genData.docx_base64),c=>c.charCodeAt(0));
-        if(window.mammoth){
-          const result=await window.mammoth.convertToHtml({arrayBuffer:filledBytes.buffer});
-          setViewDocxHtml(result.value);
-          setViewingReport(["__docx_html__"]);
-        }else{
-          throw new Error("Document preview library not loaded. Please reload the app.");
-        }
+        const docxBlob=new Blob([filledBytes],{type:"application/vnd.openxmlformats-officedocument.wordprocessingml.document"});
+        const docxUrl=URL.createObjectURL(docxBlob);
+        // Build a summary of filled fields for display
+        const filledSummary=Object.entries(fieldValues).filter(([,v])=>v).map(([k,v])=>k+": "+String(v).substring(0,60)+(String(v).length>60?"...":""));
+        const summaryHtml=`<div style="text-align:center;padding:40px 20px;">
+          <div style="font-size:48px;margin-bottom:16px;">\uD83D\uDCC4</div>
+          <h2 style="margin:0 0 8px;font-size:18px;color:#333;">Filled Report Ready</h2>
+          <p style="color:#666;font-size:14px;margin:0 0 24px;">Your template has been filled with ${filledSummary.length} field values. Download to view the complete document with all formatting intact.</p>
+          <a href="${docxUrl}" download="${job.name||"report"}_filled.docx" style="display:inline-block;padding:14px 32px;background:#e8742a;color:#fff;text-decoration:none;border-radius:10px;font-weight:700;font-size:15px;">Download Filled Report</a>
+          <div style="margin-top:24px;text-align:left;background:#f5f5f5;border-radius:8px;padding:16px;font-size:13px;color:#555;">
+            <div style="font-weight:600;margin-bottom:8px;color:#333;">Fields filled:</div>
+            ${filledSummary.map(s=>"<div style='padding:2px 0;'>"+s.replace(/</g,"&lt;")+"</div>").join("")}
+          </div>
+        </div>`;
+        setViewDocxHtml(summaryHtml);
+        setViewingReport(["__docx_html__"]);
         setViewLoading(false);
         return;
       }
@@ -3058,49 +3068,52 @@ function ReportEditor({job, user, onBack, reportDate}){
       // ── 3. Build field values ──
       const allFields=buildEditableFields();
 
-      // ── 4. Draw field values onto template ──
-      // Skip drawing any value that matches the original template value — copyPages already has it
+      // ── 4. Fill field values using AcroForm fields then flatten ──
+      // Instead of white rectangles + drawText, we create real PDF form fields,
+      // set their values, then flatten — producing clean native text with no overlays
+      const form=pdfDoc.getForm();
+      let fieldIdx=0;
       allFields.forEach(f=>{
         if(f.x==null||f.y==null||!f.val)return;
-        // If value hasn't changed from what's already baked into the PDF, don't redraw it
-        // Always redraw auto-date and auto-increment fields (they change every report)
         const isAutoField=f.autoFill==="date"||f.autoFill==="increment";
         if(!isAutoField&&f.originalValue&&f.val===f.originalValue)return;
         const pageIdx=(f.page||1)-1;
         if(pageIdx<0||pageIdx>=pages.length)return;
         const page=pages[pageIdx];const pageH=page.getHeight();
-        const sz=f.fontSize||10;const pdfY=pageH-f.y-sz;
-        // Cover old template text with white rectangle before writing new value
-        if(f.w){
-          page.drawRectangle({x:f.x-1,y:pdfY-2,width:(f.w||120)+2,height:(f.h||sz+4),color:rgb(1,1,1)});
-        }
-        // Signature stamp — italic name + "Signed via My Daily Reports" timestamp
+        const sz=f.fontSize||10;
+        const fieldH=f.h||sz+4;
+        const pdfY=pageH-f.y-fieldH;
+        const fieldW=f.w||120;
+
+        // Signature stamp — combine name + timestamp into one field value
         const isSig=(f.name||"").toLowerCase().includes("signature")||(f.autoFill==="name"&&(f.name||"").toLowerCase().includes("inspector"));
+        let fieldVal=String(f.val);
         if(isSig){
-          const sigSz=sz*0.85;
           const sigDate=new Date().toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"});
-          page.drawText(String(f.val),{x:f.x,y:pdfY,size:sigSz,font:fontItalic,color:rgb(0.1,0.1,0.1)});
-          page.drawText("Signed via My Daily Reports \u2014 "+sigDate,{x:f.x,y:pdfY-sigSz*1.2,size:sigSz*0.7,font,color:rgb(0.33,0.33,0.33)});
-        }else if(f.multiline&&f.w){
-          const maxW=f.w;
-          const bullet="\u2022 ";
-          const bulletW=font.widthOfTextAtSize(bullet,sz);
-          // Split on newlines first, then word-wrap each line with bullets
-          const rawLines=f.val.split(/\n/).filter(l=>l.trim());
-          const lines=[];
-          rawLines.forEach(rl=>{
-            const hasBullet=rawLines.length>1;
-            const prefix=hasBullet?bullet:"";
-            const indent=hasBullet?bulletW:0;
-            const words=rl.trim().split(" ");let cur=prefix;
-            words.forEach(w=>{const test=cur?cur+(cur===prefix?"":" ")+w:prefix+w;const tw=font.widthOfTextAtSize(test,sz);if(tw>maxW&&cur!==prefix){lines.push(cur);cur=" ".repeat(Math.ceil(indent/font.widthOfTextAtSize(" ",sz)))+w;}else cur=test;});
-            if(cur)lines.push(cur);
-          });
-          lines.forEach((ln,i)=>{const ly=pdfY-(i*sz*1.3);if(ly>0)page.drawText(ln,{x:f.x,y:ly,size:sz,font,color:rgb(0,0,0)});});
-        }else{
-          page.drawText(String(f.val),{x:f.x,y:pdfY,size:sz,font,color:rgb(0,0,0)});
+          fieldVal=f.val+"\nSigned via My Daily Reports \u2014 "+sigDate;
+        }
+
+        // Create a uniquely-named text field (avoid name collisions)
+        const fieldName="mdr_"+(fieldIdx++)+"_"+(f.name||"field").replace(/[^a-zA-Z0-9]/g,"_");
+        try{
+          const tf=form.createTextField(fieldName);
+          tf.setText(fieldVal);
+          tf.setFontSize(isSig?sz*0.85:sz);
+          if(f.multiline||isSig)tf.enableMultiline();
+          // White background to cover original template text underneath
+          tf.addToPage(page,{x:f.x,y:pdfY,width:fieldW,height:fieldH,
+            borderWidth:0,backgroundColor:rgb(1,1,1)});
+        }catch(e){
+          // Fallback: if AcroForm fails for any reason, draw text directly
+          console.warn("AcroForm field failed for",f.name,e);
+          const fallbackY=pageH-f.y-sz;
+          if(f.w)page.drawRectangle({x:f.x-1,y:fallbackY-2,width:fieldW+2,height:fieldH+2,color:rgb(1,1,1)});
+          page.drawText(fieldVal,{x:f.x,y:fallbackY,size:sz,font,color:rgb(0,0,0)});
         }
       });
+      // Flatten all form fields — bakes values into PDF as regular content
+      // Result: clean text at correct positions, no interactive fields, no white-box artifacts
+      form.flatten();
 
       // ── 5. Remove empty trailing pages (no fields reference them) before adding photos ──
       if(photos.length>0&&srcDoc&&pdfDoc.getPageCount()>1){
