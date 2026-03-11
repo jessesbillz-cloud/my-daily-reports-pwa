@@ -1301,6 +1301,7 @@ function WorkLogEditor({job, user, onBack, reportDate}){
   const [materials,setMaterials]=useState("");
   const [equipment,setEquipment]=useState("");
   const [qualityControl,setQualityControl]=useState("");
+  const [customCategories,setCustomCategories]=useState([]); // [{title:"",value:""}]
   const [survey,setSurvey]=useState([
     {q:"Any accidents on site today?",answer:"",desc:""},
     {q:"Any schedule delays occur?",answer:"",desc:""},
@@ -1402,6 +1403,7 @@ function WorkLogEditor({job, user, onBack, reportDate}){
             if(c.materials)setMaterials(c.materials);
             if(c.equipment)setEquipment(c.equipment);
             if(c.qualityControl)setQualityControl(c.qualityControl);
+            if(c.customCategories)setCustomCategories(c.customCategories);
             if(c.survey)setSurvey(c.survey);
             if(c.weatherEnabled)setWeatherEnabled(true);
             if(c.weatherAM)setWeatherAM(c.weatherAM);
@@ -1505,7 +1507,7 @@ function WorkLogEditor({job, user, onBack, reportDate}){
   const showToast=(m)=>{setToast(m);setTimeout(()=>setToast(""),3000);};
 
   const buildContent=()=>({
-    contractors,generalNotes,safetyNotes,materials,equipment,qualityControl,survey,
+    contractors,generalNotes,safetyNotes,materials,equipment,qualityControl,customCategories,survey,
     weatherEnabled,weatherAM,weatherMid,weatherPM,
     reportType:"worklog"
   });
@@ -1788,6 +1790,13 @@ function WorkLogEditor({job, user, onBack, reportDate}){
     // ── Quality Control Observations ──
     drawTextSection("Quality Control Observations",qualityControl);
 
+    // ── Custom Categories ──
+    if(customCategories&&customCategories.length>0){
+      customCategories.forEach(cat=>{
+        if(cat.title||cat.value)drawTextSection(cat.title||"Untitled Category",cat.value);
+      });
+    }
+
     // ── Survey ──
     ensureSpace(40);
     page.drawRectangle({x:M,y:y-30,width:CW,height:30,color:rgb(.45,.45,.45)});
@@ -2031,7 +2040,7 @@ function WorkLogEditor({job, user, onBack, reportDate}){
     if(contractors.length===0)return;
     const t=setInterval(()=>saveWorking(),30000);
     return()=>clearInterval(t);
-  },[contractors,generalNotes,safetyNotes,materials,equipment,qualityControl,survey,weatherEnabled,weatherAM,weatherMid,weatherPM]);
+  },[contractors,generalNotes,safetyNotes,materials,equipment,qualityControl,customCategories,survey,weatherEnabled,weatherAM,weatherMid,weatherPM]);
 
   const totalHours=contractors.reduce((sum,c)=>{
     const h=parseFloat(c.hours)||0;
@@ -2253,6 +2262,30 @@ function WorkLogEditor({job, user, onBack, reportDate}){
           </div>
         ))}
 
+        {/* Custom Categories — user-added sections */}
+        {customCategories.map((cat,ci)=>(
+          <div key={"cc-"+ci} style={{background:C.card,border:`1px solid ${expandedSections["cc"+ci]?C.org:C.brd}`,borderRadius:12,marginBottom:10,overflow:"hidden",transition:"border-color 0.2s"}}>
+            <button onClick={()=>toggleSection("cc"+ci)} style={{width:"100%",display:"flex",alignItems:"center",gap:10,padding:"14px 16px",background:"none",border:"none",cursor:"pointer",textAlign:"left"}}>
+              <span style={{fontSize:16}}>+</span>
+              <span style={{flex:1,fontWeight:700,fontSize:14,color:C.txt}}>{cat.title||"New Category"}</span>
+              <span style={{fontSize:11,color:C.mut}}>{cat.value?"Has entry":"No entry"}</span>
+              <button onClick={e=>{e.stopPropagation();setCustomCategories(p=>p.filter((_,i)=>i!==ci));}} style={{background:"none",border:"none",color:"#ef4444",fontSize:14,cursor:"pointer",padding:"4px 8px"}}>✕</button>
+              <span style={{color:expandedSections["cc"+ci]?C.org:C.mut,fontSize:18,transform:expandedSections["cc"+ci]?"rotate(180deg)":"none",transition:"transform 0.2s",padding:"4px 8px"}}>▼</span>
+            </button>
+            {expandedSections["cc"+ci]&&(
+              <div style={{padding:"0 16px 16px"}}>
+                <input value={cat.title} onChange={e=>setCustomCategories(p=>p.map((c,i)=>i===ci?{...c,title:e.target.value}:c))} placeholder="Category name..." style={{...fs,padding:"8px 12px",marginBottom:8,fontWeight:600}}/>
+                <textarea value={cat.value} onChange={e=>setCustomCategories(p=>p.map((c,i)=>i===ci?{...c,value:e.target.value}:c))} placeholder="Enter details..." rows={3} style={{...fs,resize:"vertical",minHeight:70,lineHeight:1.5}}/>
+              </div>
+            )}
+          </div>
+        ))}
+
+        {/* Add Category button */}
+        <button onClick={()=>{const idx=customCategories.length;setCustomCategories(p=>[...p,{title:"",value:""}]);setExpandedSections(p=>({...p,["cc"+idx]:true}));}} style={{width:"100%",padding:"12px 0",background:"none",border:`1px dashed ${C.brd}`,borderRadius:12,color:C.mut,fontSize:13,fontWeight:600,cursor:"pointer",marginBottom:10}}>
+          + Add Category
+        </button>
+
         {/* Survey Section */}
         <div style={{background:C.card,border:`1px solid ${expandedSections.survey?C.org:C.brd}`,borderRadius:12,marginBottom:10,overflow:"hidden",transition:"border-color 0.2s"}}>
           <button onClick={()=>toggleSection("survey")} style={{width:"100%",display:"flex",alignItems:"center",gap:10,padding:"14px 16px",background:"none",border:"none",cursor:"pointer",textAlign:"left"}}>
@@ -2265,7 +2298,14 @@ function WorkLogEditor({job, user, onBack, reportDate}){
             <div style={{padding:"0 16px 16px"}}>
               {survey.map((s,si)=>(
                 <div key={si} style={{padding:"10px 0",borderTop:si>0?`1px solid ${C.brd}`:"none"}}>
-                  <div style={{fontSize:13,fontWeight:600,color:C.txt,marginBottom:8}}>{si+1}. {s.q}</div>
+                  <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:8}}>
+                    {si<6?(
+                      <div style={{flex:1,fontSize:13,fontWeight:600,color:C.txt}}>{si+1}. {s.q}</div>
+                    ):(
+                      <input value={s.q} onChange={e=>setSurvey(p=>p.map((sv,i)=>i===si?{...sv,q:e.target.value}:sv))} placeholder="Type your concern..." style={{flex:1,fontSize:13,fontWeight:600,color:C.txt,background:C.inp,border:`1px solid ${C.brd}`,borderRadius:6,padding:"6px 10px"}}/>
+                    )}
+                    {si>=6&&<button onClick={()=>setSurvey(p=>p.filter((_,i)=>i!==si))} style={{background:"none",border:"none",color:"#ef4444",fontSize:12,cursor:"pointer",padding:"2px 6px"}}>✕</button>}
+                  </div>
                   <div style={{display:"flex",gap:8,marginBottom:6}}>
                     {["N/A","No","Yes"].map(opt=>(
                       <button key={opt} onClick={()=>setSurvey(p=>p.map((sv,i)=>i===si?{...sv,answer:sv.answer===opt?"":opt}:sv))}
@@ -2279,6 +2319,9 @@ function WorkLogEditor({job, user, onBack, reportDate}){
                   )}
                 </div>
               ))}
+              <button onClick={()=>setSurvey(p=>[...p,{q:"",answer:"",desc:""}])} style={{width:"100%",padding:"10px 0",background:"none",border:`1px dashed ${C.brd}`,borderRadius:8,color:C.mut,fontSize:13,fontWeight:600,cursor:"pointer",marginTop:8}}>
+                + Add Concern
+              </button>
             </div>
           )}
         </div>
