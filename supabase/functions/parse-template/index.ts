@@ -359,6 +359,42 @@ serve(async (req) => {
         }
       }
 
+      // Multi-word fallback — pdf.js splits "IOR Notes:" into "IOR" + "Notes:" as
+      // separate text items. Combine adjacent items on the same row to match.
+      const labelLower = label.toLowerCase().replace(/:$/, "").trim();
+      for (const [pg, pgItems] of itemsByPage) {
+        if (page && pg !== page) continue;
+        for (let i = 0; i < pgItems.length; i++) {
+          let combined = (pgItems[i].str || "").trim();
+          let lastItem = pgItems[i];
+          if (!combined) continue;
+          // Check if partial match — label starts with this item's text
+          if (!labelLower.startsWith(combined.toLowerCase().replace(/:$/, "").trim())) continue;
+          // Try combining with subsequent items on the same row
+          for (let j = i + 1; j < pgItems.length && j <= i + 5; j++) {
+            const nxt = pgItems[j];
+            if (Math.abs(nxt.y - pgItems[i].y) > 4) break; // different row
+            const gap = nxt.x - (lastItem.x + (lastItem.w || 0));
+            if (gap > (lastItem.fontSize || 10) * 2) break; // too far apart
+            combined = combined + " " + (nxt.str || "").trim();
+            lastItem = nxt;
+            const combinedClean = combined.toLowerCase().replace(/:$/, "").trim();
+            if (combinedClean === labelLower || combined.toLowerCase().trim() === label.toLowerCase().trim()) {
+              // Return a synthetic merged item spanning from first to last
+              return {
+                str: combined,
+                x: pgItems[i].x,
+                y: pgItems[i].y,
+                w: (lastItem.x + (lastItem.w || 0)) - pgItems[i].x,
+                h: Math.max(pgItems[i].h || 10, lastItem.h || 10),
+                page: pg,
+                fontSize: pgItems[i].fontSize || 10,
+              };
+            }
+          }
+        }
+      }
+
       return null;
     };
 

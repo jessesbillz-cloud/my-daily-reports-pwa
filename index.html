@@ -43,7 +43,7 @@ async function extractPdfTextStructure(pdfData){
   // Always work on a copy so the caller's buffer isn't detached
   const safeCopy=new Uint8Array(pdfData instanceof ArrayBuffer?new Uint8Array(pdfData):pdfData);
   const doc=await window.pdfjsLib.getDocument({data:safeCopy}).promise;
-  const allItems=[];
+  const rawItems=[];
   for(let p=1;p<=doc.numPages;p++){
     const page=await doc.getPage(p);
     const vp=page.getViewport({scale:1});
@@ -58,10 +58,30 @@ async function extractPdfTextStructure(pdfData){
       const y=pageH-yBottom-fontSize; // top-left origin, top of text
       const w=item.width||(item.str.length*fontSize*0.6); // estimate if missing
       const h=item.height||fontSize;
-      allItems.push({str:item.str.trim(),x:Math.round(x*100)/100,y:Math.round(y*100)/100,w:Math.round(w*100)/100,h:Math.round(h*100)/100,page:p,fontSize:Math.round(fontSize*10)/10});
+      rawItems.push({str:item.str.trim(),x:Math.round(x*100)/100,y:Math.round(y*100)/100,w:Math.round(w*100)/100,h:Math.round(h*100)/100,page:p,fontSize:Math.round(fontSize*10)/10});
     });
   }
-  return allItems;
+  // Merge adjacent text items on the same line — pdf.js splits multi-word labels
+  // like "IOR Notes:" into separate items "IOR" and "Notes:" which breaks label matching
+  rawItems.sort((a,b)=>a.page-b.page||a.y-b.y||a.x-b.x);
+  const merged=[];
+  for(let i=0;i<rawItems.length;i++){
+    const cur={...rawItems[i]};
+    while(i+1<rawItems.length){
+      const nxt=rawItems[i+1];
+      if(nxt.page!==cur.page)break;
+      if(Math.abs(nxt.y-cur.y)>3)break; // different line
+      const gap=nxt.x-(cur.x+cur.w);
+      if(gap>cur.fontSize*1.2)break; // too far apart — different field/column
+      cur.str=cur.str+" "+nxt.str;
+      cur.w=Math.round(((nxt.x+nxt.w)-cur.x)*100)/100;
+      cur.h=Math.max(cur.h,nxt.h);
+      i++;
+    }
+    cur.str=cur.str.trim();
+    if(cur.str)merged.push(cur);
+  }
+  return merged;
 }
 
 // Auth helper — check for existing session (refresh token in Supabase cookie/localStorage)
