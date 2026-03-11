@@ -405,6 +405,7 @@ function AccountSettings({user, onBack, onLogout}){
       };
       await db.upsertProfile(data);
       flash("Settings saved successfully");
+      setTimeout(()=>onBack(),600);
     }catch(e){
       flash(e.message,"err");
     }finally{setSaving(false);}
