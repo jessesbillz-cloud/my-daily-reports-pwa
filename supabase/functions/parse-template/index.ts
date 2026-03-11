@@ -157,13 +157,19 @@ For each field label found, return:
 - "multiline": true for notes/observations/comments/activities fields, false otherwise
 - "valueText": If you can identify the current value text near this label, include the exact str. Otherwise empty string.
 
+IMPORTANT — SIGNATURE BLOCKS:
+- Look for "X:___", "X:_________", "Signature:", or "Project Inspector:" text near signature lines.
+- If found, create a field named "Signature" with category "editable", autoFill "name", layout "inline".
+- The "label" should match the "X:___..." text item or the "Project Inspector:" text item.
+- The value area should REPLACE the underscores/line, so users see their digital signature stamp.
+
 CRITICAL RULES:
 1. NEVER output duplicate field names. Each field appears EXACTLY ONCE. If there are multiple dates, give them UNIQUE names (e.g. "Date", "Signature Date", "Report Date").
 2. If a label appears multiple times (e.g. "IOR Notes" in header AND as section heading), pick the one with the larger writable area (layout: "below").
 3. NOTES/OBSERVATIONS: Output exactly ONE notes field with layout "below", multiline true, voiceEnabled true.
-4. Ignore signature LINES themselves (the line where someone signs) and page numbers.
-5. The "label" field MUST exactly match a "str" value from the input text items.
-6. Date values next to signatures ARE fields and MUST be included.
+4. The "label" field MUST exactly match a "str" value from the input text items.
+5. Date values next to signatures ARE fields and MUST be included.
+6. Signature blocks (X:___, Project Inspector:) MUST be detected as editable fields with autoFill "name".
 
 Return ONLY valid JSON object with "fields" array, no markdown:
 {"fields":[{"label":"Date:","name":"Date","category":"editable","layout":"inline","autoFill":"date","voiceEnabled":false,"multiline":false,"valueText":"04 February 2026"},{"label":"Jan 31, 2026","name":"Signature Date","category":"editable","layout":"inline","autoFill":"date","voiceEnabled":false,"multiline":false,"valueText":"Jan 31, 2026"},{"label":"IOR Notes","name":"IOR Notes","category":"editable","layout":"below","autoFill":null,"voiceEnabled":true,"multiline":true,"valueText":""}]}`;
@@ -394,37 +400,34 @@ serve(async (req) => {
     const locked: any[] = [];
     const NOTES_KEYWORDS = ["notes", "observations", "comments"];
 
-    // Detect table column boundaries for smarter inline field positioning
-    // Groups items by y-position (rows), finds where value columns typically start
-    const columnCache = new Map<number, number[]>();
-    const getColumnStarts = (pg: number): number[] => {
-      if (columnCache.has(pg)) return columnCache.get(pg)!;
+    // Detect table structure: find rows of labels at consistent x positions
+    // Instead of looking for "value columns", detect LABEL columns and infer value areas between them
+    const rowCache = new Map<number, Map<number, any[]>>();
+    const getRowItems = (pg: number): Map<number, any[]> => {
+      if (rowCache.has(pg)) return rowCache.get(pg)!;
       const pgItems = itemsByPage.get(pg) || [];
       const rows = new Map<number, any[]>();
       for (const item of pgItems) {
-        const yKey = Math.round(item.y / 14) * 14;
+        const yKey = Math.round(item.y / 8) * 8; // tighter grouping
         if (!rows.has(yKey)) rows.set(yKey, []);
         rows.get(yKey)!.push(item);
       }
-      const valXs: number[] = [];
-      for (const [, rItems] of rows) {
-        const sorted = [...rItems].sort((a: any, b: any) => a.x - b.x);
-        if (sorted.length >= 2) valXs.push(sorted[1].x);
-        if (sorted.length >= 4) valXs.push(sorted[3].x);
+      rowCache.set(pg, rows);
+      return rows;
+    };
+
+    // Find the next label on the same row (to calculate value width)
+    const findNextLabelOnRow = (labelItem: any): any | null => {
+      const rows = getRowItems(labelItem.page || 1);
+      const yKey = Math.round(labelItem.y / 8) * 8;
+      const rowItems = rows.get(yKey) || [];
+      const sorted = [...rowItems].sort((a: any, b: any) => a.x - b.x);
+      const idx = sorted.findIndex((it: any) => it === labelItem || (it.x === labelItem.x && it.y === labelItem.y));
+      // Return the next item on the same row that's further right
+      for (let i = idx + 1; i < sorted.length; i++) {
+        if (sorted[i].x > labelItem.x + (labelItem.w || 0) + 5) return sorted[i];
       }
-      valXs.sort((a, b) => a - b);
-      const clusters: { sum: number; count: number; avg: number }[] = [];
-      for (const xv of valXs) {
-        const last = clusters[clusters.length - 1];
-        if (last && Math.abs(xv - last.avg) < 25) {
-          last.sum += xv; last.count++; last.avg = last.sum / last.count;
-        } else {
-          clusters.push({ sum: xv, count: 1, avg: xv });
-        }
-      }
-      const cols = clusters.filter(c => c.count >= 2).map(c => Math.round(c.avg));
-      columnCache.set(pg, cols);
-      return cols;
+      return null;
     };
 
     for (const mapping of fieldMappings) {
@@ -461,17 +464,10 @@ serve(async (req) => {
           }
         }
 
-        // If x is still right after the label, snap to detected column boundary
-        if (x < labelEnd + 20) {
-          const cols = getColumnStarts(page);
-          const snapCol = cols.find((cx: number) => cx > labelEnd + 10 && cx < labelEnd + 250);
-          if (snapCol) x = snapCol;
-        }
-
-        // Width: distance to next item on the right, or to page margin
-        const nextRight = findNextItemRight(labelItem);
-        if (nextRight && nextRight.x > x) {
-          w = nextRight.x - x - PADDING;
+        // Width: find the next LABEL on the same row to define the value boundary
+        const nextLabel = findNextLabelOnRow(labelItem);
+        if (nextLabel && nextLabel.x > x) {
+          w = nextLabel.x - x - PADDING;
         } else {
           w = PAGE_WIDTH - x - 36; // extend to right margin
         }
