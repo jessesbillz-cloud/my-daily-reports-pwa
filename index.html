@@ -851,14 +851,15 @@ function TemplateFieldEditor({pdfBase64,initialFields,onDone,onCancel}){
   const saveField=()=>{
     if(!modalName.trim())return;
     const entry={
+      id:modal.isNew?(typeof crypto!=="undefined"&&crypto.randomUUID?crypto.randomUUID():"fld_"+Date.now()+"_"+Math.random().toString(36).slice(2,6)):modal.id||undefined,
       name:modalName.trim(),
       value:"",
       mode:modalMode,
       page:modal.page||pageNum,
-      x:Math.round(modal.x*100)/100,
-      y:Math.round(modal.y*100)/100,
-      w:Math.round((modal.w||160)*100)/100,
-      h:Math.round((modal.h||(modalType==="textarea"?80:24))*100)/100,
+      x:snap(Math.round(modal.x*100)/100),
+      y:snap(Math.round(modal.y*100)/100),
+      w:snap(Math.round((modal.w||160)*100)/100),
+      h:snap(Math.round((modal.h||(modalType==="textarea"?80:24))*100)/100),
       fontSize:modalType==="textarea"?10:12,
       multiline:modalType==="textarea",
       voiceEnabled:modalType!=="signature",
@@ -892,12 +893,12 @@ function TemplateFieldEditor({pdfBase64,initialFields,onDone,onCancel}){
     if(dragging){
       const dx=(px-dragging.startX)/scale;
       const dy=(py-dragging.startY)/scale;
-      setFields(prev=>prev.map((f,i)=>i===dragging.idx?{...f,x:Math.max(0,dragging.origX+dx),y:Math.max(0,dragging.origY+dy)}:f));
+      setFields(prev=>prev.map((f,i)=>i===dragging.idx?{...f,x:snap(Math.max(0,dragging.origX+dx)),y:snap(Math.max(0,dragging.origY+dy))}:f));
     }
     if(resizing){
       const dx=(px-resizing.startX)/scale;
       const dy=(py-resizing.startY)/scale;
-      setFields(prev=>prev.map((f,i)=>i===resizing.idx?{...f,w:Math.max(40,resizing.origW+dx),h:Math.max(16,resizing.origH+dy)}:f));
+      setFields(prev=>prev.map((f,i)=>i===resizing.idx?{...f,w:snap(Math.max(40,resizing.origW+dx)),h:snap(Math.max(16,resizing.origH+dy))}:f));
     }
   };
   const onPointerUp=()=>{setDragging(null);setResizing(null);};
