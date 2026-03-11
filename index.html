@@ -1257,9 +1257,10 @@ function CreateJob({user, onBack, onCreated}){
       // Store as base64 string — immune to iOS Safari releasing the file buffer
       const u8=new Uint8Array(buf);const chunks=[];for(let i=0;i<u8.length;i+=8192)chunks.push(String.fromCharCode.apply(null,u8.subarray(i,i+8192)));
       setTfB64(btoa(chunks.join("")));
-      // For PDF: don't auto-parse — user will use click-to-place editor
-      // For DOCX: still use edge function (no canvas preview available)
-      if(e==="docx"||e==="doc"){
+      // Auto-detect fields via Edge Function
+      if(e==="pdf"){
+        parseFields(buf.slice(0),f.name);
+      }else if(e==="docx"||e==="doc"){
         parseDocxFields(buf.slice(0),f.name);
       }else{
         setFields([]);setParsing(false);
@@ -1623,21 +1624,11 @@ function CreateJob({user, onBack, onCreated}){
           )}
         </div>
 
-        {/* Place Fields button — for PDF uploads without saved template fields */}
-        {tf&&!usedSavedId&&fields.length===0&&!parsing&&tf.name.toLowerCase().endsWith(".pdf")&&tfB64&&(
-          <div style={{marginBottom:16}}>
-            <button onClick={()=>setShowFieldEditor(true)} style={{width:"100%",padding:"16px 0",background:C.org,border:"none",borderRadius:12,color:"#fff",fontSize:15,fontWeight:700,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",gap:8}}>
-              Place Fields on Template
-            </button>
-            <div style={{fontSize:11,color:C.mut,marginTop:6,textAlign:"center"}}>Tap where each field goes on your form — takes about 10 seconds</div>
-          </div>
-        )}
-
-        {/* Re-edit fields button — when fields already placed */}
-        {tf&&fields.length>0&&!parsing&&tf.name.toLowerCase().endsWith(".pdf")&&tfB64&&(
-          <div style={{marginBottom:8}}>
-            <button onClick={()=>setShowFieldEditor(true)} style={{width:"100%",padding:"10px 0",background:"transparent",border:`1px solid ${C.org}`,borderRadius:10,color:C.org,fontSize:13,fontWeight:600,cursor:"pointer"}}>
-              Edit Field Placement
+        {/* Manual field placement — optional, for when auto-detect misses fields */}
+        {tf&&!parsing&&tf.name.toLowerCase().endsWith(".pdf")&&tfB64&&(
+          <div style={{marginBottom:4,textAlign:"right"}}>
+            <button onClick={()=>setShowFieldEditor(true)} style={{background:"none",border:"none",color:C.mut,fontSize:11,cursor:"pointer",textDecoration:"underline",padding:"4px 0"}}>
+              {fields.length>0?"Adjust field positions manually":"Place fields manually instead"}
             </button>
           </div>
         )}
