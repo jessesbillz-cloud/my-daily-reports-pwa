@@ -2265,14 +2265,12 @@ function WorkLogEditor({job, user, onBack, reportDate}){
             {/* Expanded entry area */}
             {activeId===c.id&&(
               <div style={{padding:"0 16px 16px",borderTop:`1px solid ${C.brd}`,position:"relative"}}>
-                {/* Remove contractor — small corner button */}
-                <button onClick={()=>removeContractor(c.id)} style={{position:"absolute",top:6,right:8,background:"none",border:"none",color:C.err,fontSize:11,fontWeight:600,cursor:"pointer",padding:"4px 8px",opacity:0.7}}>✕ Remove</button>
-                {/* Collapse bar — easy tap target to close */}
-                <button onClick={()=>setActiveId(null)} style={{width:"100%",padding:"10px 0",background:"none",border:"none",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",gap:6}}>
-                  <span style={{fontSize:11,color:C.mut,fontWeight:600}}>Collapse</span>
-                  <span style={{fontSize:12,color:C.mut}}>▲</span>
-                </button>
-                <div style={{marginTop:14,marginBottom:14}}>
+                {/* Top bar: Save/Close + Remove */}
+                <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"10px 0 6px"}}>
+                  <button onClick={()=>removeContractor(c.id)} style={{background:"none",border:"none",color:C.err,fontSize:11,fontWeight:600,cursor:"pointer",padding:"4px 8px",opacity:0.7}}>✕ Remove</button>
+                  <button onClick={()=>setActiveId(null)} style={{display:"flex",alignItems:"center",gap:5,padding:"6px 14px",background:"#22c55e",border:"none",borderRadius:8,color:"#fff",fontSize:13,fontWeight:700,cursor:"pointer"}}>✓ Save</button>
+                </div>
+                <div style={{marginBottom:14}}>
                   <label style={{display:"block",fontSize:12,color:C.lt,fontWeight:600,marginBottom:4}}>Work Description</label>
                   <textarea value={c.description} onChange={e=>updateContractor(c.id,"description",e.target.value)} placeholder="Tap here and use your keyboard mic to dictate..." rows={3} style={{...fs,resize:"vertical",minHeight:70,lineHeight:1.5}}/>
                 </div>
@@ -2284,16 +2282,6 @@ function WorkLogEditor({job, user, onBack, reportDate}){
                   <div style={{flex:1}}>
                     <label style={{display:"block",fontSize:12,color:C.lt,fontWeight:600,marginBottom:4}}>Quantity (Men)</label>
                     <input type="number" inputMode="numeric" value={c.quantity} onChange={e=>updateContractor(c.id,"quantity",e.target.value)} placeholder="1" style={fs}/>
-                  </div>
-                </div>
-
-                {/* Carry-over toggle */}
-                <div style={{marginBottom:14,padding:"10px 12px",background:C.org+"0A",border:`1px solid ${C.org}22`,borderRadius:8}}>
-                  <div style={{fontSize:12,fontWeight:600,color:C.lt,marginBottom:6}}>Carry over to tomorrow:</div>
-                  <div style={{display:"flex",gap:8}}>
-                    <button onClick={()=>{updateContractor(c.id,"locked",true);updateContractor(c.id,"carryDesc",true);}} style={{flex:1,padding:"8px 0",background:c.locked&&c.carryDesc!==false?C.org:C.card,border:`1px solid ${c.locked&&c.carryDesc!==false?C.org:C.brd}`,borderRadius:6,color:c.locked&&c.carryDesc!==false?"#fff":C.mut,fontSize:12,fontWeight:600,cursor:"pointer"}}>Name + Work</button>
-                    <button onClick={()=>{updateContractor(c.id,"locked",true);updateContractor(c.id,"carryDesc",false);}} style={{flex:1,padding:"8px 0",background:c.locked&&c.carryDesc===false?C.org:C.card,border:`1px solid ${c.locked&&c.carryDesc===false?C.org:C.brd}`,borderRadius:6,color:c.locked&&c.carryDesc===false?"#fff":C.mut,fontSize:12,fontWeight:600,cursor:"pointer"}}>Name Only</button>
-                    {c.locked&&<button onClick={()=>{updateContractor(c.id,"locked",false);updateContractor(c.id,"carryDesc",true);}} style={{padding:"8px 12px",background:"transparent",border:`1px solid ${C.brd}`,borderRadius:6,color:C.mut,fontSize:12,fontWeight:600,cursor:"pointer"}}>Clear</button>}
                   </div>
                 </div>
 
@@ -2312,10 +2300,20 @@ function WorkLogEditor({job, user, onBack, reportDate}){
                       ))}
                     </div>
                   )}
-                  {/* Photo + Library buttons — full width at bottom */}
+                  {/* Photo + Library buttons */}
                   <div style={{display:"flex",gap:8}}>
                     <button onClick={()=>{setPhotoTarget(c.id);setTimeout(()=>cameraRef.current?.click(),100);}} style={{flex:1,padding:"10px 0",background:C.org,border:"none",borderRadius:8,color:"#fff",fontSize:13,fontWeight:600,cursor:"pointer"}}>Photo</button>
                     <button onClick={()=>{setPhotoTarget(c.id);setTimeout(()=>libraryRef.current?.click(),100);}} style={{flex:1,padding:"10px 0",background:C.card,border:`1px solid ${C.brd}`,borderRadius:8,color:C.lt,fontSize:13,fontWeight:600,cursor:"pointer"}}>Library</button>
+                  </div>
+                </div>
+
+                {/* Carry-over toggle — at the very bottom */}
+                <div style={{padding:"10px 12px",background:C.org+"0A",border:`1px solid ${C.org}22`,borderRadius:8}}>
+                  <div style={{fontSize:12,fontWeight:600,color:C.lt,marginBottom:6}}>Carry over to tomorrow:</div>
+                  <div style={{display:"flex",gap:8}}>
+                    <button onClick={()=>{updateContractor(c.id,"locked",true);updateContractor(c.id,"carryDesc",true);}} style={{flex:1,padding:"8px 0",background:c.locked&&c.carryDesc!==false?C.org:C.card,border:`1px solid ${c.locked&&c.carryDesc!==false?C.org:C.brd}`,borderRadius:6,color:c.locked&&c.carryDesc!==false?"#fff":C.mut,fontSize:12,fontWeight:600,cursor:"pointer"}}>Name + Work</button>
+                    <button onClick={()=>{updateContractor(c.id,"locked",true);updateContractor(c.id,"carryDesc",false);}} style={{flex:1,padding:"8px 0",background:c.locked&&c.carryDesc===false?C.org:C.card,border:`1px solid ${c.locked&&c.carryDesc===false?C.org:C.brd}`,borderRadius:6,color:c.locked&&c.carryDesc===false?"#fff":C.mut,fontSize:12,fontWeight:600,cursor:"pointer"}}>Name Only</button>
+                    {c.locked&&<button onClick={()=>{updateContractor(c.id,"locked",false);updateContractor(c.id,"carryDesc",true);}} style={{padding:"8px 12px",background:"transparent",border:`1px solid ${C.brd}`,borderRadius:6,color:C.mut,fontSize:12,fontWeight:600,cursor:"pointer"}}>Clear</button>}
                   </div>
                 </div>
               </div>
