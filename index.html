@@ -1767,13 +1767,8 @@ function WorkLogEditor({job, user, onBack, reportDate}){
 
     // ── Helper: draw a MDR-style text section ──
     const drawTextSection=(title,text)=>{
-      if(!text){
-        // Draw "No entry" bar like MDR
-        ensureSpace(34);
-        page.drawRectangle({x:M,y:y-30,width:CW,height:30,color:rgb(.45,.45,.45)});
-        page.drawText(title,{x:M+(CW-fontB.widthOfTextAtSize(title,14))/2,y:y-22,size:14,font:fontB,color:rgb(.92,.57,.17)});
-        page.drawText("No entry",{x:M+CW-font.widthOfTextAtSize("No entry",9)-10,y:y-22,size:9,font,color:rgb(.85,.85,.85)});
-        y-=36;
+      if(!text||!text.trim()){
+        // Skip empty sections entirely — no wasted space
         return;
       }
       ensureSpace(60);
@@ -1838,7 +1833,9 @@ function WorkLogEditor({job, user, onBack, reportDate}){
     page.drawText("Description",{x:M+sqW+scW*3+8,y:y-15,size:9,font:fontB,color:rgb(.3,.3,.3)});
     y-=24;
 
-    survey.forEach((s,si)=>{
+    // Filter out custom questions (index >= 6) with no question text
+    const surveyFiltered=survey.filter((s,si)=>si<6||s.q?.trim());
+    surveyFiltered.forEach((s,si)=>{
       // Wrap question text if it exceeds question column width
       const qFullText=`${si+1}. ${s.q||""}`;
       const qMaxW=sqW-20;
