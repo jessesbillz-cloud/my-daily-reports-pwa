@@ -743,6 +743,324 @@ function AccountSettings({user, onBack, onLogout}){
   );
 }
 
+/* ── Click-to-Place Template Field Editor ── */
+function TemplateFieldEditor({pdfBase64,initialFields,onDone,onCancel}){
+  const canvasRef=useRef(null);
+  const overlayRef=useRef(null);
+  const [pdfDoc,setPdfDoc]=useState(null);
+  const [pageNum,setPageNum]=useState(1);
+  const [numPages,setNumPages]=useState(1);
+  const [fields,setFields]=useState(initialFields||[]);
+  const [scale,setScale]=useState(1); // canvas px / PDF pt
+  const [pageW,setPageW]=useState(612);
+  const [pageH,setPageH]=useState(792);
+  const [modal,setModal]=useState(null); // {idx} or {x,y,w,h,page} for new
+  const [modalName,setModalName]=useState("");
+  const [modalType,setModalType]=useState("text");
+  const [modalMode,setModalMode]=useState("edit");
+  const [dragging,setDragging]=useState(null); // {idx,startX,startY,origX,origY}
+  const [resizing,setResizing]=useState(null); // {idx,startX,startY,origW,origH}
+  const [loading,setLoading]=useState(true);
+  const [nearbyText,setNearbyText]=useState(""); // text near click for auto-suggest
+  const [textItems,setTextItems]=useState([]); // extracted text items for name suggestions
+  const FIELD_PRESETS=["Date","Weather","Crew Size","Notes","Signature","Inspector","Project Name","Project No"];
+
+  // Load PDF
+  useEffect(()=>{
+    if(!pdfBase64||!window.pdfjsLib)return;
+    (async()=>{
+      try{
+        const raw=atob(pdfBase64);const u8=new Uint8Array(raw.length);
+        for(let i=0;i<raw.length;i++)u8[i]=raw.charCodeAt(i);
+        const doc=await window.pdfjsLib.getDocument({data:u8}).promise;
+        setPdfDoc(doc);setNumPages(doc.numPages);
+        // Extract text items for nearby-text suggestions
+        try{
+          const items=await extractPdfTextStructure(u8);
+          setTextItems(items);
+        }catch(e){console.error("Text extraction for suggestions:",e);}
+      }catch(e){console.error("PDF load error:",e);}
+      finally{setLoading(false);}
+    })();
+  },[pdfBase64]);
+
+  // Render current page — handles rotation, high-DPI, and explicit CSS sizing
+  useEffect(()=>{
+    if(!pdfDoc||!canvasRef.current)return;
+    (async()=>{
+      const page=await pdfDoc.getPage(pageNum);
+      // Account for PDF rotation metadata
+      const vp=page.getViewport({scale:1,rotation:page.rotate||0});
+      // Scale to fit container width (max ~360px on mobile)
+      const container=canvasRef.current.parentElement;
+      const maxW=container?container.clientWidth-8:360;
+      const s=maxW/vp.width;
+      setScale(s);setPageW(vp.width);setPageH(vp.height);
+      const svp=page.getViewport({scale:s,rotation:page.rotate||0});
+      const cvs=canvasRef.current;
+      const dpr=window.devicePixelRatio||1;
+      // Set internal resolution for high-DPI (iPhone retina)
+      cvs.width=Math.round(svp.width*dpr);
+      cvs.height=Math.round(svp.height*dpr);
+      // Set CSS display size to match logical pixels exactly — prevents double-scaling
+      cvs.style.width=Math.round(svp.width)+"px";
+      cvs.style.height=Math.round(svp.height)+"px";
+      const ctx=cvs.getContext("2d");
+      ctx.scale(dpr,dpr);
+      await page.render({canvasContext:ctx,viewport:svp}).promise;
+    })();
+  },[pdfDoc,pageNum]);
+
+  // Find nearby text for auto-suggest field name
+  const findNearbyText=(clickX,clickY,pg)=>{
+    // clickX/clickY are in PDF points
+    let best="";let bestDist=Infinity;
+    textItems.filter(t=>t.page===pg).forEach(t=>{
+      const cx=t.x+t.w/2;const cy=t.y+t.h/2;
+      const dist=Math.sqrt((cx-clickX)**2+(cy-clickY)**2);
+      if(dist<bestDist&&dist<80){bestDist=dist;best=t.str;}
+    });
+    return best;
+  };
+
+  // Handle tap on overlay to place a new field
+  const handlePointerDown=(e)=>{
+    if(dragging||resizing)return;
+    const rect=overlayRef.current.getBoundingClientRect();
+    const px=e.clientX-rect.left;
+    const py=e.clientY-rect.top;
+    // Check if tapping on existing field (handled by field's own handler)
+    // Convert to PDF coords
+    const pdfX=px/scale;
+    const pdfY=py/scale;
+    // Default field size in PDF points
+    const defW=160,defH=24;
+    const nearby=findNearbyText(pdfX,pdfY,pageNum);
+    // Clean up nearby text to make a good field name suggestion
+    let suggestion=nearby.replace(/[:_\-\.]+$/,"").trim();
+    // If it looks like a label (short, no numbers), use it
+    if(suggestion.length>30||/^\d+$/.test(suggestion))suggestion="";
+    setNearbyText(suggestion);
+    setModalName(suggestion);
+    setModalType(suggestion.toLowerCase().includes("note")||suggestion.toLowerCase().includes("comment")?"textarea":"text");
+    setModalMode(suggestion.toLowerCase().includes("date")?"auto-date":"edit");
+    setModal({x:pdfX,y:pdfY,w:defW,h:defH,page:pageNum,isNew:true});
+  };
+
+  // Save field from modal
+  const saveField=()=>{
+    if(!modalName.trim())return;
+    const entry={
+      name:modalName.trim(),
+      value:"",
+      mode:modalMode,
+      page:modal.page||pageNum,
+      x:Math.round(modal.x*100)/100,
+      y:Math.round(modal.y*100)/100,
+      w:Math.round((modal.w||160)*100)/100,
+      h:Math.round((modal.h||(modalType==="textarea"?80:24))*100)/100,
+      fontSize:modalType==="textarea"?10:12,
+      multiline:modalType==="textarea",
+      voiceEnabled:modalType!=="signature",
+      fieldType:modalType
+    };
+    if(modal.isNew){
+      setFields(prev=>[...prev,entry]);
+    }else{
+      // Editing existing field
+      setFields(prev=>prev.map((f,i)=>i===modal.idx?{...f,...entry}:f));
+    }
+    setModal(null);setModalName("");
+  };
+
+  // Delete field
+  const deleteField=(idx)=>{
+    setFields(prev=>prev.filter((_,i)=>i!==idx));
+    setModal(null);
+  };
+
+  // Field drag handler
+  const startDrag=(e,idx)=>{
+    e.stopPropagation();e.preventDefault();
+    const rect=overlayRef.current.getBoundingClientRect();
+    setDragging({idx,startX:e.clientX-rect.left,startY:e.clientY-rect.top,origX:fields[idx].x,origY:fields[idx].y});
+  };
+  const onPointerMove=(e)=>{
+    if(!overlayRef.current)return;
+    const rect=overlayRef.current.getBoundingClientRect();
+    const px=e.clientX-rect.left;const py=e.clientY-rect.top;
+    if(dragging){
+      const dx=(px-dragging.startX)/scale;
+      const dy=(py-dragging.startY)/scale;
+      setFields(prev=>prev.map((f,i)=>i===dragging.idx?{...f,x:Math.max(0,dragging.origX+dx),y:Math.max(0,dragging.origY+dy)}:f));
+    }
+    if(resizing){
+      const dx=(px-resizing.startX)/scale;
+      const dy=(py-resizing.startY)/scale;
+      setFields(prev=>prev.map((f,i)=>i===resizing.idx?{...f,w:Math.max(40,resizing.origW+dx),h:Math.max(16,resizing.origH+dy)}:f));
+    }
+  };
+  const onPointerUp=()=>{setDragging(null);setResizing(null);};
+
+  // Snap to 4px grid in PDF pts
+  const snap=(v)=>Math.round(v/4)*4;
+
+  const pageFields=fields.filter(f=>f.page===pageNum);
+
+  if(loading)return(
+    <div style={{padding:40,textAlign:"center"}}>
+      <div style={{width:36,height:36,border:`3px solid ${C.brd}`,borderTop:`3px solid ${C.org}`,borderRadius:"50%",margin:"0 auto 12px",animation:"spin 1s linear infinite"}}/>
+      <p style={{color:C.mut,fontSize:14}}>Loading template preview...</p>
+    </div>
+  );
+
+  return(
+    <div style={{background:C.bg,color:C.txt}}>
+      {/* Header */}
+      <div style={{padding:"12px 16px",borderBottom:`1px solid ${C.brd}`,background:C.card,display:"flex",alignItems:"center",gap:10}}>
+        <button onClick={onCancel} style={{background:"none",border:"none",color:C.blu,fontSize:24,cursor:"pointer",padding:"6px 10px",lineHeight:1}}>←</button>
+        <div style={{flex:1}}>
+          <div style={{fontWeight:700,fontSize:15}}>Place Fields</div>
+          <div style={{fontSize:11,color:C.mut}}>Tap where each field should go • {fields.length} field{fields.length!==1?"s":""} placed</div>
+        </div>
+        <button onClick={()=>onDone(fields)} disabled={fields.length===0} style={{padding:"8px 16px",background:fields.length?C.org:C.brd,border:"none",borderRadius:8,color:"#fff",fontSize:13,fontWeight:700,cursor:fields.length?"pointer":"default",opacity:fields.length?1:0.5}}>Done</button>
+      </div>
+
+      {/* Quick preset buttons */}
+      <div style={{padding:"8px 16px",display:"flex",gap:6,overflowX:"auto",WebkitOverflowScrolling:"touch",borderBottom:`1px solid ${C.brd}`}}>
+        {FIELD_PRESETS.map(p=>(
+          <button key={p} onClick={()=>{setModalName(p);setModalType(p==="Notes"?"textarea":p==="Signature"?"signature":"text");setModalMode(p==="Date"?"auto-date":["Project Name","Project No","Inspector"].includes(p)?"lock":"edit");setModal({x:pageW/2-80,y:pageH/2-12,w:160,h:p==="Notes"?80:p==="Signature"?40:24,page:pageNum,isNew:true});}}
+            style={{padding:"6px 12px",background:C.inp,border:`1px solid ${C.brd}`,borderRadius:16,color:C.lt,fontSize:11,fontWeight:600,cursor:"pointer",whiteSpace:"nowrap",flexShrink:0}}>
+            + {p}
+          </button>
+        ))}
+      </div>
+
+      {/* Page navigation */}
+      {numPages>1&&(
+        <div style={{display:"flex",alignItems:"center",justifyContent:"center",gap:12,padding:"8px 0",borderBottom:`1px solid ${C.brd}`}}>
+          <button onClick={()=>setPageNum(p=>Math.max(1,p-1))} disabled={pageNum<=1} style={{background:"none",border:"none",color:pageNum>1?C.blu:C.brd,fontSize:20,cursor:pageNum>1?"pointer":"default"}}>‹</button>
+          <span style={{fontSize:13,color:C.lt,fontWeight:600}}>Page {pageNum} of {numPages}</span>
+          <button onClick={()=>setPageNum(p=>Math.min(numPages,p+1))} disabled={pageNum>=numPages} style={{background:"none",border:"none",color:pageNum<numPages?C.blu:C.brd,fontSize:20,cursor:pageNum<numPages?"pointer":"default"}}>›</button>
+        </div>
+      )}
+
+      {/* Canvas + overlay */}
+      <div style={{padding:"8px",overflow:"auto",WebkitOverflowScrolling:"touch"}}>
+        <div style={{position:"relative",display:"inline-block",boxShadow:"0 2px 12px rgba(0,0,0,0.5)",borderRadius:4,overflow:"hidden"}}>
+          <canvas ref={canvasRef} style={{display:"block"}}/>
+          {/* Clickable overlay */}
+          <div ref={overlayRef}
+            onPointerDown={handlePointerDown}
+            onPointerMove={onPointerMove}
+            onPointerUp={onPointerUp}
+            style={{position:"absolute",top:0,left:0,width:"100%",height:"100%",cursor:"crosshair",touchAction:"none"}}>
+            {/* Rendered field boxes */}
+            {pageFields.map((f,i)=>{
+              const realIdx=fields.indexOf(f);
+              const isActive=modal&&!modal.isNew&&modal.idx===realIdx;
+              return(
+                <div key={realIdx}
+                  onPointerDown={(e)=>startDrag(e,realIdx)}
+                  onClick={(e)=>{e.stopPropagation();setModalName(f.name);setModalType(f.fieldType||"text");setModalMode(f.mode);setModal({...f,idx:realIdx,isNew:false});}}
+                  style={{position:"absolute",left:f.x*scale,top:f.y*scale,width:f.w*scale,height:f.h*scale,
+                    background:isActive?"rgba(232,116,42,0.35)":"rgba(232,116,42,0.15)",
+                    border:`2px solid ${isActive?C.org:"rgba(232,116,42,0.6)"}`,
+                    borderRadius:3,cursor:"move",touchAction:"none",
+                    display:"flex",alignItems:"center",padding:"0 4px",boxSizing:"border-box"}}>
+                  <span style={{fontSize:Math.max(9,Math.min(12,f.h*scale*0.5)),color:C.org,fontWeight:700,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",pointerEvents:"none",userSelect:"none"}}>{f.name}</span>
+                  {/* Resize handle */}
+                  <div onPointerDown={(e)=>{e.stopPropagation();e.preventDefault();const rect=overlayRef.current.getBoundingClientRect();setResizing({idx:realIdx,startX:e.clientX-rect.left,startY:e.clientY-rect.top,origW:f.w,origH:f.h});}}
+                    style={{position:"absolute",right:-4,bottom:-4,width:16,height:16,background:C.org,borderRadius:"50%",cursor:"nwse-resize",touchAction:"none",border:"2px solid #fff"}}/>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+
+      {/* Field list summary */}
+      {fields.length>0&&(
+        <div style={{padding:"12px 16px",borderTop:`1px solid ${C.brd}`}}>
+          <div style={{fontSize:12,fontWeight:700,color:C.lt,marginBottom:8}}>Fields ({fields.length})</div>
+          <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
+            {fields.map((f,i)=>(
+              <span key={i} onClick={()=>{if(f.page!==pageNum)setPageNum(f.page);setModalName(f.name);setModalType(f.fieldType||"text");setModalMode(f.mode);setModal({...f,idx:i,isNew:false});}}
+                style={{padding:"4px 10px",background:f.mode==="lock"?C.inp:f.mode==="auto-date"?"rgba(90,143,192,0.15)":"rgba(232,116,42,0.1)",border:`1px solid ${f.mode==="lock"?C.brd:f.mode==="auto-date"?C.blu:C.org}`,borderRadius:12,fontSize:11,color:f.mode==="lock"?C.mut:f.mode==="auto-date"?C.blu:C.org,fontWeight:600,cursor:"pointer"}}>
+                {f.name}{f.page>1?` (p${f.page})`:""}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Field Editor Modal */}
+      {modal&&(
+        <div style={{position:"fixed",top:0,left:0,right:0,bottom:0,background:"rgba(0,0,0,0.7)",zIndex:1000,display:"flex",alignItems:"flex-end",justifyContent:"center"}}
+          onClick={()=>setModal(null)}>
+          <div onClick={e=>e.stopPropagation()} style={{width:"100%",maxWidth:420,background:C.card,borderRadius:"16px 16px 0 0",padding:"20px",paddingBottom:"calc(20px + env(safe-area-inset-bottom))"}}>
+            <div style={{fontSize:16,fontWeight:700,color:C.txt,marginBottom:16}}>{modal.isNew?"Add Field":"Edit Field"}</div>
+
+            {/* Field name */}
+            <div style={{marginBottom:12}}>
+              <label style={{fontSize:12,color:C.lt,fontWeight:600,display:"block",marginBottom:4}}>Field Name</label>
+              <input type="text" value={modalName} onChange={e=>setModalName(e.target.value)}
+                placeholder="e.g. Date, Weather, Notes..."
+                autoFocus
+                style={{width:"100%",padding:"10px 12px",background:C.inp,border:`1px solid ${C.brd}`,borderRadius:8,color:C.txt,fontSize:15,boxSizing:"border-box"}}/>
+              {nearbyText&&modal.isNew&&modalName!==nearbyText&&(
+                <button onClick={()=>setModalName(nearbyText)} style={{marginTop:4,padding:"3px 8px",background:"rgba(232,116,42,0.1)",border:`1px solid ${C.org}`,borderRadius:6,color:C.org,fontSize:11,cursor:"pointer"}}>
+                  Use: "{nearbyText}"
+                </button>
+              )}
+            </div>
+
+            {/* Field type */}
+            <div style={{marginBottom:12}}>
+              <label style={{fontSize:12,color:C.lt,fontWeight:600,display:"block",marginBottom:6}}>Type</label>
+              <div style={{display:"flex",gap:6}}>
+                {[{k:"text",l:"Text"},{k:"textarea",l:"Notes"},{k:"signature",l:"Signature"}].map(t=>(
+                  <button key={t.k} onClick={()=>{setModalType(t.k);if(t.k==="textarea")setFields(prev=>modal.isNew?prev:prev.map((f,i)=>i===modal.idx?{...f,h:Math.max(f.h,80)}:f));}}
+                    style={{flex:1,padding:"8px 0",background:modalType===t.k?C.org:"transparent",border:`1px solid ${modalType===t.k?C.org:C.brd}`,borderRadius:8,color:modalType===t.k?"#fff":C.mut,fontSize:13,fontWeight:600,cursor:"pointer"}}>
+                    {t.l}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Mode */}
+            <div style={{marginBottom:16}}>
+              <label style={{fontSize:12,color:C.lt,fontWeight:600,display:"block",marginBottom:6}}>Behavior</label>
+              <div style={{display:"flex",gap:6}}>
+                {[{k:"edit",l:"Edit Daily",c:C.org},{k:"lock",l:"Lock",c:C.mut},{k:"auto-date",l:"Auto-Date",c:C.blu},{k:"auto-num",l:"Auto-#",c:C.blu}].map(m=>(
+                  <button key={m.k} onClick={()=>setModalMode(m.k)}
+                    style={{flex:1,padding:"7px 0",background:modalMode===m.k?m.c:"transparent",border:`1px solid ${modalMode===m.k?m.c:C.brd}`,borderRadius:8,color:modalMode===m.k?"#fff":C.mut,fontSize:11,fontWeight:700,cursor:"pointer"}}>
+                    {m.l}
+                  </button>
+                ))}
+              </div>
+              <div style={{fontSize:10,color:C.mut,marginTop:4}}>
+                {modalMode==="edit"?"You fill this field each report":modalMode==="lock"?"Same value every report (set once)":modalMode==="auto-date"?"Auto-fills today's date":"Auto-increments (1, 2, 3...)"}
+              </div>
+            </div>
+
+            {/* Actions */}
+            <div style={{display:"flex",gap:10}}>
+              {!modal.isNew&&(
+                <button onClick={()=>deleteField(modal.idx)} style={{padding:"12px 16px",background:"transparent",border:`1px solid ${C.err}`,borderRadius:10,color:C.err,fontSize:14,fontWeight:700,cursor:"pointer"}}>Delete</button>
+              )}
+              <button onClick={()=>setModal(null)} style={{flex:1,padding:"12px 0",background:C.inp,border:`1px solid ${C.brd}`,borderRadius:10,color:C.txt,fontSize:14,fontWeight:600,cursor:"pointer"}}>Cancel</button>
+              <button onClick={saveField} disabled={!modalName.trim()} style={{flex:1,padding:"12px 0",background:modalName.trim()?C.org:C.brd,border:"none",borderRadius:10,color:"#fff",fontSize:14,fontWeight:700,cursor:modalName.trim()?"pointer":"default"}}>
+                {modal.isNew?"Add":"Save"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* ── Create Job ── */
 function CreateJob({user, onBack, onCreated}){
   const tz=Intl.DateTimeFormat().resolvedOptions().timeZone;
@@ -770,6 +1088,7 @@ function CreateJob({user, onBack, onCreated}){
   const [fnConvention,setFnConvention]=useState(null); // AI-detected: {pattern, dateFormat, numberPadding}
   const [savingTpl,setSavingTpl]=useState(false);
   const [tplSaved,setTplSaved]=useState(false); // whether current parse was saved
+  const [showFieldEditor,setShowFieldEditor]=useState(false); // click-to-place editor
   const [jobType,setJobType]=useState("template"); // "template" or "worklog"
   // Company autocomplete for job-level company (whose template we use)
   const [jobCompanyName,setJobCompanyName]=useState("");
@@ -937,9 +1256,9 @@ function CreateJob({user, onBack, onCreated}){
       // Store as base64 string — immune to iOS Safari releasing the file buffer
       const u8=new Uint8Array(buf);const chunks=[];for(let i=0;i<u8.length;i+=8192)chunks.push(String.fromCharCode.apply(null,u8.subarray(i,i+8192)));
       setTfB64(btoa(chunks.join("")));
-      if(e==="pdf"){
-        parseFields(buf.slice(0),f.name);
-      }else if(e==="docx"||e==="doc"){
+      // For PDF: don't auto-parse — user will use click-to-place editor
+      // For DOCX: still use edge function (no canvas preview available)
+      if(e==="docx"||e==="doc"){
         parseDocxFields(buf.slice(0),f.name);
       }else{
         setFields([]);setParsing(false);
@@ -1135,6 +1454,13 @@ function CreateJob({user, onBack, onCreated}){
   const fs={width:"100%",padding:"12px 14px",background:C.inp,border:`1px solid ${C.brd}`,borderRadius:10,color:C.txt,fontSize:15};
   const ls={display:"block",color:C.lt,fontSize:13,fontWeight:600,marginBottom:6};
 
+  // Click-to-place field editor (full-screen overlay)
+  if(showFieldEditor&&tfB64){
+    return <TemplateFieldEditor pdfBase64={tfB64} initialFields={fields}
+      onDone={(placedFields)=>{setFields(placedFields);setShowFieldEditor(false);}}
+      onCancel={()=>setShowFieldEditor(false)}/>;
+  }
+
   return(
     <div style={{minHeight:"100vh",background:C.bg,color:C.txt}}>
       <div style={{display:"flex",alignItems:"center",gap:12,padding:"16px 20px",borderBottom:`1px solid ${C.brd}`,background:C.card}}>
@@ -1296,6 +1622,25 @@ function CreateJob({user, onBack, onCreated}){
           )}
         </div>
 
+        {/* Place Fields button — for PDF uploads without saved template fields */}
+        {tf&&!usedSavedId&&fields.length===0&&!parsing&&tf.name.toLowerCase().endsWith(".pdf")&&tfB64&&(
+          <div style={{marginBottom:16}}>
+            <button onClick={()=>setShowFieldEditor(true)} style={{width:"100%",padding:"16px 0",background:C.org,border:"none",borderRadius:12,color:"#fff",fontSize:15,fontWeight:700,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",gap:8}}>
+              Place Fields on Template
+            </button>
+            <div style={{fontSize:11,color:C.mut,marginTop:6,textAlign:"center"}}>Tap where each field goes on your form — takes about 10 seconds</div>
+          </div>
+        )}
+
+        {/* Re-edit fields button — when fields already placed */}
+        {tf&&fields.length>0&&!parsing&&tf.name.toLowerCase().endsWith(".pdf")&&tfB64&&(
+          <div style={{marginBottom:8}}>
+            <button onClick={()=>setShowFieldEditor(true)} style={{width:"100%",padding:"10px 0",background:"transparent",border:`1px solid ${C.org}`,borderRadius:10,color:C.org,fontSize:13,fontWeight:600,cursor:"pointer"}}>
+              Edit Field Placement
+            </button>
+          </div>
+        )}
+
         {/* Report Naming Convention — uses the uploaded filename directly */}
         {reportTitle&&(
           <div style={{marginBottom:20}}>
@@ -1304,13 +1649,13 @@ function CreateJob({user, onBack, onCreated}){
           </div>
         )}
 
-        {/* AI Parsing indicator with spinner */}
+        {/* AI Parsing indicator with spinner (DOCX only now) */}
         {parsing&&(
           <div style={{background:C.inp,border:`1px solid ${C.brd}`,borderRadius:12,padding:"24px",marginBottom:20,textAlign:"center"}}>
             <div style={{width:40,height:40,border:`3px solid ${C.brd}`,borderTop:`3px solid ${C.org}`,borderRadius:"50%",margin:"0 auto 12px",animation:"spin 1s linear infinite"}}/>
             <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
             <p style={{color:C.lt,fontSize:14,fontWeight:600,margin:"0 0 4px"}}>Analyzing template fields...</p>
-            <p style={{color:C.mut,fontSize:12,margin:0}}>AI is detecting fillable fields in your document. This may take 10-20 seconds.</p>
+            <p style={{color:C.mut,fontSize:12,margin:0}}>Detecting fillable fields in your document...</p>
           </div>
         )}
 
@@ -3189,14 +3534,18 @@ function ReportEditor({job, user, onBack, reportDate}){
           const pageIdx=(f.page||1)-1;
           if(pageIdx<0||pageIdx>=pages.length)return;
           const page=pages[pageIdx];const pageH=page.getHeight();
-          const sz=f.fontSize||10;const pdfY=pageH-f.y-sz;
-          if(f.w)page.drawRectangle({x:f.x-1,y:pdfY-2,width:(f.w||120)+2,height:(f.h||sz+4),color:rgb(1,1,1)});
+          const sz=f.fontSize||10;
+          const fieldH=f.h||sz+4;
+          // Y-flip: pdf.js stores y from top, pdf-lib draws from bottom
+          // Baseline offset: drawText aligns to baseline, so offset by ~0.75*fontSize to center in box
+          const pdfY=pageH-f.y-fieldH+sz*0.75;
+          if(f.w)page.drawRectangle({x:f.x-1,y:pageH-f.y-fieldH-2,width:(f.w||120)+2,height:fieldH+4,color:rgb(1,1,1)});
           const isSig=(f.name||"").toLowerCase().includes("signature")||(f.autoFill==="name"&&(f.name||"").toLowerCase().includes("inspector"));
           if(isSig){
             const sigSz=sz*0.85;
             const sigDate=new Date().toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"});
-            page.drawText(String(f.val),{x:f.x,y:pdfY,size:sigSz,font:fontItalic,color:rgb(0.1,0.1,0.1)});
-            page.drawText("Signed via My Daily Reports \u2014 "+sigDate,{x:f.x,y:pdfY-sigSz*1.2,size:sigSz*0.7,font,color:rgb(0.33,0.33,0.33)});
+            page.drawText(String(f.val),{x:f.x+2,y:pdfY,size:sigSz,font:fontItalic,color:rgb(0.1,0.1,0.1)});
+            page.drawText("Signed via My Daily Reports \u2014 "+sigDate,{x:f.x+2,y:pdfY-sigSz*1.2,size:sigSz*0.7,font,color:rgb(0.33,0.33,0.33)});
           }else if(f.multiline&&f.w){
             const maxW=f.w;const rawLines=f.val.split(/\n/).filter(l=>l.trim());
             const lines=[];
@@ -3205,9 +3554,9 @@ function ReportEditor({job, user, onBack, reportDate}){
               words.forEach(w=>{const test=cur?cur+" "+w:w;const tw=font.widthOfTextAtSize(test,sz);if(tw>maxW&&cur){lines.push(cur);cur=w;}else cur=test;});
               if(cur)lines.push(cur);
             });
-            lines.forEach((ln,i)=>{const ly=pdfY-(i*sz*1.3);if(ly>0)page.drawText(ln,{x:f.x,y:ly,size:sz,font,color:rgb(0,0,0)});});
+            lines.forEach((ln,i)=>{const ly=pdfY-(i*sz*1.3);if(ly>0)page.drawText(ln,{x:f.x+2,y:ly,size:sz,font,color:rgb(0,0,0)});});
           }else{
-            page.drawText(String(f.val),{x:f.x,y:pdfY,size:sz,font,color:rgb(0,0,0)});
+            page.drawText(String(f.val),{x:f.x+2,y:pdfY,size:sz,font,color:rgb(0,0,0)});
           }
         });
       }
@@ -3815,6 +4164,8 @@ function JobDetail({job, user, onBack, onDeleted}){
   const [showFieldEdit,setShowFieldEdit]=useState(false);
   const [fieldEditFields,setFieldEditFields]=useState(null); // null=not loaded
   const [fieldEditSaving,setFieldEditSaving]=useState(false);
+  const [showVisualFieldEditor,setShowVisualFieldEditor]=useState(false);
+  const [visualEditorB64,setVisualEditorB64]=useState(null);
 
   const [tplFilename,setTplFilename]=useState(null);
   const loadReports=useCallback(async()=>{
@@ -3916,6 +4267,27 @@ function JobDetail({job, user, onBack, onDeleted}){
       {open&&<div style={{background:C.card,border:`1px solid ${C.brd}`,borderTop:"none",borderRadius:"0 0 12px 12px",padding:"4px 16px 12px"}}>{children}</div>}
     </div>
   );
+
+  // Visual field editor (full-screen, from job settings)
+  if(showVisualFieldEditor&&visualEditorB64){
+    const existingFields=fieldEditFields||[];
+    return <TemplateFieldEditor pdfBase64={visualEditorB64} initialFields={existingFields}
+      onDone={async(placedFields)=>{
+        // Convert placed fields back to field_config format and save
+        const coords=(f)=>({page:f.page,x:f.x,y:f.y,w:f.w,h:f.h,fontSize:f.fontSize,multiline:f.multiline||f.fieldType==="textarea"});
+        const editF=placedFields.filter(f=>f.mode==="edit"||f.mode==="auto-date"||f.mode==="auto-num").map(f=>({name:f.name,value:f.value||"",originalValue:f.value||"",voiceEnabled:f.voiceEnabled!==false,autoFill:f.mode==="auto-date"?"date":f.mode==="auto-num"?"increment":null,...coords(f)}));
+        const lockF=placedFields.filter(f=>f.mode==="lock").map(f=>({name:f.name,value:f.value||"",...coords(f)}));
+        const conv=job.field_config?.filenameConvention||{};
+        const newConfig={editable:editF,locked:lockF,filenameConvention:conv};
+        try{
+          await db.updateJobFieldConfig(job.id,newConfig);
+          job.field_config=newConfig;
+          showToast("Fields saved! "+placedFields.length+" field"+(placedFields.length!==1?"s":"")+" configured.");
+        }catch(e){showToast("Save failed: "+e.message);}
+        setShowVisualFieldEditor(false);setVisualEditorB64(null);setFieldEditFields(null);
+      }}
+      onCancel={()=>{setShowVisualFieldEditor(false);setVisualEditorB64(null);}}/>;
+  }
 
   if(showReport){
     if(job.job_type==="worklog")return<WorkLogEditor key={job.id+"-"+(editDate||"")} job={job} user={user} onBack={closeReport} reportDate={editDate}/>;
@@ -4187,8 +4559,27 @@ function JobDetail({job, user, onBack, onDeleted}){
             <button onClick={()=>{if(!fieldEditFields){const fc=job.field_config||{};const all=[...(fc.editable||[]).map(f=>({...f,mode:f.autoFill==="date"?"auto-date":f.autoFill==="increment"?"auto-num":"edit"})),...(fc.locked||[]).map(f=>({...f,mode:"lock"}))];setFieldEditFields(all);}setShowFieldEdit(!showFieldEdit);}} style={{width:"100%",display:"flex",alignItems:"center",gap:10,padding:"14px 18px",background:"none",border:"none",borderBottom:`1px solid ${C.brd}`,cursor:"pointer",textAlign:"left"}}>
               <span style={{fontSize:14,fontWeight:600,color:C.lt}}>Edit Template Fields</span>
             </button>
+            <button onClick={async()=>{
+              try{
+                const tpl=await db.getTemplate(job.id);
+                if(!tpl||!tpl.storage_path){showToast("No template found.");return;}
+                if(!tpl.storage_path.toLowerCase().endsWith(".pdf")&&!tpl.file_type?.toLowerCase()?.includes("pdf")){showToast("Visual field placement only works with PDF templates.");return;}
+                const tplResp=await fetch(`${SB_URL}/storage/v1/object/report-source-docs/${tpl.storage_path}`,{headers:{apikey:SB_KEY,Authorization:`Bearer ${AUTH_TOKEN||SB_KEY}`}});
+                if(!tplResp.ok)throw new Error("Could not download template.");
+                const buf=await tplResp.arrayBuffer();
+                const u8=new Uint8Array(buf);const chunks=[];for(let i=0;i<u8.length;i+=8192)chunks.push(String.fromCharCode.apply(null,u8.subarray(i,i+8192)));
+                setVisualEditorB64(btoa(chunks.join("")));
+                // Convert existing field_config to flat field array for editor
+                const fc=job.field_config||{};
+                const existing=[...(fc.editable||[]).map(f=>({...f,mode:f.autoFill==="date"?"auto-date":f.autoFill==="increment"?"auto-num":"edit",fieldType:f.multiline?"textarea":"text"})),...(fc.locked||[]).map(f=>({...f,mode:"lock",fieldType:f.multiline?"textarea":"text"}))];
+                setFieldEditFields(existing);
+                setShowVisualFieldEditor(true);
+              }catch(e){showToast("Error: "+e.message);}
+            }} style={{width:"100%",display:"flex",alignItems:"center",gap:10,padding:"14px 18px",background:"none",border:"none",borderBottom:`1px solid ${C.brd}`,cursor:"pointer",textAlign:"left"}}>
+              <span style={{fontSize:16}}>📍</span><span style={{fontSize:14,fontWeight:600,color:C.org}}>Place Fields Visually</span>
+            </button>
             <button onClick={reparseTemplate} disabled={reparsing} style={{width:"100%",display:"flex",alignItems:"center",gap:10,padding:"14px 18px",background:"none",border:"none",borderBottom:`1px solid ${C.brd}`,cursor:reparsing?"default":"pointer",textAlign:"left",opacity:reparsing?0.6:1}}>
-              <span style={{fontSize:16}}>{reparsing?"⏳":"🔄"}</span><span style={{fontSize:14,fontWeight:600,color:C.lt}}>{reparsing?"Re-parsing template...":"Re-parse Template Fields"}</span>
+              <span style={{fontSize:16}}>{reparsing?"⏳":"🔄"}</span><span style={{fontSize:14,fontWeight:600,color:C.mut}}>{reparsing?"Re-parsing template...":"Re-parse Template Fields (AI)"}</span>
             </button>
             <button onClick={()=>reuploadRef.current?.click()} disabled={reuploading} style={{width:"100%",display:"flex",alignItems:"center",gap:10,padding:"14px 18px",background:"none",border:"none",borderBottom:`1px solid ${C.brd}`,cursor:reuploading?"default":"pointer",textAlign:"left",opacity:reuploading?0.6:1}}>
               <span style={{fontSize:14,fontWeight:600,color:C.lt}}>{reuploading?"Uploading...":"Re-upload Template File"}</span>
