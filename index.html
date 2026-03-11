@@ -1600,31 +1600,46 @@ function WorkLogEditor({job, user, onBack, reportDate}){
     let y=H-M;
     let pageNum=1;
     const totalPagesRef={val:1}; // will update after building
-    // ── Page 1 Header — always built fresh from job name + site address ──
-    // Clean, professional header for every work log. No template dependency.
-    // Logo upload support planned for future release.
+    // ── Page 1 Header — logo + job name + site address ──
     page=doc.addPage([W,H]);
     const headerH=90;
 
-    // Dark header bar (charcoal, matches PI template style)
+    // Dark header bar
     page.drawRectangle({x:0,y:H-headerH,width:W,height:headerH,color:rgb(.12,.12,.12)});
-    // Job name (large, white, left-aligned — prominent like a company heading)
+
+    // Embed logo
+    let logoImg=null;
+    let logoW=0;
+    try{
+      const logoResp=await fetch("logo.jpg");
+      if(logoResp.ok){
+        const logoBytes=new Uint8Array(await logoResp.arrayBuffer());
+        logoImg=await doc.embedJpg(logoBytes);
+        const logoSize=60;
+        const scl=Math.min(logoSize/logoImg.width,logoSize/logoImg.height);
+        logoW=logoImg.width*scl;
+        const logoH2=logoImg.height*scl;
+        page.drawImage(logoImg,{x:M,y:H-headerH+(headerH-logoH2)/2,width:logoW,height:logoH2});
+        logoW+=12; // gap after logo
+      }
+    }catch(e){console.error("Logo embed:",e);}
+
+    // Job name (large, white, after logo)
     const jobTitle=job.name||"Daily Work Log";
-    // Auto-size and wrap title to fit header width
+    const titleStartX=M+logoW;
     let titleSize=jobTitle.length>30?16:jobTitle.length>20?18:22;
-    const maxTitleW=W-2*M;
+    const maxTitleW=W-titleStartX-M;
     while(titleSize>10&&fontB.widthOfTextAtSize(jobTitle,titleSize)>maxTitleW)titleSize-=1;
-    // If still too wide at 10pt, split into two lines
     if(fontB.widthOfTextAtSize(jobTitle,titleSize)>maxTitleW){
       const words=jobTitle.split(" ");let l1="",l2="";
       for(const w of words){const t=l1?l1+" "+w:w;if(fontB.widthOfTextAtSize(t,titleSize)>maxTitleW&&l1){l2=words.slice(words.indexOf(w)).join(" ");break;}else l1=t;}
-      page.drawText(l1,{x:M,y:H-36,size:titleSize,font:fontB,color:rgb(1,1,1)});
-      if(l2)page.drawText(l2,{x:M,y:H-50,size:titleSize,font:fontB,color:rgb(1,1,1)});
+      page.drawText(l1,{x:titleStartX,y:H-36,size:titleSize,font:fontB,color:rgb(1,1,1)});
+      if(l2)page.drawText(l2,{x:titleStartX,y:H-50,size:titleSize,font:fontB,color:rgb(1,1,1)});
     }else{
-      page.drawText(jobTitle,{x:M,y:H-40,size:titleSize,font:fontB,color:rgb(1,1,1)});
+      page.drawText(jobTitle,{x:titleStartX,y:H-40,size:titleSize,font:fontB,color:rgb(1,1,1)});
     }
-    // Site address (smaller, light gray, below job name)
-    if(job.site_address)page.drawText(job.site_address,{x:M,y:H-58,size:10,font,color:rgb(.72,.72,.72)});
+    // Site address
+    if(job.site_address)page.drawText(job.site_address,{x:titleStartX,y:H-58,size:10,font,color:rgb(.72,.72,.72)});
 
     // Info bar below header (dark, with Date / Job # / Prepared By)
     const infoBarH=26;
@@ -1856,6 +1871,63 @@ function WorkLogEditor({job, user, onBack, reportDate}){
       y-=boxH+6;
     };
 
+    // ── Work Log Photos — right after work logs, before text sections ──
+    const contractorsWithPhotos=contractors.filter(c=>(c.photos||[]).length>0);
+    if(contractorsWithPhotos.length>0){
+      ensureSpace(50);
+      page.drawRectangle({x:M,y:y-30,width:CW,height:30,color:rgb(.45,.45,.45)});
+      page.drawText("Work Log Photos",{x:M+(CW-fontB.widthOfTextAtSize("Work Log Photos",14))/2,y:y-22,size:14,font:fontB,color:rgb(.92,.57,.17)});
+      y-=40;
+
+      const cols=4;
+      const photoGap=6;
+      const imgW=Math.floor((CW-(cols-1)*photoGap)/cols);
+      const imgH=Math.floor(imgW*0.75); // 4:3 aspect
+
+      for(const c of contractorsWithPhotos){
+        const hrs=parseFloat(c.hours)||0;
+        const qty=parseInt(c.quantity)||1;
+        ensureSpace(imgH+30);
+        page.drawText(c.name+":",{x:M+4,y:y-14,size:12,font:fontB,color:rgb(.15,.15,.15)});
+        const labelW=fontB.widthOfTextAtSize(c.name+":",12);
+        page.drawText(`  | QTY: `,{x:M+4+labelW,y:y-14,size:10,font,color:rgb(.5,.5,.5)});
+        const q1W=font.widthOfTextAtSize(`  | QTY: `,10);
+        page.drawText(String(qty),{x:M+4+labelW+q1W,y:y-14,size:10,font:fontB,color:rgb(.92,.57,.17)});
+        const q2W=fontB.widthOfTextAtSize(String(qty),10);
+        page.drawText(` | HRS: `,{x:M+4+labelW+q1W+q2W,y:y-14,size:10,font,color:rgb(.5,.5,.5)});
+        const h1W=font.widthOfTextAtSize(` | HRS: `,10);
+        page.drawText(hrs.toFixed(1),{x:M+4+labelW+q1W+q2W+h1W,y:y-14,size:10,font:fontB,color:rgb(.92,.57,.17)});
+        y-=22;
+
+        const photos=c.photos||[];
+        let pi=0;
+        while(pi<photos.length){
+          const rowPhotos=photos.slice(pi,pi+cols);
+          ensureSpace(imgH+10);
+          for(let ri=0;ri<rowPhotos.length;ri++){
+            const ph=rowPhotos[ri];
+            try{
+              const imgBytes=Uint8Array.from(atob(ph.data.split(",")[1]||""),ch=>ch.charCodeAt(0));
+              let img;
+              if(ph.data.includes("image/png"))img=await doc.embedPng(imgBytes);
+              else img=await doc.embedJpg(imgBytes);
+              const xPos=M+ri*(imgW+photoGap);
+              const scl=Math.min(imgW/img.width,imgH/img.height,1);
+              const pw=img.width*scl,ph2=img.height*scl;
+              page.drawImage(img,{x:xPos,y:y-ph2,width:pw,height:ph2});
+              const stampH=12;
+              page.drawRectangle({x:xPos,y:y-ph2,width:pw,height:stampH,color:rgb(.2,.2,.2),opacity:0.7});
+              const stamp=ph.ts?new Date(ph.ts).toLocaleString("en-US",{month:"2-digit",day:"2-digit",year:"2-digit",hour:"2-digit",minute:"2-digit",hour12:true,timeZone:tz}):"";
+              if(stamp)page.drawText(stamp,{x:xPos+3,y:y-ph2+2,size:6,font,color:rgb(1,1,1)});
+            }catch(e){console.error("Photo embed error:",e);}
+          }
+          pi+=rowPhotos.length;
+          y-=(imgH+photoGap);
+        }
+        y-=6;
+      }
+    }
+
     // ── Materials ──
     drawTextSection("Materials",materials);
 
@@ -1932,67 +2004,6 @@ function WorkLogEditor({job, user, onBack, reportDate}){
       y-=rowH;
     });
     y-=10;
-
-    // ── Work Log Photos — MDR-style: grouped by contractor, 2-up, date stamps ──
-    const contractorsWithPhotos=contractors.filter(c=>(c.photos||[]).length>0);
-    if(contractorsWithPhotos.length>0){
-      // Section header bar
-      ensureSpace(50);
-      page.drawRectangle({x:M,y:y-30,width:CW,height:30,color:rgb(.45,.45,.45)});
-      page.drawText("Work Log Photos",{x:M+(CW-fontB.widthOfTextAtSize("Work Log Photos",14))/2,y:y-22,size:14,font:fontB,color:rgb(.92,.57,.17)});
-      y-=40;
-
-      const imgW=Math.floor((CW-8)/2); // two images side by side with 8pt gap
-      const imgH=160; // max height per photo
-
-      for(const c of contractorsWithPhotos){
-        const hrs=parseFloat(c.hours)||0;
-        const qty=parseInt(c.quantity)||1;
-        // Contractor label row: "Bravo Concrete:  | QTY: 8 | HRS: 0.0"
-        ensureSpace(imgH+30);
-        page.drawText(c.name+":",{x:M+4,y:y-14,size:12,font:fontB,color:rgb(.15,.15,.15)});
-        const labelW=fontB.widthOfTextAtSize(c.name+":",12);
-        page.drawText(`  | QTY: `,{x:M+4+labelW,y:y-14,size:10,font,color:rgb(.5,.5,.5)});
-        const q1W=font.widthOfTextAtSize(`  | QTY: `,10);
-        page.drawText(String(qty),{x:M+4+labelW+q1W,y:y-14,size:10,font:fontB,color:rgb(.92,.57,.17)});
-        const q2W=fontB.widthOfTextAtSize(String(qty),10);
-        page.drawText(` | HRS: `,{x:M+4+labelW+q1W+q2W,y:y-14,size:10,font,color:rgb(.5,.5,.5)});
-        const h1W=font.widthOfTextAtSize(` | HRS: `,10);
-        page.drawText(hrs.toFixed(1),{x:M+4+labelW+q1W+q2W+h1W,y:y-14,size:10,font:fontB,color:rgb(.92,.57,.17)});
-        y-=22;
-
-        // Draw photos 2-up
-        const photos=c.photos||[];
-        let pi=0;
-        while(pi<photos.length){
-          const rowPhotos=photos.slice(pi,pi+2);
-          ensureSpace(imgH+10);
-          for(let ri=0;ri<rowPhotos.length;ri++){
-            const ph=rowPhotos[ri];
-            try{
-              const imgBytes=Uint8Array.from(atob(ph.data.split(",")[1]||""),ch=>ch.charCodeAt(0));
-              let img;
-              if(ph.data.includes("image/png"))img=await doc.embedPng(imgBytes);
-              else img=await doc.embedJpg(imgBytes);
-              const xPos=M+ri*(imgW+8);
-              // Scale to fit slot while preserving aspect ratio
-              const scl=Math.min(imgW/img.width,imgH/img.height,1);
-              const pw=img.width*scl,ph2=img.height*scl;
-              // Draw image
-              page.drawImage(img,{x:xPos,y:y-ph2,width:pw,height:ph2});
-              // Date/time stamp overlay on bottom-left (dark semi-transparent bar)
-              const stampH=14;
-              page.drawRectangle({x:xPos,y:y-ph2,width:pw,height:stampH,color:rgb(.2,.2,.2),opacity:0.7});
-              const stamp=ph.ts?new Date(ph.ts).toLocaleString("en-US",{month:"2-digit",day:"2-digit",year:"2-digit",hour:"2-digit",minute:"2-digit",hour12:true,timeZone:tz}):"";
-              if(stamp)page.drawText(stamp,{x:xPos+4,y:y-ph2+3,size:7,font,color:rgb(1,1,1)});
-            }catch(e){console.error("Photo embed error:",e);}
-          }
-          pi+=rowPhotos.length;
-          y-=(imgH+8);
-        }
-        y-=6; // gap between contractor photo groups
-      }
-    }
 
     // Add footers to all pages — job name left, page num center-right, "Powered by" right
     const pages=doc.getPages();
@@ -2127,12 +2138,12 @@ function WorkLogEditor({job, user, onBack, reportDate}){
     finally{setSaving(false);}
   };
 
-  // Auto-save every 30 seconds if there are contractors
+  // Auto-save every 30 seconds if there are contractors (skip after submit)
   useEffect(()=>{
-    if(contractors.length===0)return;
+    if(contractors.length===0||submitSuccess)return;
     const t=setInterval(()=>saveWorking(),30000);
     return()=>clearInterval(t);
-  },[contractors,generalNotes,safetyNotes,materials,equipment,qualityControl,customCategories,survey,weatherEnabled,weatherAM,weatherMid,weatherPM]);
+  },[contractors,generalNotes,safetyNotes,materials,equipment,qualityControl,customCategories,survey,weatherEnabled,weatherAM,weatherMid,weatherPM,submitSuccess]);
 
   const totalHours=contractors.reduce((sum,c)=>{
     const h=parseFloat(c.hours)||0;
