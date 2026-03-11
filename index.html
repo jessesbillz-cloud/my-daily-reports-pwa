@@ -3889,13 +3889,14 @@ function JobDetail({job, user, onBack, onDeleted}){
 
         {/* ── Edit Template Fields Panel ── */}
         {showFieldEdit&&fieldEditFields&&(
-          <div style={{background:C.card,border:`1px solid ${C.org}`,borderRadius:12,padding:16,marginBottom:16}}>
-            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:12}}>
+          <div style={{background:C.card,border:`1px solid ${C.org}`,borderRadius:12,overflow:"hidden",marginBottom:16}}>
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"14px 16px",borderBottom:`1px solid ${C.brd}`,background:"rgba(232,116,42,0.06)"}}>
               <div style={{fontWeight:700,fontSize:15,color:C.org}}>Edit Template Fields</div>
-              <button onClick={()=>setShowFieldEdit(false)} style={{background:"none",border:"none",color:C.mut,cursor:"pointer",fontSize:20,padding:"0 4px"}}>✕</button>
+              <button onClick={()=>{setShowFieldEdit(false);setFieldEditFields(null);}} style={{background:C.inp,border:`1px solid ${C.brd}`,borderRadius:8,color:C.lt,cursor:"pointer",fontSize:13,fontWeight:600,padding:"6px 14px"}}>Done</button>
             </div>
+            <div style={{padding:16}}>
             <div style={{fontSize:11,color:C.mut,marginBottom:12,lineHeight:1.5}}>Change field modes and values. This affects all future reports for this job.</div>
-            <div style={{maxHeight:400,overflowY:"auto",marginBottom:12}}>
+            <div style={{marginBottom:12}}>
               {fieldEditFields.map((f,i)=>{
                 const setMode=(m)=>setFieldEditFields(p=>p.map((x,j)=>j===i?{...x,mode:m}:x));
                 const setVal=(v)=>setFieldEditFields(p=>p.map((x,j)=>j===i?{...x,value:v}:x));
@@ -3938,13 +3939,15 @@ function JobDetail({job, user, onBack, onDeleted}){
               {fieldEditSaving?"Saving...":"Save Field Changes"}
             </button>
           </div>
+          </div>
         )}
 
         {/* ── Job Settings Panel ── */}
         {showJobSet&&(
           <div style={{background:C.card,border:`1px solid ${C.brd}`,borderRadius:12,overflow:"hidden",marginBottom:16}}>
-            <div style={{padding:"14px 18px",borderBottom:`1px solid ${C.brd}`,background:"rgba(232,116,42,0.06)"}}>
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"14px 18px",borderBottom:`1px solid ${C.brd}`,background:"rgba(232,116,42,0.06)"}}>
               <div style={{fontWeight:700,fontSize:15,color:C.org}}>Job Settings</div>
+              <button onClick={()=>setShowJobSet(false)} style={{background:C.inp,border:`1px solid ${C.brd}`,borderRadius:8,color:C.lt,cursor:"pointer",fontSize:13,fontWeight:600,padding:"6px 14px"}}>Done</button>
             </div>
             <button onClick={()=>{setShowEditJob(!showEditJob);setEditName(job.name);setEditAddr(job.site_address||"");}} style={{width:"100%",display:"flex",alignItems:"center",gap:10,padding:"14px 18px",background:"none",border:"none",borderBottom:`1px solid ${C.brd}`,cursor:"pointer",textAlign:"left"}}>
               <span style={{fontSize:16}}>✏️</span><span style={{fontSize:14,fontWeight:600,color:C.lt}}>Edit Job Details</span>
