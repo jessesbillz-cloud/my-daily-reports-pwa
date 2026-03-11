@@ -1,4 +1,5 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -31,6 +32,51 @@ serve(async (req) => {
       );
     }
 
+    const SUPABASE_URL = Deno.env.get("SUPABASE_URL");
+    const SUPABASE_SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+
+    // Filter out suppressed email addresses (bounced/complained)
+    let validRecipients = [...to];
+    let skippedEmails: string[] = [];
+
+    if (SUPABASE_URL && SUPABASE_SERVICE_KEY) {
+      try {
+        const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
+        const normalized = to.map((e: string) => e.toLowerCase().trim());
+        const { data: suppressed } = await supabase
+          .from("email_suppressions")
+          .select("email")
+          .eq("suppressed", true)
+          .in("email", normalized);
+
+        if (suppressed && suppressed.length > 0) {
+          const suppressedSet = new Set(suppressed.map((s: { email: string }) => s.email));
+          validRecipients = to.filter((e: string) => !suppressedSet.has(e.toLowerCase().trim()));
+          skippedEmails = to.filter((e: string) => suppressedSet.has(e.toLowerCase().trim()));
+
+          if (skippedEmails.length > 0) {
+            console.warn("Skipped suppressed emails:", skippedEmails);
+          }
+        }
+      } catch (suppErr) {
+        // If suppression check fails, send to all — don't block the report
+        console.error("Suppression check failed (sending anyway):", suppErr);
+      }
+    }
+
+    if (validRecipients.length === 0) {
+      return new Response(
+        JSON.stringify({
+          error: "All recipients are suppressed due to previous bounces or complaints.",
+          skipped: skippedEmails,
+        }),
+        {
+          status: 422,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        }
+      );
+    }
+
     const FROM_EMAIL = Deno.env.get("FROM_EMAIL") || "reports@mydailyreports.org";
 
     // Use custom HTML body if provided, fallback to plain body text
@@ -44,7 +90,7 @@ serve(async (req) => {
           <p style="color: #666; font-size: 13px; margin: 0;">The PDF report is attached to this email.</p>
         </div>
         <p style="color: #999; font-size: 11px; text-align: center; margin-top: 16px;">
-          Sent via My Daily Reports &bull; mydailyreports.com
+          Sent via My Daily Reports &bull; mydailyreports.org
         </p>
       </div>
     `;
@@ -57,7 +103,7 @@ serve(async (req) => {
       },
       body: JSON.stringify({
         from: `${sender_name || "My Daily Reports"} <${FROM_EMAIL}>`,
-        to: to,
+        to: validRecipients,
         subject: subject,
         html: emailHtml,
         attachments: pdf_base64
@@ -84,9 +130,17 @@ serve(async (req) => {
       );
     }
 
-    return new Response(JSON.stringify({ success: true, id: result.id }), {
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
+    return new Response(
+      JSON.stringify({
+        success: true,
+        id: result.id,
+        sent_to: validRecipients,
+        skipped: skippedEmails.length > 0 ? skippedEmails : undefined,
+      }),
+      {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      }
+    );
   } catch (error) {
     return new Response(JSON.stringify({ error: error.message }), {
       status: 500,
