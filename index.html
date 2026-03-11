@@ -2693,8 +2693,11 @@ function ReportEditor({job, user, onBack, reportDate}){
 
   const showToast=(msg)=>{setToast(msg);setTimeout(()=>setToast(""),2500);};
 
-  // Shared: build editable field values only — locked fields are already on the template
-  const buildEditableFields=()=>editFields.map(f=>({...f,val:vals[f.name]||""}));
+  // Shared: build all field values — editable fields from vals, locked fields from lockVals
+  const buildEditableFields=()=>[
+    ...editFields.map(f=>({...f,val:vals[f.name]||""})),
+    ...lockFields.filter(f=>f.x!=null&&f.y!=null&&lockVals[f.name]).map(f=>({...f,val:lockVals[f.name]||""}))
+  ];
 
   // Shared: draw fields onto a canvas context (for View Report preview)
   const drawFieldsOnCanvas=(ctx,fields,pageNum,scale,pageH)=>{
@@ -2709,6 +2712,19 @@ function ReportEditor({job, user, onBack, reportDate}){
       if(f.w){
         ctx.fillStyle="#ffffff";
         ctx.fillRect(drawX-1,f.y*scale-1,(f.w||120)*scale+2,(f.h||sz)*scale+2);
+      }
+      // Signature stamp — render as "Signed: Name — via My Daily Reports" with timestamp
+      const isSig=(f.name||"").toLowerCase().includes("signature")||(f.autoFill==="name"&&(f.name||"").toLowerCase().includes("inspector"));
+      if(isSig){
+        const sigSz=sz*0.85;
+        ctx.font="italic "+sigSz+"px Helvetica, Arial, sans-serif";
+        ctx.fillStyle="#1a1a1a";
+        const sigDate=new Date().toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"});
+        ctx.fillText(f.val,drawX,drawY);
+        ctx.font=(sigSz*0.7)+"px Helvetica, Arial, sans-serif";
+        ctx.fillStyle="#555555";
+        ctx.fillText("Signed via My Daily Reports — "+sigDate,drawX,drawY+sigSz*1.2);
+        return;
       }
       ctx.fillStyle="#000000";
       if(f.multiline&&f.w){
@@ -3016,6 +3032,7 @@ function ReportEditor({job, user, onBack, reportDate}){
         pdfDoc=await PDFDocument.create();pdfDoc.addPage([612,792]);
       }
       const font=await pdfDoc.embedFont(StandardFonts.Helvetica);
+      const fontItalic=await pdfDoc.embedFont(StandardFonts.HelveticaOblique);
       const pages=pdfDoc.getPages();
 
       // ── 3. Build field values ──
@@ -3037,7 +3054,14 @@ function ReportEditor({job, user, onBack, reportDate}){
         if(f.w){
           page.drawRectangle({x:f.x-1,y:pdfY-2,width:(f.w||120)+2,height:(f.h||sz+4),color:rgb(1,1,1)});
         }
-        if(f.multiline&&f.w){
+        // Signature stamp — italic name + "Signed via My Daily Reports" timestamp
+        const isSig=(f.name||"").toLowerCase().includes("signature")||(f.autoFill==="name"&&(f.name||"").toLowerCase().includes("inspector"));
+        if(isSig){
+          const sigSz=sz*0.85;
+          const sigDate=new Date().toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"});
+          page.drawText(String(f.val),{x:f.x,y:pdfY,size:sigSz,font:fontItalic,color:rgb(0.1,0.1,0.1)});
+          page.drawText("Signed via My Daily Reports \u2014 "+sigDate,{x:f.x,y:pdfY-sigSz*1.2,size:sigSz*0.7,font,color:rgb(0.33,0.33,0.33)});
+        }else if(f.multiline&&f.w){
           const maxW=f.w;
           const bullet="\u2022 ";
           const bulletW=font.widthOfTextAtSize(bullet,sz);
