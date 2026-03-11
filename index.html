@@ -1125,7 +1125,7 @@ function CreateJob({user, onBack, onCreated}){
               </div>
               <div style={{padding:8}}>
                 {fields.map(f=>(
-                  <div key={f.name} style={{padding:"10px 12px",background:C.card,border:`1px solid ${C.brd}`,borderRadius:8,marginBottom:6}}>
+                  <div key={f.name} style={{padding:"10px 12px",background:f.mode==="lock"&&!f.lockAfterCreate?C.bg:C.card,border:`1px solid ${f.lockAfterCreate?C.org:C.brd}`,borderRadius:8,marginBottom:6,opacity:f.mode==="lock"&&!f.lockAfterCreate?0.7:1}}>
                     {/* Row 1: Field name + mode buttons */}
                     <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:8}}>
                       <span style={{fontSize:13,fontWeight:700,color:C.txt,flex:1,marginRight:8}}>{f.name}</span>
@@ -1144,9 +1144,10 @@ function CreateJob({user, onBack, onCreated}){
                           value={f.value}
                           onChange={e=>setFieldValue(f.name,e.target.value)}
                           placeholder={f.lockAfterCreate?"Enter value for this job...":f.mode==="lock"?"Set locked value...":"Default value (optional)"}
-                          style={{width:"100%",padding:"8px 10px",background:f.lockAfterCreate?"rgba(232,116,42,0.06)":C.bg,border:`1px solid ${f.lockAfterCreate?C.org:C.brd}`,borderRadius:6,color:C.txt,fontSize:13}}
+                          style={{width:"100%",padding:"8px 10px",background:f.lockAfterCreate?"rgba(232,116,42,0.06)":f.mode==="lock"?C.inp:C.bg,border:`1px solid ${f.lockAfterCreate?C.org:C.brd}`,borderRadius:6,color:f.mode==="lock"?C.mut:C.txt,fontSize:13,opacity:f.mode==="lock"&&!f.lockAfterCreate?0.6:1}}
                         />
-                        {f.lockAfterCreate&&<div style={{fontSize:10,color:C.org,marginTop:4,fontStyle:"italic"}}>🔒 Will lock after job is created</div>}
+                        {f.lockAfterCreate&&<div style={{fontSize:10,color:C.org,marginTop:4,fontStyle:"italic"}}>Will lock after job is created</div>}
+                        {f.mode==="lock"&&!f.lockAfterCreate&&<div style={{fontSize:10,color:C.mut,marginTop:4,fontStyle:"italic"}}>Locked — same value every report</div>}
                       </>
                     )}
                     {f.mode==="auto-date"&&(
@@ -2376,8 +2377,9 @@ function ReportEditor({job, user, onBack, reportDate}){
   const [draftId,setDraftId]=useState(null);
 
   // Smart date formatter — matches the format from the original template value
+  // Uses the report date context (today or a specific past date being edited)
   const formatAutoDate=(originalVal)=>{
-    const now=new Date();
+    const now=reportDate?new Date(reportDate+"T12:00:00"):new Date();
     const orig=(originalVal||"").trim();
     // "04 February 2026" or "4 February 2026" → day month year (long)
     if(/^\d{1,2}\s+[A-Za-z]+\s+\d{4}$/.test(orig)){
@@ -2418,15 +2420,36 @@ function ReportEditor({job, user, onBack, reportDate}){
     (async()=>{
       try{
         const rpt=await db.getReport(job.id,todayISO);
+        // Fetch next report number for auto-# fields
+        let nextReportNum=1;
+        try{
+          const cntR=await fetch(`${SB_URL}/rest/v1/reports?select=report_number&job_id=eq.${job.id}&order=report_number.desc&limit=1`,{headers:db._h()});
+          const topR=cntR.ok?await cntR.json():[];
+          if(topR[0]?.report_number){nextReportNum=topR[0].report_number+1;}
+          else{const countR=await fetch(`${SB_URL}/rest/v1/reports?select=id&job_id=eq.${job.id}&limit=0`,{headers:{...db._h(),Prefer:"count=exact"}});const total=parseInt(countR.headers.get("content-range")?.split("/")[1]||"0");nextReportNum=total+1;}
+        }catch(numErr){console.error("Report number fetch:",numErr);}
+        // If editing an existing report, use its number instead
+        if(rpt&&rpt.report_number)nextReportNum=rpt.report_number;
+        // Fill auto-# fields with the computed number
+        const conv=job.field_config?.filenameConvention||{};
+        const padding=conv.numberPadding||0;
+        const numStr=padding>0?String(nextReportNum).padStart(padding,"0"):String(nextReportNum);
+        const autoNumVals={};
+        initEdit.forEach(f=>{if(f.autoFill==="increment")autoNumVals[f.name]=numStr;});
+        if(Object.keys(autoNumVals).length>0)setVals(p=>({...p,...autoNumVals}));
         if(rpt){
           setReportStatus(rpt.status);
           setDraftId(rpt.id);
           if(rpt.content){
             const c=typeof rpt.content==="string"?JSON.parse(rpt.content):rpt.content;
             if(c.vals){
-              // Merge saved values but re-apply today's date for auto-date fields (matching original format)
+              // Merge saved values but re-apply today's date and auto-# for auto fields (matching original format)
               const merged={...c.vals};
-              initEdit.forEach(f=>{if(f.autoFill==="date")merged[f.name]=formatAutoDate(f.originalValue||f.value);if(f.autoFill==="name"&&window._mdrUserName)merged[f.name]=window._mdrUserName;});
+              initEdit.forEach(f=>{
+                if(f.autoFill==="date")merged[f.name]=formatAutoDate(f.originalValue||f.value);
+                if(f.autoFill==="increment")merged[f.name]=numStr;
+                if(f.autoFill==="name"&&window._mdrUserName)merged[f.name]=window._mdrUserName;
+              });
               setVals(p=>({...p,...merged}));
             }
             if(c.lockVals)setLockVals(p=>({...p,...c.lockVals}));
@@ -2579,9 +2602,14 @@ function ReportEditor({job, user, onBack, reportDate}){
     setViewLoading(true);
     try{
       const tplRecord=await db.getTemplate(job.id);
-      // No template at all — show error
-      if(!tplRecord||!tplRecord.storage_path){
-        throw new Error("No template found. Upload a template in Job Settings first.");
+      // No template at all — show error with diagnostic context
+      if(!tplRecord){
+        console.error("getTemplate returned null for job:",job.id,job.name);
+        throw new Error("No template record found for this job. Go to Job Settings and re-upload your template.");
+      }
+      if(!tplRecord.storage_path){
+        console.error("Template record has no storage_path:",JSON.stringify(tplRecord));
+        throw new Error("Template record exists but file is missing. Go to Job Settings and re-upload your template.");
       }
       // DOCX template — call generate-docx to fill it, then render with mammoth
       const isDocx=tplRecord.file_type&&tplRecord.file_type!=="pdf";
@@ -2747,7 +2775,8 @@ function ReportEditor({job, user, onBack, reportDate}){
 
       // ── 1. Look up template ──
       const tplRecord=await db.getTemplate(job.id);
-      if(!tplRecord||!tplRecord.storage_path)throw new Error("No template found. Upload a template in Job Settings first.");
+      if(!tplRecord){console.error("Submit: no template record for job:",job.id);throw new Error("No template record found. Go to Job Settings and re-upload your template.");}
+      if(!tplRecord.storage_path){console.error("Submit: template has no storage_path:",JSON.stringify(tplRecord));throw new Error("Template file is missing. Go to Job Settings and re-upload your template.");}
       let tplResp=await fetch(`${SB_URL}/storage/v1/object/report-source-docs/${tplRecord.storage_path}`,{
         headers:{apikey:SB_KEY,Authorization:`Bearer ${AUTH_TOKEN||SB_KEY}`}
       });
@@ -3420,6 +3449,28 @@ function JobDetail({job, user, onBack, onDeleted}){
   const [deleting,setDeleting]=useState(false);
   const [showJobSet,setShowJobSet]=useState(false);
   const [reparsing,setReparsing]=useState(false);
+  const reuploadRef=useRef(null);
+  const [reuploading,setReuploading]=useState(false);
+  const handleReuploadTemplate=async(e)=>{
+    const f=e.target.files?.[0];if(!f)return;
+    const ext=f.name.split(".").pop().toLowerCase();
+    if(!["pdf","docx","doc","jpg","jpeg","png"].includes(ext)){alert("Accepted formats: PDF, DOCX, JPG, PNG");return;}
+    setReuploading(true);
+    try{
+      const blob=new Blob([await f.arrayBuffer()],{type:f.type||"application/octet-stream"});
+      const sp=await db.ulTpl(user.id,job.id,blob,ext);
+      // Check if template record exists, update or create
+      const existing=await db.getTemplate(job.id);
+      if(existing){
+        await fetch(`${SB_URL}/rest/v1/templates?id=eq.${existing.id}`,{method:"PATCH",headers:db._h(),body:JSON.stringify({storage_path:sp,original_filename:f.name,file_type:ext})});
+      }else{
+        await db.mkTpl({user_id:user.id,job_id:job.id,name:f.name,original_filename:f.name,file_type:ext,storage_path:sp,field_config:[]});
+      }
+      setTplFilename(f.name);
+      showToast("Template uploaded successfully!");
+    }catch(err){alert("Upload failed: "+err.message);}
+    finally{setReuploading(false);if(reuploadRef.current)reuploadRef.current.value="";}
+  };
   const reparseTemplate=async()=>{
     setReparsing(true);
     try{
@@ -3441,7 +3492,12 @@ function JobDetail({job, user, onBack, onDeleted}){
       await db.updateJobFieldConfig(job.id,newConfig);
       // Update the job object directly so next ReportEditor open picks up new fields
       job.field_config=newConfig;
-      showToast("Template re-parsed with updated field positions! Open a report to see the changes.");
+      // Open the field editing panel so user can review/adjust the re-parsed fields
+      const allFields=[...editF.map(f=>({...f,mode:f.autoFill==="date"?"auto-date":f.autoFill==="increment"?"auto-num":"edit"})),...lockF.map(f=>({...f,mode:"lock"}))];
+      setFieldEditFields(allFields);
+      setShowFieldEdit(true);
+      setShowJobSet(true);
+      showToast("Template re-parsed! Review the fields below.");
     }catch(e){console.error("Reparse error:",e);showToast("Re-parse failed: "+e.message);}
     finally{setReparsing(false);}
   };
@@ -3837,6 +3893,10 @@ function JobDetail({job, user, onBack, onDeleted}){
             <button onClick={reparseTemplate} disabled={reparsing} style={{width:"100%",display:"flex",alignItems:"center",gap:10,padding:"14px 18px",background:"none",border:"none",borderBottom:`1px solid ${C.brd}`,cursor:reparsing?"default":"pointer",textAlign:"left",opacity:reparsing?0.6:1}}>
               <span style={{fontSize:16}}>{reparsing?"⏳":"🔄"}</span><span style={{fontSize:14,fontWeight:600,color:C.lt}}>{reparsing?"Re-parsing template...":"Re-parse Template Fields"}</span>
             </button>
+            <button onClick={()=>reuploadRef.current?.click()} disabled={reuploading} style={{width:"100%",display:"flex",alignItems:"center",gap:10,padding:"14px 18px",background:"none",border:"none",borderBottom:`1px solid ${C.brd}`,cursor:reuploading?"default":"pointer",textAlign:"left",opacity:reuploading?0.6:1}}>
+              <span style={{fontSize:14,fontWeight:600,color:C.lt}}>{reuploading?"Uploading...":"Re-upload Template File"}</span>
+            </button>
+            <input ref={reuploadRef} type="file" accept=".pdf,.docx,.doc,.jpg,.jpeg,.png" onChange={handleReuploadTemplate} style={{display:"none"}}/>
             <button onClick={()=>{setShowSchedSet(!showSchedSet);setShowTeam(false);}} style={{width:"100%",display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,padding:"14px 18px",background:"none",border:"none",borderBottom:`1px solid ${C.brd}`,cursor:"pointer",textAlign:"left"}}>
               <div style={{display:"flex",alignItems:"center",gap:10}}>
                 <span style={{fontSize:16}}>📅</span><span style={{fontSize:14,fontWeight:600,color:C.lt}}>Jobsite Scheduling</span>
