@@ -468,7 +468,7 @@ function AccountSettings({user, onBack, onLogout}){
 
                 <div style={{marginBottom:16}}>
                   <label style={ls}>Company Name</label>
-                  <input type="text" value={companyName} onChange={e=>setCompanyName(e.target.value)} placeholder="Saltzman Inspections" style={fs}/>
+                  <input type="text" value={companyName} onChange={e=>setCompanyName(e.target.value)} placeholder="e.g. ABC Construction" style={fs}/>
                   <div style={{fontSize:11,color:C.mut,marginTop:4}}>Emails will appear as: <strong style={{color:C.txt}}>{companyName||"Your Company"} &lt;reports@mydailyreports.org&gt;</strong></div>
                   <div style={{fontSize:11,color:C.mut,marginTop:2}}>Set this once — it's how your name shows in your recipients' inbox.</div>
                 </div>
@@ -2283,7 +2283,7 @@ function WorkLogEditor({job, user, onBack, reportDate}){
           {key:"equipment",icon:"🚜",title:"Equipment",val:equipment,set:setEquipment,placeholder:"Equipment on site or rented..."},
           {key:"generalNotes",icon:"📝",title:"General Notes",val:generalNotes,set:setGeneralNotes,placeholder:"Tap here and use your keyboard mic to dictate..."},
           {key:"safetyNotes",icon:"🦺",title:"Site Safety Observations",val:safetyNotes,set:setSafetyNotes,placeholder:"Safety observations, incidents, precautions..."},
-          {key:"qualityControl",icon:"✅",title:"Quality Control Observations",val:qualityControl,set:setQualityControl,placeholder:"Quality control notes, inspections performed..."},
+          {key:"qualityControl",icon:"✅",title:"Quality Control Observations",val:qualityControl,set:setQualityControl,placeholder:"Quality control notes, observations..."},
         ].map(sec=>(
           <div key={sec.key} style={{background:C.card,border:`1px solid ${expandedSections[sec.key]?C.org:C.brd}`,borderRadius:12,marginBottom:10,overflow:"hidden",transition:"border-color 0.2s"}}>
             <button onClick={()=>toggleSection(sec.key)} style={{width:"100%",display:"flex",alignItems:"center",gap:10,padding:"14px 16px",background:"none",border:"none",cursor:"pointer",textAlign:"left"}}>
@@ -3994,38 +3994,40 @@ function JobDetail({job, user, onBack, onDeleted}){
 
 /* ── Training Center ── */
 const GUIDES=[
-  {icon:"→",color:C.blu,title:"Getting Started",sub:"Create your first job and learn the basics",steps:[
+  {icon:"→",color:C.blu,title:"Getting Started",sub:"Set up your account and create your first job",steps:[
     {icon:"✓",title:"Sign In",body:"Enter your email and password or create a new account. Your data syncs across all devices.",tip:"Name and email can't be changed after sign up — double-check before submitting."},
     {icon:"▬",title:"The Dashboard",body:"Your home screen. Active jobs show status dots: red = due, orange = in progress, green = submitted. Tap any job to open it.",tip:null},
-    {icon:"+",title:"Create a Job",body:"Tap \"+ New Job\" and enter a job name. Upload a PDF template and the AI detects all fillable fields. Set each field to Edit, Lock, Auto-Date, or Auto-#.",tip:"Leave date and report number cells blank in your PDF template — auto-fill handles them."},
-    {icon:"—",title:"Save as Template",body:"After parsing, tap \"Save as Reusable Template\" to reuse the same field layout on future jobs without re-parsing. Job-specific fields (project name, DSA #, etc.) become editable when you reuse it.",tip:null},
+    {icon:"+",title:"Create a Job",body:"Tap \"+ New Job\", enter a job name and site address, then choose your report type: Template (upload a PDF) or Work Log (track contractors and hours). If your company has templates, they'll appear automatically.",tip:null},
+    {icon:"—",title:"Company Templates",body:"If your company has set up a template, just type the company name during job creation. The template loads automatically — fields, naming convention, and all.",tip:"Company templates save time. Everyone on the team gets the same format without re-uploading."},
     {icon:"▼",title:"Switch Jobs",body:"Use the Jobs dropdown at the top to switch between active jobs.",tip:null},
   ]},
-  {icon:"—",color:C.ok,title:"Creating Reports",sub:"Build and submit daily field reports",steps:[
+  {icon:"—",color:C.ok,title:"Template Reports",sub:"Fill in a PDF template with daily entries",steps:[
     {icon:"▶",title:"Start a Report",body:"From the job dashboard, tap \"Start Today's Report\". Locked fields are pre-filled. Auto-date shows today. Auto-# increments from your last report.",tip:"One report per day per job. Working copies can be edited anytime."},
-    {icon:"✏",title:"Fill In Fields",body:"Editable fields are ready for your daily entries — notes, weather, hours, observations. Locked fields (project name, architect, contractor) are already filled in.",tip:null},
+    {icon:"✏",title:"Fill In Fields",body:"Editable fields are ready for your daily entries — notes, weather, hours, observations. Locked fields (project name, contractor, etc.) are already filled in.",tip:null},
     {icon:"🎤",title:"Voice Dictation",body:"Tap any text field, then tap the mic on your keyboard. Speak naturally — your phone's built-in dictation does the rest. No extra setup needed.",tip:"Take notes throughout the day as things happen. Come back later and everything's saved."},
-    {icon:"📷",title:"Photos",body:"Take or upload photos from the report editor. Choose layout: 1 per page, 2 side-by-side, or 4 per page (2x2 grid).",tip:null},
-    {icon:"—",title:"Save & Submit",body:"Tap \"Save Working Copy\" to save progress. Tap \"Submit\" when done — the submit button generates a PDF using your original template with your entries overlaid.",tip:null},
+    {icon:"—",title:"Save & Submit",body:"Tap \"Save Working Copy\" to save progress. Tap \"Submit\" when done — the app generates a PDF using your template with your entries overlaid and emails it to your team.",tip:null},
   ]},
-  {icon:"📷",color:C.org,title:"Photos",sub:"Capture and organize site documentation",steps:[
-    {icon:"📷",title:"Take Photos",body:"Use \"Take Photo\" for camera or \"Library\" to pick from your phone. Photos attach to your report and appear in the layout you selected.",tip:"Context shots, close-ups of issues, and progress photos make the best documentation."},
-    {icon:"—",title:"Remove Photos",body:"Tap the X on any photo thumbnail to remove it from the report.",tip:null},
+  {icon:"▬",color:C.org,title:"Work Log Reports",sub:"Track contractors, hours, and daily activity",steps:[
+    {icon:"+",title:"Add Contractors",body:"Tap \"+ Add Contractor\" and enter their name. Add a work description, hours, and quantity (number of people). Use your keyboard mic to dictate descriptions.",tip:null},
+    {icon:"🔒",title:"Save Contractors",body:"Tap the lock icon to save a contractor for tomorrow. Choose \"Name + Work\" to carry over the description too, or \"Name Only\" to start fresh each day. Hours and photos always reset.",tip:"Use \"Name + Work\" for crews doing the same task every day. Use \"Name Only\" when the work changes daily."},
+    {icon:"📷",title:"Photos",body:"Each contractor has Photo and Library buttons at the bottom of their card. Take a photo with your camera or pick from your library. Photos are grouped by contractor in the report.",tip:"Context shots, close-ups of issues, and progress photos make the best documentation."},
+    {icon:"—",title:"Custom Sections",body:"Need to track something extra? Tap \"+ Add Category\" to create new sections like Materials or Equipment. In the Survey, tap \"+ Add Concern\" to add custom questions.",tip:null},
+    {icon:"✓",title:"Preview & Submit",body:"Tap \"View Report\" to preview the PDF. Weather, work logs, notes, survey — it's all there. Hit \"Submit Report\" to generate and email the final PDF.",tip:null},
   ]},
   {icon:"→",color:"#a855f7",title:"Exporting & Sharing",sub:"Generate PDFs and email reports",steps:[
-    {icon:"—",title:"PDF Generation",body:"The submit button generates a PDF from your original template with your daily entries overlaid. Includes a timestamp watermark.",tip:"Report numbers are sequential: DR#1, DR#2, DR#3 — based on submissions, not calendar days."},
+    {icon:"—",title:"PDF Generation",body:"The submit button generates a professional PDF with your daily entries. Template reports overlay your data onto the original PDF. Work logs build a clean report from scratch.",tip:"Report numbers are sequential: #1, #2, #3 — based on submissions, not calendar days."},
     {icon:"—",title:"Email Reports",body:"Email the PDF to your project team on submit. Set up default recipients in your job's Project Team settings.",tip:null},
     {icon:"↻",title:"Past Reports",body:"Completed reports live in the Completed folder on your job dashboard. Re-download or resend anytime.",tip:null},
   ]},
   {icon:"⚙",color:"#14b8a6",title:"Managing Jobs",sub:"Edit, update, and organize your projects",steps:[
-    {icon:"⚙",title:"Job Settings",body:"Tap the gear icon on any job dashboard. From here: edit job name and address, manage your project team (name + email), edit template fields and modes, toggle scheduling, or delete the job.",tip:null},
+    {icon:"⚙",title:"Job Settings",body:"Tap the gear icon on any job dashboard. From here: edit job name and address, manage your project team (name + email), edit template fields, toggle scheduling, or delete the job.",tip:null},
     {icon:"—",title:"Edit Template Fields",body:"In Job Settings, tap \"Edit Template Fields\" to change any field's mode (Edit, Lock, Auto-Date, Auto-#) or update its value. Changes apply to all future reports.",tip:null},
     {icon:"▬",title:"Archive a Job",body:"When a project is done, archive it. Reports and data are preserved but the job hides from your active list.",tip:"Archive instead of delete — you may need old reports later."},
   ]},
-  {icon:"📅",color:C.blu,title:"Scheduling Calendar",sub:"Share your availability with GCs and subs",steps:[
+  {icon:"📅",color:C.blu,title:"Scheduling Calendar",sub:"Share your availability with your team",steps:[
     {icon:"📅",title:"Your Calendar",body:"Enable Jobsite Scheduling on any job (in Job Settings) and it appears on your shared calendar. One link covers all your scheduling-enabled jobs.",tip:null},
-    {icon:"🔗",title:"Share Your Link",body:"Tap \"Share Calendar\" on the dashboard. Send the link to your GC, subs, or anyone who needs to request a site visit.",tip:"Set your Scheduling Display Name in Account Settings so people recognize your calendar."},
-    {icon:"—",title:"Requests",body:"Visitors pick a job and date from your calendar link. You see the request and can approve or reschedule it.",tip:"Scheduling requests don't auto-create reports — start your report when you're on site."},
+    {icon:"🔗",title:"Share Your Link",body:"Tap \"Share Calendar\" on the dashboard. Send the link to your team, subs, or anyone who needs to coordinate site visits.",tip:"Set your Scheduling Display Name in Account Settings so people recognize your calendar."},
+    {icon:"—",title:"Requests",body:"Visitors pick a job and date from your calendar link. You see the request and can approve or reschedule it.",tip:null},
   ]},
   {icon:"—",color:"#f59e0b",title:"Preparing Your Template",sub:"Visual guide to uploading a clean PDF",steps:[
     {icon:"—",title:"Start With a Clean PDF",body:"Export your report as a PDF with blank value cells. Labels stay, values go. The AI reads the labels to detect fields — blank cells give it a clean surface to write on.",tip:null,
@@ -4036,10 +4038,10 @@ const GUIDES=[
       ]}},
     {icon:"✗",title:"Remove Old Dates & Numbers",body:"If your template has a date like \"04 February 2026\" or a report number already filled in, delete those values before uploading. The app overwrites them but the old text can show through underneath.",tip:null,
       illustration:{type:"compare",bad:{label:"Date:",value:"04 February 2026",caption:"Old date bleeds through"},good:{label:"Date:",value:"",caption:"Clean — auto-date fills it fresh"}}},
-    {icon:"—",title:"Notes Section",body:"If you have a standing note (like a general availability message), put it in its own separate text box on your PDF and lock it as a field. Then create a second, blank text box labeled \"IOR Notes:\" for your daily entries. This keeps the standing note untouched and gives you a clean area to write in every day.",tip:null,
+    {icon:"—",title:"Notes Section",body:"If you have a standing note (like a general message), put it in its own separate text box on your PDF and lock it as a field. Then create a second, blank text box labeled \"Notes:\" for your daily entries. This keeps the standing note untouched and gives you a clean area to write in every day.",tip:null,
       illustration:{type:"form",rows:[
         {label:"Standing Note:",value:"Available for daily communication...",good:true,note:"Separate box — lock this as a field"},
-        {label:"IOR Notes:",value:"",good:true,note:"Blank — this is where you write daily notes"},
+        {label:"Notes:",value:"",good:true,note:"Blank — this is where you write daily notes"},
       ]}},
     {icon:"✓",title:"Best Practices",body:"Use standard letter size (8.5\" x 11\"). Single page works best. Use real text labels with colons, not empty boxes. Delete any blank extra pages. Signature lines are automatically ignored.",tip:null,
       illustration:{type:"checklist",items:[
@@ -4870,7 +4872,7 @@ function SetupWizard({user, inviteCompany, onComplete}){
               </div>
               <div style={{marginBottom:18,position:"relative"}}>
                 <label style={ls}>Company Name</label>
-                <input type="text" value={companyName} onChange={e=>handleCompanyNameChange(e.target.value)} placeholder="Saltzman Inspections" style={fs}/>
+                <input type="text" value={companyName} onChange={e=>handleCompanyNameChange(e.target.value)} placeholder="e.g. ABC Construction" style={fs}/>
                 {/* Company match dropdown */}
                 {companyMatches.length>0&&!selectedCompany&&(
                   <div style={{position:"absolute",left:0,right:0,top:"100%",zIndex:50,background:C.card,border:`1px solid ${C.brd}`,borderRadius:10,marginTop:4,overflow:"hidden",boxShadow:"0 8px 24px rgba(0,0,0,0.15)"}}>
@@ -4969,7 +4971,7 @@ function SetupWizard({user, inviteCompany, onComplete}){
                 "The cleaner your template, the better the results",
               ]},
               {key:"notes",icon:"📝",title:"Notes Section Setup",bullets:[
-                "Label your notes area clearly — \"IOR Notes:\" or \"Observations:\"",
+                "Label your notes area clearly — \"Notes:\" or \"Observations:\"",
                 "Leave the notes area blank in your template so there's room to write",
                 "Your notes will appear as bullet points on the final report",
               ]},
