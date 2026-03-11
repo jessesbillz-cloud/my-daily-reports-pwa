@@ -804,7 +804,10 @@ function CreateJob({user, onBack, onCreated}){
   // Use a saved template — loads fields without re-parsing, but still needs the actual file uploaded
   // Job-specific locked fields become editable so user can enter new values for the new job
   const JOB_SPECIFIC_FIELDS=["project name","project no","project number","owner","client","district","dsa file","dsa file #","dsa app","dsa app #","contractor","architect","engineer","inspector","ior","project inspector","project manager","address","location","jurisdiction"];
+  const [loadingTpl,setLoadingTpl]=useState(false);
   const useSavedTemplate=async(tpl)=>{
+    setLoadingTpl(true);setErr("");
+    try{
     const raw=tpl.field_config||[];
     // Extract filename convention if embedded (from admin provisioning)
     const convEntry=raw.find(f=>f._type==="filenameConvention");
@@ -826,14 +829,14 @@ function CreateJob({user, onBack, onCreated}){
     setReportTitle(storedPattern||tpl.original_filename?.replace(/\.[^.]+$/,"")||tpl.name||"");
     setTplSaved(adjusted.length>0);
     setShowSaved(false);
-    setErr("");
     // Download the template file — check company-templates bucket first, then report-source-docs
     if(tpl.storage_path){
-      try{
         const bucket=tpl.storage_path.startsWith("company-templates/")?"company-templates":"report-source-docs";
         const path=tpl.storage_path.startsWith("company-templates/")?tpl.storage_path.replace("company-templates/",""):tpl.storage_path;
         const token=AUTH_TOKEN||SB_KEY;
+        console.log("[useSavedTemplate] Downloading from",bucket,"/",path);
         const resp=await fetch(`${SB_URL}/storage/v1/object/${bucket}/${path}`,{headers:{apikey:SB_KEY,Authorization:`Bearer ${token}`}});
+        console.log("[useSavedTemplate] Download status:",resp.status);
         if(resp.ok){
           const blob=await resp.blob();
           const ext=tpl.file_type||tpl.original_filename?.split(".").pop().toLowerCase()||"pdf";
@@ -848,13 +851,15 @@ function CreateJob({user, onBack, onCreated}){
             await parseFields(buf,file.name);
           }
         }else{
-          showToast("Could not load template file. Try uploading manually.");
+          const errBody=await resp.text().catch(()=>"");
+          console.error("[useSavedTemplate] Download failed:",resp.status,errBody);
+          setErr("Could not load template file ("+resp.status+"). Try uploading manually.");
         }
-      }catch(dlErr){console.error("Auto-download template:",dlErr);showToast("Template download failed. Try uploading manually.");}
     }else if(adjusted.length===0){
-      // Company template with no file and no field config — nothing to load
-      showToast("This template doesn't have a file yet. Upload a PDF to get started.");
+      setErr("This template doesn't have a file yet. Upload a PDF to get started.");
     }
+    }catch(dlErr){console.error("[useSavedTemplate] Error:",dlErr);setErr("Template loading failed: "+dlErr.message);}
+    finally{setLoadingTpl(false);}
   };
 
   // When file is uploaded after selecting a saved template, skip parsing
@@ -1083,12 +1088,12 @@ function CreateJob({user, onBack, onCreated}){
                 <div style={{fontSize:13,fontWeight:700,color:C.org}}>{jobSelectedCompany.name} Templates</div>
               </div>
               {jobCompanyTemplates.map(t=>(
-                <div key={"co-"+t.id} onClick={()=>useSavedTemplate({...t,name:t.template_name||t.name||t.file_name})} style={{padding:"12px 16px",borderBottom:`1px solid rgba(232,116,42,0.12)`,display:"flex",alignItems:"center",gap:10,cursor:"pointer"}}>
+                <div key={"co-"+t.id} onClick={()=>{if(!loadingTpl)useSavedTemplate({...t,name:t.template_name||t.name||t.file_name});}} style={{padding:"12px 16px",borderBottom:`1px solid rgba(232,116,42,0.12)`,display:"flex",alignItems:"center",gap:10,cursor:loadingTpl?"default":"pointer",opacity:loadingTpl?0.6:1}}>
                   <div style={{flex:1}}>
                     <div style={{fontSize:13,fontWeight:600,color:C.txt}}>{t.template_name||t.name||t.file_name||"Template"}</div>
-                    <div style={{fontSize:11,color:C.mut}}>{(t.field_config||[]).length} fields{t.file_type?" — "+t.file_type.toUpperCase():""}</div>
+                    <div style={{fontSize:11,color:C.mut}}>{t.file_type?t.file_type.toUpperCase():"PDF"} template</div>
                   </div>
-                  <span style={{color:C.org,fontSize:12,fontWeight:700}}>Use →</span>
+                  <span style={{color:C.org,fontSize:12,fontWeight:700}}>{loadingTpl?"Loading...":"Use →"}</span>
                 </div>
               ))}
             </div>
@@ -4206,6 +4211,8 @@ function Dashboard({user, onLogout}){
   const [calYear,setCalYear]=useState(new Date().getFullYear());
   const [calMonth,setCalMonth]=useState(new Date().getMonth());
   const [editReq,setEditReq]=useState(null);
+  const [showSubDash,setShowSubDash]=useState(false);
+  const [shareCopied,setShareCopied]=useState(false);
   const [navRestored,setNavRestored]=useState(false);
 
   // Persist navigation state — saves selected job ID so user returns to where they were
@@ -4577,9 +4584,14 @@ function Dashboard({user, onLogout}){
                   <button onClick={nextMonth} style={{background:"none",border:"none",color:C.mut,fontSize:18,cursor:"pointer",padding:"0 4px"}}>›</button>
                 </div>
                 {hasScheduling&&(
-                  <button onClick={async()=>{const url=calURL;if(navigator.share){try{await navigator.share({title:"Scheduling Calendar",text:"Request a site visit here:",url});}catch(e){}}else{try{await navigator.clipboard.writeText(url);alert("Calendar link copied!");}catch(e){alert(url);}}}} style={{padding:"6px 12px",fontSize:12,fontWeight:700,borderRadius:6,background:C.blu,border:"none",color:"#fff",cursor:"pointer",display:"flex",alignItems:"center",gap:4}}>
-                    <span>↗</span> Share Calendar
-                  </button>
+                  <div style={{display:"flex",gap:6}}>
+                    <button onClick={async()=>{try{await navigator.clipboard.writeText(calURL);setShareCopied(true);setTimeout(()=>setShareCopied(false),2000);}catch(e){alert(calURL);}}} style={{padding:"6px 12px",fontSize:12,fontWeight:700,borderRadius:6,background:shareCopied?"#22c55e":C.blu,border:"none",color:"#fff",cursor:"pointer",display:"flex",alignItems:"center",gap:4,transition:"background 0.2s"}}>
+                      {shareCopied?"Copied!":"Share"}
+                    </button>
+                    <button onClick={()=>setShowSubDash(!showSubDash)} style={{padding:"6px 12px",fontSize:12,fontWeight:700,borderRadius:6,background:showSubDash?C.org:C.blu,border:"none",color:"#fff",cursor:"pointer"}}>
+                      Subscribe
+                    </button>
+                  </div>
                 )}
               </div>
               {/* Day headers */}
@@ -4680,6 +4692,30 @@ function Dashboard({user, onLogout}){
                   )}
                 </div>
               )}
+            </div>
+          );
+        })()}
+
+        {/* ── Subscribe to Calendar section ── */}
+        {showSubDash&&hasScheduling&&(()=>{
+          const icsURL=`${SB_URL}/functions/v1/calendar-feed?slug=${profileSlug||user?.user_metadata?.full_name?.toLowerCase().replace(/\\s+/g,"-")||"inspector"}`;
+          return(
+            <div style={{background:C.card,border:`1px solid ${C.brd}`,borderRadius:12,overflow:"hidden",marginBottom:12,position:"relative"}}>
+              <button onClick={()=>setShowSubDash(false)} style={{position:"absolute",top:10,right:10,background:C.inp,border:`1px solid ${C.brd}`,color:C.txt,width:28,height:28,borderRadius:"50%",fontSize:16,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",lineHeight:1}}>&times;</button>
+              <div style={{padding:"16px 16px 4px",textAlign:"center"}}>
+                <div style={{color:C.blu,fontWeight:600,fontSize:14}}>Subscribe to Your Calendar</div>
+                <div style={{color:C.mut,fontSize:12,marginTop:4}}>Sync your scheduling calendar to your phone or computer</div>
+              </div>
+              <div style={{padding:"12px 16px"}}>
+                <div style={{background:C.inp,border:`1px solid ${C.brd}`,borderRadius:6,padding:"8px 10px",marginBottom:12,display:"flex",alignItems:"center",gap:8}}>
+                  <div style={{flex:1,fontSize:10,color:C.mut,wordBreak:"break-all",lineHeight:1.3,fontFamily:"monospace"}}>{icsURL}</div>
+                  <button onClick={async()=>{try{await navigator.clipboard.writeText(icsURL);}catch(e){}}} style={{background:C.blu,color:"#fff",border:"none",borderRadius:4,padding:"6px 10px",fontSize:11,fontWeight:700,cursor:"pointer",whiteSpace:"nowrap"}}>Copy</button>
+                </div>
+                <details style={{borderTop:`1px solid ${C.brd}`,padding:"10px 0 0"}}><summary style={{fontSize:13,fontWeight:600,color:C.lt,cursor:"pointer",listStyle:"none",display:"flex",justifyContent:"space-between",alignItems:"center"}}>iPhone Setup <span style={{fontSize:14,color:C.mut}}>+</span></summary><div style={{padding:"8px 0",fontSize:13,color:C.mut,lineHeight:1.6}}>1. Settings → Calendar → Accounts<br/>2. "Add Account" → "Other"<br/>3. "Add Subscribed Calendar"<br/>4. Paste the URL above<br/>5. Done!</div></details>
+                <details style={{borderTop:`1px solid ${C.brd}`,padding:"10px 0 0"}}><summary style={{fontSize:13,fontWeight:600,color:C.lt,cursor:"pointer",listStyle:"none",display:"flex",justifyContent:"space-between",alignItems:"center"}}>Android / Google Calendar <span style={{fontSize:14,color:C.mut}}>+</span></summary><div style={{padding:"8px 0",fontSize:13,color:C.mut,lineHeight:1.6}}>1. Open Google Calendar on desktop<br/>2. Next to "Other calendars," click (+)<br/>3. Select "From URL"<br/>4. Paste the URL above</div></details>
+                <details style={{borderTop:`1px solid ${C.brd}`,padding:"10px 0 0"}}><summary style={{fontSize:13,fontWeight:600,color:C.lt,cursor:"pointer",listStyle:"none",display:"flex",justifyContent:"space-between",alignItems:"center"}}>Outlook Desktop <span style={{fontSize:14,color:C.mut}}>+</span></summary><div style={{padding:"8px 0",fontSize:13,color:C.mut,lineHeight:1.6}}>1. Open Outlook → Calendar view<br/>2. Click "Add Calendar" → "From Internet"<br/>3. Paste the URL above<br/>4. Click "OK" and name the calendar</div></details>
+                <details style={{borderTop:`1px solid ${C.brd}`,padding:"10px 0 0"}}><summary style={{fontSize:13,fontWeight:600,color:C.lt,cursor:"pointer",listStyle:"none",display:"flex",justifyContent:"space-between",alignItems:"center"}}>Outlook Mobile <span style={{fontSize:14,color:C.mut}}>+</span></summary><div style={{padding:"8px 0",fontSize:13,color:C.mut,lineHeight:1.6}}>1. Open Outlook app → tap the calendar icon<br/>2. Tap the gear icon (Settings)<br/>3. Tap your account → "Add Shared Calendar"<br/>4. Select "Add from link" or "Subscribe"<br/>5. Paste the URL above and save</div></details>
+              </div>
             </div>
           );
         })()}
