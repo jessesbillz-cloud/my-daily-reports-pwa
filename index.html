@@ -308,6 +308,20 @@ const db = {
     }
     return results;
   },
+  // Call assign_company DB function — lookup or create, link profile
+  async assignCompany(userId,companyName){
+    const r=await fetch(`${SB_URL}/rest/v1/rpc/assign_company`,{method:"POST",headers:this._h(),body:JSON.stringify({p_user_id:userId,p_company_name:companyName})});
+    if(!r.ok){const e=await r.json().catch(()=>({}));throw new Error(e.message||"assign_company failed");}
+    const id=await r.json();return id; // returns company UUID
+  },
+  // Call copy_company_templates_to_user DB function
+  async copyCompanyTemplatesDB(userId,companyId,jobId){
+    const params={p_user_id:userId,p_company_id:companyId};
+    if(jobId)params.p_job_id=jobId;
+    const r=await fetch(`${SB_URL}/rest/v1/rpc/copy_company_templates_to_user`,{method:"POST",headers:this._h(),body:JSON.stringify(params)});
+    if(!r.ok){const e=await r.json().catch(()=>({}));throw new Error(e.message||"copy_company_templates failed");}
+    return await r.json(); // returns count of templates copied
+  },
 };
 
 /* ── Account Settings Page ── */
@@ -4713,26 +4727,18 @@ function SetupWizard({user, onComplete}){
       let slugVal=baseSlug;
       let attempt=0;
 
-      // Handle company: join existing or create new
+      // Handle company: use assign_company DB function (lookup → fuzzy match → create)
       let companyId=null;
-      if(selectedCompany){
-        // User chose to join an existing company
-        companyId=selectedCompany.id;
-      }else if(companyName.trim()){
-        // Create a new company for this user
+      if(companyName.trim()){
         try{
-          const newCo=await db.createCompany(companyName.trim(),user.id);
-          if(newCo?.id)companyId=newCo.id;
-        }catch(e){
-          // If duplicate name error, company already exists — try to find and join it
-          if((e.message||"").toLowerCase().includes("unique")||(e.message||"").toLowerCase().includes("duplicate")){
-            try{
-              const existing=await db.searchCompanies(companyName.trim());
-              const exact=existing.find(c=>c.name.toLowerCase()===companyName.trim().toLowerCase());
-              if(exact)companyId=exact.id;
-            }catch(_){}
+          companyId=await db.assignCompany(user.id,companyName.trim());
+          // Copy company templates to user's saved templates
+          if(companyId){
+            try{await db.copyCompanyTemplatesDB(user.id,companyId);}catch(e){console.error("Template copy:",e);}
           }
-          // If still no companyId, just continue without — company is optional
+        }catch(e){
+          console.error("assign_company:",e);
+          // Company is optional — continue without if it fails
         }
       }
 
