@@ -155,7 +155,7 @@ const SL={daily_mf:"Daily M-F",daily_7:"Daily 7 Days",weekly:"Weekly",as_needed:
 
 /* ── MDR Logo SVG Component ── */
 function MDRLogo({size=36}){
-  return <img src="logo.jpg" alt="My Daily Reports" style={{width:size,height:size,borderRadius:4,objectFit:"cover"}}/>;
+  return <img src="logo.jpg" alt="My Daily Reports" style={{width:size,height:size,borderRadius:size>40?8:4,objectFit:"contain"}}/>;
 }
 
 /* ── Database Layer ── */
@@ -4641,16 +4641,14 @@ function Dashboard({user, onLogout}){
                   <span style={{fontWeight:700,fontSize:15,color:C.txt}}>{monthLabel}</span>
                   <button onClick={nextMonth} style={{background:"none",border:"none",color:C.mut,fontSize:18,cursor:"pointer",padding:"0 4px"}}>›</button>
                 </div>
-                {hasScheduling&&(
-                  <div style={{display:"flex",gap:6}}>
-                    <button onClick={async()=>{try{await navigator.clipboard.writeText(calURL);setShareCopied(true);setTimeout(()=>setShareCopied(false),2000);}catch(e){alert(calURL);}}} style={{padding:"6px 12px",fontSize:12,fontWeight:700,borderRadius:6,background:shareCopied?"#22c55e":C.blu,border:"none",color:"#fff",cursor:"pointer",display:"flex",alignItems:"center",gap:4,transition:"background 0.2s"}}>
-                      {shareCopied?"Copied!":"Share"}
-                    </button>
-                    <button onClick={()=>setShowSubDash(!showSubDash)} style={{padding:"6px 12px",fontSize:12,fontWeight:700,borderRadius:6,background:showSubDash?C.org:C.blu,border:"none",color:"#fff",cursor:"pointer"}}>
-                      Subscribe
-                    </button>
-                  </div>
-                )}
+                <div style={{display:"flex",gap:6}}>
+                  <button onClick={async()=>{try{await navigator.clipboard.writeText(calURL);setShareCopied(true);setTimeout(()=>setShareCopied(false),2000);}catch(e){alert(calURL);}}} style={{padding:"6px 12px",fontSize:12,fontWeight:700,borderRadius:6,background:shareCopied?"#22c55e":C.blu,border:"none",color:"#fff",cursor:"pointer",display:"flex",alignItems:"center",gap:4,transition:"background 0.2s"}}>
+                    {shareCopied?"Copied!":"Share"}
+                  </button>
+                  <button onClick={()=>setShowSubDash(!showSubDash)} style={{padding:"6px 12px",fontSize:12,fontWeight:700,borderRadius:6,background:showSubDash?C.org:C.blu,border:"none",color:"#fff",cursor:"pointer"}}>
+                    Subscribe
+                  </button>
+                </div>
               </div>
               {/* Day headers */}
               <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)"}}>
@@ -4755,7 +4753,7 @@ function Dashboard({user, onLogout}){
         })()}
 
         {/* ── Subscribe to Calendar section ── */}
-        {showSubDash&&hasScheduling&&(()=>{
+        {showSubDash&&(()=>{
           const icsURL=`${SB_URL}/functions/v1/calendar-feed?slug=${profileSlug||user?.user_metadata?.full_name?.toLowerCase().replace(/\s+/g,"-")||"inspector"}`;
           return(
             <div style={{background:C.card,border:`1px solid ${C.brd}`,borderRadius:12,overflow:"hidden",marginBottom:12,position:"relative"}}>
