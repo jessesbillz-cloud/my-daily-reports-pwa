@@ -364,6 +364,32 @@ const db = {
     if(!r.ok){const e=await r.json().catch(()=>({}));throw new Error(e.message||"copy_company_templates failed");}
     return await r.json(); // returns count of templates copied
   },
+  // Upload company logo
+  async uploadCompanyLogo(companyId,blob){
+    const ext=blob.type.includes("png")?"png":"jpg";
+    const path=`${companyId}/logo.${ext}`;
+    let r=await fetch(`${SB_URL}/storage/v1/object/company-logos/${path}`,{
+      method:"POST",headers:{apikey:SB_KEY,Authorization:`Bearer ${AUTH_TOKEN||SB_KEY}`,"Content-Type":blob.type},body:blob
+    });
+    if(!r.ok){r=await fetch(`${SB_URL}/storage/v1/object/company-logos/${path}`,{
+      method:"PUT",headers:{apikey:SB_KEY,Authorization:`Bearer ${AUTH_TOKEN||SB_KEY}`,"Content-Type":blob.type},body:blob
+    });}
+    if(!r.ok)throw new Error("Logo upload failed: "+r.status);
+    // Update company record
+    await fetch(`${SB_URL}/rest/v1/companies?id=eq.${companyId}`,{method:"PATCH",headers:this._h(),body:JSON.stringify({logo_path:path})});
+    return path;
+  },
+  // Get company logo URL (public bucket)
+  getCompanyLogoUrl(logoPath){
+    if(!logoPath)return null;
+    return `${SB_URL}/storage/v1/object/public/company-logos/${logoPath}`;
+  },
+  // Get company record by ID
+  async getCompany(companyId){
+    const r=await fetch(`${SB_URL}/rest/v1/companies?id=eq.${companyId}&select=id,name,logo_path&limit=1`,{headers:this._h()});
+    if(!r.ok)return null;
+    const d=await r.json();return d[0]||null;
+  },
 };
 
 /* ── Account Settings Page ── */
@@ -385,6 +411,9 @@ function AccountSettings({user, onBack, onLogout}){
   const [companyMatches,setCompanyMatches]=useState([]);
   const [selectedCompany,setSelectedCompany]=useState(null);
   const companyDebounce=useRef(null);
+  const [companyLogoUrl,setCompanyLogoUrl]=useState(null);
+  const [uploadingLogo,setUploadingLogo]=useState(false);
+  const logoInputRef=useRef(null);
 
   const TZ_OPTIONS = [
     "America/New_York","America/Chicago","America/Denver","America/Phoenix",
@@ -405,7 +434,10 @@ function AccountSettings({user, onBack, onLogout}){
           setProfile(p);
           if(p.full_name)setFullName(p.full_name);
           if(p.company_name)setCompanyName(p.company_name);
-          if(p.company_id)setSelectedCompany({id:p.company_id,name:p.company_name||""});
+          if(p.company_id){
+            setSelectedCompany({id:p.company_id,name:p.company_name||""});
+            try{const co=await db.getCompany(p.company_id);if(co?.logo_path)setCompanyLogoUrl(db.getCompanyLogoUrl(co.logo_path));}catch(e){}
+          }
           if(p.timezone)setTimezone(p.timezone);
           if(p.slug)setSlug(p.slug);
         }
@@ -434,6 +466,20 @@ function AccountSettings({user, onBack, onLogout}){
     setSelectedCompany(null);
     setCompanyName("");
     setCompanyMatches([]);
+    setCompanyLogoUrl(null);
+  };
+  const handleLogoUpload=async(e)=>{
+    const file=e.target.files?.[0];
+    if(!file||!selectedCompany)return;
+    if(!file.type.startsWith("image/")){flash("Please select an image file","err");return;}
+    if(file.size>5*1024*1024){flash("Logo must be under 5MB","err");return;}
+    setUploadingLogo(true);
+    try{
+      const path=await db.uploadCompanyLogo(selectedCompany.id,file);
+      setCompanyLogoUrl(db.getCompanyLogoUrl(path));
+      flash("Company logo uploaded");
+    }catch(err){flash("Logo upload failed: "+err.message,"err");}
+    finally{setUploadingLogo(false);if(logoInputRef.current)logoInputRef.current.value="";}
   };
 
   const saveProfile=async()=>{
@@ -551,6 +597,26 @@ function AccountSettings({user, onBack, onLogout}){
                   </div>
                   <div style={{fontSize:11,color:C.mut,marginTop:2}}>Emails appear as: <strong style={{color:C.txt}}>{companyName||selectedCompany?.name||"Your Company"} &lt;reports@mydailyreports.org&gt;</strong></div>
                 </div>
+
+                {selectedCompany&&(
+                  <div style={{marginBottom:16}}>
+                    <label style={ls}>Company Logo</label>
+                    <div style={{display:"flex",alignItems:"center",gap:12}}>
+                      {companyLogoUrl?(
+                        <img src={companyLogoUrl} alt="Logo" style={{width:56,height:56,borderRadius:8,objectFit:"contain",background:"#fff",border:`1px solid ${C.brd}`}}/>
+                      ):(
+                        <div style={{width:56,height:56,borderRadius:8,background:C.inp,border:`1px solid ${C.brd}`,display:"flex",alignItems:"center",justifyContent:"center",color:C.mut,fontSize:11}}>No logo</div>
+                      )}
+                      <div style={{flex:1}}>
+                        <input ref={logoInputRef} type="file" accept="image/*" onChange={handleLogoUpload} style={{display:"none"}}/>
+                        <button onClick={()=>logoInputRef.current?.click()} disabled={uploadingLogo} style={{padding:"8px 16px",background:C.inp,border:`1px solid ${C.brd}`,borderRadius:8,color:C.txt,fontSize:13,fontWeight:600,cursor:"pointer"}}>
+                          {uploadingLogo?"Uploading...":companyLogoUrl?"Change Logo":"Upload Logo"}
+                        </button>
+                        <div style={{fontSize:11,color:C.mut,marginTop:4}}>Appears on work log report headers</div>
+                      </div>
+                    </div>
+                  </div>
+                )}
 
                 <div style={{marginBottom:16}}>
                   <label style={ls}>Email</label>
@@ -1629,14 +1695,32 @@ function WorkLogEditor({job, user, onBack, reportDate}){
     // Dark header bar
     page.drawRectangle({x:0,y:H-headerH,width:W,height:headerH,color:rgb(.12,.12,.12)});
 
-    // Embed logo
+    // Embed logo — try company logo first, fall back to MDR logo
     let logoImg=null;
     let logoW=0;
     try{
-      const logoResp=await fetch("logo.jpg");
-      if(logoResp.ok){
-        const logoBytes=new Uint8Array(await logoResp.arrayBuffer());
-        logoImg=await doc.embedJpg(logoBytes);
+      let logoBytes=null;let isJpg=true;
+      // Try company logo from Supabase storage
+      if(job.company_id){
+        try{
+          const co=await db.getCompany(job.company_id);
+          if(co?.logo_path){
+            const logoUrl=db.getCompanyLogoUrl(co.logo_path);
+            const clResp=await fetch(logoUrl);
+            if(clResp.ok){
+              logoBytes=new Uint8Array(await clResp.arrayBuffer());
+              isJpg=!co.logo_path.toLowerCase().endsWith(".png");
+            }
+          }
+        }catch(e){console.error("Company logo fetch:",e);}
+      }
+      // Fall back to MDR logo
+      if(!logoBytes){
+        const logoResp=await fetch("logo.jpg");
+        if(logoResp.ok)logoBytes=new Uint8Array(await logoResp.arrayBuffer());
+      }
+      if(logoBytes){
+        logoImg=isJpg?await doc.embedJpg(logoBytes):await doc.embedPng(logoBytes);
         const logoSize=60;
         const scl=Math.min(logoSize/logoImg.width,logoSize/logoImg.height);
         logoW=logoImg.width*scl;
