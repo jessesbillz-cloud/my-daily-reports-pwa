@@ -75,20 +75,40 @@ async function authGetSession(){
       method:"POST",headers:{"Content-Type":"application/json",apikey:SB_KEY},
       body:JSON.stringify({refresh_token:session.refresh_token})
     });
-    const d=await r.json();
-    if(d.access_token){
-      AUTH_TOKEN=d.access_token;
-      localStorage.setItem("mdr_session",JSON.stringify({refresh_token:d.refresh_token}));
-      return {id:d.user.id,email:d.user.email,user_metadata:d.user.user_metadata||{}};
+    if(r.ok){
+      const d=await r.json();
+      if(d.access_token){
+        AUTH_TOKEN=d.access_token;
+        const u={id:d.user.id,email:d.user.email,user_metadata:d.user.user_metadata||{}};
+        localStorage.setItem("mdr_session",JSON.stringify({refresh_token:d.refresh_token,user:u}));
+        return u;
+      }
     }
-  }catch(e){}
-  localStorage.removeItem("mdr_session");
+    // Only clear session on definitive auth rejection (400/401 = bad refresh token)
+    if(r.status===400||r.status===401){
+      localStorage.removeItem("mdr_session");
+      return null;
+    }
+    // Network error or server error (5xx) — return cached user so app stays logged in
+    if(session.user){
+      AUTH_TOKEN=null; // will fail API calls but user sees the app, not login screen
+      return session.user;
+    }
+  }catch(e){
+    // Network failure (offline, timeout) — return cached user if available
+    try{
+      const session=JSON.parse(stored);
+      if(session.user)return session.user;
+    }catch(_){}
+  }
   return null;
 }
 
 // Save session for persistence
-function authSaveSession(refreshToken){
-  if(refreshToken)localStorage.setItem("mdr_session",JSON.stringify({refresh_token:refreshToken}));
+function authSaveSession(refreshToken,user){
+  const data={refresh_token:refreshToken};
+  if(user)data.user=user;
+  localStorage.setItem("mdr_session",JSON.stringify(data));
 }
 
 // Sign in and save session
@@ -100,8 +120,9 @@ async function authSignInAndSave(email,password){
   const d=await r.json();
   if(d.access_token){
     AUTH_TOKEN=d.access_token;
-    authSaveSession(d.refresh_token);
-    return {id:d.user.id,email:d.user.email,user_metadata:d.user.user_metadata||{}};
+    const u={id:d.user.id,email:d.user.email,user_metadata:d.user.user_metadata||{}};
+    authSaveSession(d.refresh_token,u);
+    return u;
   }
   throw new Error(d.error_description||d.msg||d.error||"Invalid email or password");
 }
@@ -115,8 +136,9 @@ async function authSignUpAndSave(email,password,fullName){
   const d=await r.json();
   if(d.access_token){
     AUTH_TOKEN=d.access_token;
-    authSaveSession(d.refresh_token);
-    return {id:d.user.id,email:d.user.email,user_metadata:d.user.user_metadata||{full_name:fullName}};
+    const u={id:d.user.id,email:d.user.email,user_metadata:d.user.user_metadata||{full_name:fullName}};
+    authSaveSession(d.refresh_token,u);
+    return u;
   }
   if(d.id&&!d.access_token){
     throw new Error("CHECK_EMAIL");
@@ -796,27 +818,33 @@ function CreateJob({user, onBack, onCreated}){
       }
       return{...f};
     });
-    setFields(adjusted);
+    if(adjusted.length>0)setFields(adjusted);
     setUsedSavedId(tpl.id);
     // Use stored AI pattern with {date} tokens if available, otherwise raw filename
     const storedPattern=convEntry?.pattern;
     setReportTitle(storedPattern||tpl.original_filename?.replace(/\.[^.]+$/,"")||tpl.name||"");
-    setTplSaved(true);
+    setTplSaved(adjusted.length>0);
     setShowSaved(false);
     setErr("");
-    // If admin-provisioned template has a storage_path, auto-download the file
+    // Download the template file — check company-templates bucket first, then report-source-docs
     if(tpl.storage_path){
       try{
-        const resp=await fetch(`${SB_URL}/storage/v1/object/report-source-docs/${tpl.storage_path}`,{headers:{apikey:SB_KEY,Authorization:`Bearer ${AUTH_TOKEN||SB_KEY}`}});
+        const bucket=tpl.storage_path.startsWith("company-templates/")?"company-templates":"report-source-docs";
+        const path=tpl.storage_path.startsWith("company-templates/")?tpl.storage_path.replace("company-templates/",""):tpl.storage_path;
+        const resp=await fetch(`${SB_URL}/storage/v1/object/${bucket}/${path}`,{headers:{apikey:SB_KEY,Authorization:`Bearer ${AUTH_TOKEN||SB_KEY}`}});
         if(resp.ok){
           const blob=await resp.blob();
           const ext=tpl.file_type||tpl.original_filename?.split(".").pop().toLowerCase()||"pdf";
-          const file=new File([blob],tpl.original_filename||`template.${ext}`,{type:blob.type});
+          const file=new File([blob],tpl.original_filename||tpl.file_name||`template.${ext}`,{type:blob.type});
           setTf(file);
-          // Store as base64
           const u8=new Uint8Array(await blob.arrayBuffer());
           const chunks=[];for(let i=0;i<u8.length;i+=8192)chunks.push(String.fromCharCode.apply(null,u8.subarray(i,i+8192)));
           setTfB64(btoa(chunks.join("")));
+          // If no fields were loaded (company template without field_config), auto-parse the file
+          if(adjusted.length===0&&ext==="pdf"){
+            const buf=await blob.arrayBuffer();
+            await parseFields(buf,file.name);
+          }
         }
       }catch(dlErr){console.error("Auto-download template:",dlErr);/* User can still upload manually */}
     }
