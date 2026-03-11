@@ -833,8 +833,8 @@ function TemplateFieldEditor({pdfBase64,initialFields,onDone,onCancel}){
     // Convert to PDF coords
     const pdfX=px/scale;
     const pdfY=py/scale;
-    // Default field size in PDF points
-    const defW=160,defH=24;
+    // Default field size in PDF points (small — user resizes to fit)
+    const defW=100,defH=16;
     const nearby=findNearbyText(pdfX,pdfY,pageNum);
     // Clean up nearby text to make a good field name suggestion
     let suggestion=nearby.replace(/[:_\-\.]+$/,"").trim();
@@ -858,8 +858,8 @@ function TemplateFieldEditor({pdfBase64,initialFields,onDone,onCancel}){
       page:modal.page||pageNum,
       x:snap(Math.round(modal.x*100)/100),
       y:snap(Math.round(modal.y*100)/100),
-      w:snap(Math.round((modal.w||160)*100)/100),
-      h:snap(Math.round((modal.h||(modalType==="textarea"?80:24))*100)/100),
+      w:snap(Math.round((modal.w||100)*100)/100),
+      h:snap(Math.round((modal.h||(modalType==="textarea"?60:16))*100)/100),
       fontSize:modalType==="textarea"?10:12,
       multiline:modalType==="textarea",
       voiceEnabled:modalType!=="signature",
@@ -930,7 +930,7 @@ function TemplateFieldEditor({pdfBase64,initialFields,onDone,onCancel}){
       {/* Quick preset buttons */}
       <div style={{padding:"8px 16px",display:"flex",gap:6,overflowX:"auto",WebkitOverflowScrolling:"touch",borderBottom:`1px solid ${C.brd}`}}>
         {FIELD_PRESETS.map(p=>(
-          <button key={p} onClick={()=>{setModalName(p);setModalType(p==="Notes"?"textarea":p==="Signature"?"signature":"text");setModalMode(p==="Date"?"auto-date":["Project Name","Project No","Inspector"].includes(p)?"lock":"edit");setModal({x:pageW/2-80,y:pageH/2-12,w:160,h:p==="Notes"?80:p==="Signature"?40:24,page:pageNum,isNew:true});}}
+          <button key={p} onClick={()=>{setModalName(p);setModalType(p==="Notes"?"textarea":p==="Signature"?"signature":"text");setModalMode(p==="Date"?"auto-date":["Project Name","Project No","Inspector"].includes(p)?"lock":"edit");setModal({x:pageW/2-50,y:pageH/2-8,w:100,h:p==="Notes"?60:p==="Signature"?28:16,page:pageNum,isNew:true});}}
             style={{padding:"6px 12px",background:C.inp,border:`1px solid ${C.brd}`,borderRadius:16,color:C.lt,fontSize:11,fontWeight:600,cursor:"pointer",whiteSpace:"nowrap",flexShrink:0}}>
             + {p}
           </button>
@@ -965,14 +965,14 @@ function TemplateFieldEditor({pdfBase64,initialFields,onDone,onCancel}){
                   onPointerDown={(e)=>startDrag(e,realIdx)}
                   onClick={(e)=>{e.stopPropagation();setModalName(f.name);setModalType(f.fieldType||"text");setModalMode(f.mode);setModal({...f,idx:realIdx,isNew:false});}}
                   style={{position:"absolute",left:f.x*scale,top:f.y*scale,width:f.w*scale,height:f.h*scale,
-                    background:isActive?"rgba(232,116,42,0.35)":"rgba(232,116,42,0.15)",
-                    border:`2px solid ${isActive?C.org:"rgba(232,116,42,0.6)"}`,
-                    borderRadius:3,cursor:"move",touchAction:"none",
-                    display:"flex",alignItems:"center",padding:"0 4px",boxSizing:"border-box"}}>
-                  <span style={{fontSize:Math.max(9,Math.min(12,f.h*scale*0.5)),color:C.org,fontWeight:700,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",pointerEvents:"none",userSelect:"none"}}>{f.name}</span>
+                    background:isActive?"rgba(232,116,42,0.12)":"rgba(232,116,42,0.05)",
+                    border:isActive?`2px solid ${C.org}`:"1px dashed rgba(232,116,42,0.5)",
+                    borderRadius:2,cursor:"move",touchAction:"none",
+                    display:"flex",alignItems:"center",padding:"0 3px",boxSizing:"border-box"}}>
+                  <span style={{fontSize:Math.max(7,Math.min(10,f.h*scale*0.45)),color:"rgba(232,116,42,0.7)",fontWeight:600,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",pointerEvents:"none",userSelect:"none"}}>{f.name}</span>
                   {/* Resize handle */}
                   <div onPointerDown={(e)=>{e.stopPropagation();e.preventDefault();const rect=overlayRef.current.getBoundingClientRect();setResizing({idx:realIdx,startX:e.clientX-rect.left,startY:e.clientY-rect.top,origW:f.w,origH:f.h});}}
-                    style={{position:"absolute",right:-4,bottom:-4,width:16,height:16,background:C.org,borderRadius:"50%",cursor:"nwse-resize",touchAction:"none",border:"2px solid #fff"}}/>
+                    style={{position:"absolute",right:-3,bottom:-3,width:12,height:12,background:"rgba(232,116,42,0.6)",borderRadius:"50%",cursor:"nwse-resize",touchAction:"none",border:"1px solid #fff"}}/>
                 </div>
               );
             })}
@@ -3519,7 +3519,7 @@ function ReportEditor({job, user, onBack, reportDate}){
           tf.setFontSize(isSig?sz*0.85:sz);
           if(f.multiline||isSig)tf.enableMultiline();
           tf.addToPage(page,{x:f.x,y:pdfY,width:fieldW,height:fieldH,
-            borderWidth:0,backgroundColor:rgb(1,1,1)});
+            borderWidth:0});
         });
         form.flatten();
         acroFormWorked=true;
@@ -3540,7 +3540,6 @@ function ReportEditor({job, user, onBack, reportDate}){
           // Y-flip: pdf.js stores y from top, pdf-lib draws from bottom
           // Baseline offset: drawText aligns to baseline, so offset by ~0.75*fontSize to center in box
           const pdfY=pageH-f.y-fieldH+sz*0.75;
-          if(f.w)page.drawRectangle({x:f.x-1,y:pageH-f.y-fieldH-2,width:(f.w||120)+2,height:fieldH+4,color:rgb(1,1,1)});
           const isSig=(f.name||"").toLowerCase().includes("signature")||(f.autoFill==="name"&&(f.name||"").toLowerCase().includes("inspector"));
           if(isSig){
             const sigSz=sz*0.85;
