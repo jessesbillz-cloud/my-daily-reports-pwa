@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
-<title>My Daily Reports - Professional Field Documentation</title>
+<title>My Daily Reports - Stop Doing the Same Job Twice</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="description" content="The documentation app that saves you 2 hours every night. Built by Jesse Saltzman, field professional and retired Marine.">
 <style>
@@ -39,6 +39,10 @@ body { font-family: 'Segoe UI', Roboto, Arial, sans-serif; margin: 0; background
 .feature-card { background: #1a1a1a; padding: 35px 30px; border-radius: 15px; border: 1px solid #333; }
 .feature-card h3 { color: #e8742a; margin: 0 0 15px 0; font-size: 1.6rem; }
 .feature-card p { margin: 0; color: #ccc; font-size: 1.1rem; }
+/* Promo Banner */
+.promo-banner { background: linear-gradient(135deg, #1a2a3a, #1a1a1a); padding: 30px; border-radius: 15px; border: 2px solid #5a8fc0; margin: 50px 0; text-align: center; }
+.promo-banner h3 { color: #5a8fc0; font-size: 1.4rem; margin: 0 0 10px 0; text-transform: uppercase; letter-spacing: 2px; }
+.promo-banner p { color: #ccc; font-size: 1.1rem; margin: 0; }
 /* Price Card */
 .price-card { background: #222; padding: 50px 30px; border-radius: 20px; text-align: center; border: 2px solid #e8742a; margin: 60px 0; }
 .price { font-size: 4rem; color: #fff; font-weight: bold; margin: 10px 0; line-height: 1; }
@@ -58,19 +62,18 @@ body { font-family: 'Segoe UI', Roboto, Arial, sans-serif; margin: 0; background
 <div class="nav">
     <a href="/">Home</a>
     <a href="team.html">Meet the Team</a>
-    <a href="calendar-testing/test-calendar.html">Try Free Scheduling</a>
 </div>
 <div class="hero">
     <img src="image0-5.jpeg" alt="Logo" style="width:120px; margin-bottom:20px;">
     <h1>Get Your Evenings Back.</h1>
-    <p class="tagline">Professional Field Documentation.</p>
-    <p class="subtext">Stop doing the same job twice. Whether you're a Foreman running a crew or an Inspector observing and reporting, My Daily Reports is designed to stay open all day. Capture the entire project exactly as it happens, directly from the app.</p>
-    <a href="https://app.mydailyreports.org" class="btn">Start Free — Join the Beta</a>
+    <p class="tagline">Your reports. Your forms. Done before you leave the site.</p>
+    <p class="subtext">Stop doing the same job twice. My Daily Reports stays open all day so you can build your report as the work happens. By the time you leave the site, your paperwork is already done.</p>
+    <a href="https://app.mydailyreports.org" class="btn">Start Free &mdash; Join the Beta</a>
 </div>
 <div class="container">
     <div class="callout-box">
-        <h2>Streamlined for the Job Site.</h2>
-        <p>No bloated office software, and no forced generic forms. This tool is designed to do exactly what you need it to: capture your notes in real-time, format your photos on the fly, and produce a more accurate, thorough daily report using the exact paperwork your employer demands.</p>
+        <h2>Built for the Field, Not the Office.</h2>
+        <p>No bloated software. No forced generic forms. Upload the exact paperwork your employer or client requires, and we put the tools right where you need them. Capture notes in real-time, format photos on the fly, and produce a report that's more accurate and thorough than anything you'd write from memory at the kitchen table.</p>
     </div>
     <h2 class="section-title">The "Double Work" Trap</h2>
     <div class="problem-timeline">
@@ -80,42 +83,63 @@ body { font-family: 'Segoe UI', Roboto, Arial, sans-serif; margin: 0; background
         </div>
         <div class="time-slot">
             <div class="time-label">1:00 PM</div>
-            <p><strong>The Grind.</strong> You've hit multiple spots on site. Your phone is full of random photos and voice memos you'll have to listen to later.</p>
+            <p><strong>The Grind.</strong> You've hit multiple spots on site. Your phone is full of random photos and voice memos you'll have to sort through later.</p>
         </div>
         <div class="time-slot">
             <div class="time-label">4:00 PM</div>
-            <p><strong>The Commute.</strong> You sit in an hour of traffic, knowing the real work is just starting when you get home.</p>
+            <p><strong>The Commute.</strong> An hour in traffic, knowing the real work starts when you get home.</p>
         </div>
         <div class="time-slot" style="border-left-color: #e8742a;">
             <div class="time-label" style="color:#e8742a;">7:00 PM</div>
-            <p><strong>The Kitchen Table.</strong> You're finally home, but instead of relaxing, you're transcribing notes, resizing photos, and wrestling with files.</p>
+            <p><strong>The Kitchen Table.</strong> You're finally home, but instead of being done, you're transcribing notes, resizing photos, and wrestling with files. Again.</p>
         </div>
     </div>
     <div class="bio-stack">
         <img src="jesse-suit-headshot.jpg" alt="Jesse Saltzman">
         <h2>Built by Real Experience</h2>
         <p><strong>Jesse Saltzman</strong> is a retired U.S. Marine (1371 Combat Engineer) and DSA Class 1 Inspector who has inspected over a half-billion dollars in construction work over the last decade.</p>
-        <p>He built this app because he was tired of spending his evenings doing paperwork. He designed the system to use whatever specific format your employer or client requires. It completely changes the way you do business by letting you build your daily report as the day happens—saving you hours and helping you deliver a much more accurate, thorough final product.</p>
+        <p>He built this app because he was tired of spending his evenings doing paperwork. The system uses whatever specific forms your employer or client requires and completely changes the way you document your day. Build your daily report as the work happens, save hours every night, and deliver a final product that's more accurate than anything written from memory.</p>
     </div>
     <h2 class="section-title">Built for the Way You Actually Work</h2>
     <div class="features-stack">
         <div class="feature-card">
-            <h3>Use YOUR Specific Forms</h3>
-            <p>Upload the exact PDF or Word templates your individual employer, client, or company requires. We don't force you into generic templates—we update yours.</p>
+            <h3>Your Forms, Not Ours</h3>
+            <p>Upload the exact PDF or Word templates your employer, client, or company requires. Our AI reads your document and maps every field automatically. You fill them in &mdash; we handle the rest.</p>
         </div>
         <div class="feature-card">
             <h3>Talk, Don't Type</h3>
-            <p>High-accuracy voice-to-text lets you log your observations while you walk. Your words appear on the form in real-time.</p>
+            <p>High-accuracy voice-to-text lets you dictate observations while you walk. Your words appear on the form in real-time. No stopping, no typing, no lost details.</p>
         </div>
         <div class="feature-card">
             <h3>All-Day Capture</h3>
-            <p>Keep the app open while you work. Log activities, counts, and issues exactly as they happen so you don't forget the details by 4:00 PM.</p>
+            <p>Keep the app open while you work. Log activities, counts, and issues as they happen so you're not trying to remember what you saw six hours ago.</p>
         </div>
         <div class="feature-card">
-            <h3>Auto-Layout Photos</h3>
-            <p>Snap a photo inside the app. It drops directly into the report perfectly sized. No more manual copy-and-paste at the kitchen table.</p>
+            <h3>Photos Drop Right In</h3>
+            <p>Snap a photo inside the app. It drops directly into your report, perfectly sized. No manual copy-and-paste. No resizing. No fighting with Word.</p>
+        </div>
+        <div class="feature-card">
+            <h3>Scheduling Requests</h3>
+            <p>Share a calendar link with your GC or subs. They request site visits through your schedule, you confirm with one tap. Conflict detection, email notifications, and calendar sync built in.</p>
         </div>
     </div>
+
+    <div class="promo-banner">
+        <h3>Limited Time Offer</h3>
+        <p>Send us your company's report template and we'll set it up in the system for you &mdash; ready to go when you sign up. Email your template to <a href="mailto:jessesbillz@gmail.com" style="color:#e8742a;text-decoration:none;font-weight:700;">jessesbillz@gmail.com</a></p>
+    </div>
+
+    <div class="feature-card" style="border-left: 4px solid #5a8fc0; margin: 50px 0;">
+        <h3 style="color:#5a8fc0;">No App Store. No Updates. No Waiting.</h3>
+        <p>My Daily Reports is a Progressive Web App &mdash; it runs like a website, right from your home screen. That means when we fix a bug or add a feature, every single user gets it instantly the next time they open the app. No downloads, no update notifications, no version mismatches. You're always on the latest version.</p>
+    </div>
+
+    <div class="feature-card" style="border-left: 4px solid #e8742a; margin: 50px 0;">
+        <h3 style="color:#e8742a;">You're Talking to Me, Not a Mailbox</h3>
+        <p>There's no corporate support team here. When you email, you're reaching Jesse and his assistant &mdash; that's it. If something's broken, we can fix it on the spot. If you have a feature idea or something you don't like, tell us. We're building this thing for the people who actually use it, and we're always open to suggestions.</p>
+        <p style="margin-top: 15px;"><a href="mailto:jessesbillz@gmail.com" style="color:#e8742a; text-decoration:none; font-weight:700;">jessesbillz@gmail.com</a> &mdash; real person, real responses.</p>
+    </div>
+
     <div class="price-card">
         <div style="text-transform:uppercase; letter-spacing:2px; color:#5a8fc0; font-weight:bold; margin-bottom: 15px;">All-Access Subscription</div>
         <div class="price">$19.99</div>
@@ -131,8 +155,8 @@ body { font-family: 'Segoe UI', Roboto, Arial, sans-serif; margin: 0; background
     <div style="background:#1a1a1a; padding:50px 30px; border-radius:15px; text-align:center; border: 1px solid #333; margin-bottom: 50px;">
         <h2 style="color:#5a8fc0; font-size: 2rem; margin-top:0;">The Bottom Line</h2>
         <p style="font-size: 1.2rem; color: #ccc;">Professional-grade documentation that protects you and your company, without stealing your personal time.</p>
-        <p style="color:#888; font-size: 1.1rem; margin-top: 30px;">Ask about our custom solutions for automated RFI retrieval and schedule tracking.</p>
-        <p style="margin-top:30px; font-size: 1.2rem;"><strong>Questions?</strong> <br><a href="mailto:jesse@mydailyreports.app" style="color:#e8742a; text-decoration:none; display: inline-block; margin-top: 10px;">Contact Jesse Directly</a></p>
+        <p style="color:#888; font-size: 1.1rem; margin-top: 30px;">Ask about custom solutions for automated RFI retrieval and schedule tracking.</p>
+        <p style="margin-top:30px; font-size: 1.2rem;"><strong>Questions? Ideas? Something not working right?</strong> <br><a href="mailto:jessesbillz@gmail.com" style="color:#e8742a; text-decoration:none; display: inline-block; margin-top: 10px;">Reach Jesse Directly</a></p>
     </div>
 </div>
 <div id="trainingModal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.9);z-index:1000;padding:20px;box-sizing:border-box;">
@@ -153,39 +177,38 @@ body { font-family: 'Segoe UI', Roboto, Arial, sans-serif; margin: 0; background
             <button onclick="closeVideoModal()" style="background:none;border:none;color:#aaa;font-size:30px;cursor:pointer;padding:0;line-height:1;">&times;</button>
         </div>
         <div style="padding:40px 20px;text-align:center;">
-            <div style="font-size:60px;margin-bottom:20px;">🎥</div>
-            <p style="color:#fff;font-size:1.4rem;margin:0 0 15px 0;">Video coming soon!</p>
-            <p style="color:#aaa;font-size:1.1rem;">Jesse will show you the real workflow - from quick notes on the jobsite to clean, professional reports.</p>
+            <p style="color:#fff;font-size:1.4rem;margin:0 0 15px 0;">Video coming soon.</p>
+            <p style="color:#aaa;font-size:1.1rem;">Jesse will walk you through the real workflow &mdash; from quick notes on the jobsite to clean, professional reports ready to submit.</p>
         </div>
     </div>
 </div>
 <script>
 const trainingGuides = [
     {
-        icon: "🚀", color: "#007AFF", title: "Getting Started",
+        color: "#007AFF", title: "Getting Started",
         subtitle: "Learn the basics of creating jobs and navigating the app",
         steps: [
-            "<strong>Sign In:</strong> Your data syncs across all devices automatically. <em>Tip: Use a strong password to keep project data secure.</em>",
-            "<strong>Create Your First Job:</strong> Tap 'Create a Job in One Click'. Pick a descriptive name like 'CSUSM Building'—this becomes the default project name for every report.",
-            "<strong>Upload a Template:</strong> Use your specific PDF or Word doc. Word templates use placeholders like {date} and {projectName} to auto-fill for you."
+            "<strong>Sign In:</strong> Your data syncs across all devices automatically. Use a strong password to keep project data secure.",
+            "<strong>Create Your First Job:</strong> Tap 'Create a Job in One Click'. Pick a descriptive name like 'CSUSM Building' &mdash; this becomes the default project name for every report.",
+            "<strong>Upload a Template:</strong> Use your specific PDF or Word doc. The system reads your document and maps every field for you."
         ]
     },
     {
-        icon: "🎤", color: "#FF3B30", title: "Voice Input & Quick Notes",
+        color: "#FF3B30", title: "Voice Input & Quick Notes",
         subtitle: "Capture observations without stopping your walk",
         steps: [
-            "<strong>Real-Time Dictation:</strong> Tap the microphone on any field to talk instead of type. It uses Apple's on-device processing for 100% privacy.",
-            "<strong>Quick Observation Notes:</strong> Long-press the app icon on your home screen to record a note instantly. It automatically attaches to your next report.",
-            "<strong>Hands-Free:</strong> Perfect for capturing counts or site issues while you're still walking the job."
+            "<strong>Real-Time Dictation:</strong> Tap the microphone on any field to talk instead of type. Uses on-device processing for privacy.",
+            "<strong>Quick Observation Notes:</strong> Long-press the app icon on your home screen to record a note instantly. It attaches to your next report automatically.",
+            "<strong>Hands-Free:</strong> Capture counts and site issues while you're still walking the job."
         ]
     },
     {
-        icon: "📤", color: "#AF52DE", title: "Automated Filing & Export",
+        color: "#AF52DE", title: "Automated Filing & Export",
         subtitle: "Professional organization with zero effort",
         steps: [
             "<strong>Maintenance-Free Naming:</strong> The app auto-populates the correct date sequence and file naming conventions.",
-            "<strong>Custom Export:</strong> Configure each job to save directly to iCloud/Files or send via Email immediately upon submission.",
-            "<strong>One-Tap PDF:</strong> Generates a clean, professional PDF that follows standard industry formats (DSA/HCAI) automatically."
+            "<strong>Custom Export:</strong> Configure each job to save directly to iCloud/Files or send via email immediately on submission.",
+            "<strong>One-Tap PDF:</strong> Generates a clean, professional PDF following standard industry formats automatically."
         ]
     }
 ];
@@ -193,17 +216,14 @@ function populateTrainingGuides() {
     const container = document.getElementById('trainingGuides');
     container.innerHTML = trainingGuides.map(guide => `
         <div style="background:#222; border-radius:12px; padding:25px; border-left:5px solid ${guide.color}; margin-bottom:20px; text-align:left;">
-            <div style="display:flex; align-items:center; gap:20px; margin-bottom:20px;">
-                <div style="font-size:35px;">${guide.icon}</div>
-                <div>
-                    <h3 style="color:#fff; margin:0; font-size:1.4rem;">${guide.title}</h3>
-                    <p style="color:#aaa; margin:5px 0 0 0; font-size:1rem;">${guide.subtitle}</p>
-                </div>
+            <div style="margin-bottom:15px;">
+                <h3 style="color:#fff; margin:0; font-size:1.4rem;">${guide.title}</h3>
+                <p style="color:#aaa; margin:5px 0 0 0; font-size:1rem;">${guide.subtitle}</p>
             </div>
-            <div style="margin-left:0;">
+            <div>
                 ${guide.steps.map(step => `
                     <div style="margin-bottom:15px; color:#ccc; font-size:1.1rem; line-height:1.5;">
-                        • ${step}
+                        &bull; ${step}
                     </div>
                 `).join('')}
             </div>

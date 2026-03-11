@@ -421,7 +421,7 @@ function AccountSettings({user, onBack, onLogout}){
 
               <div style={{background:C.card,border:`1px solid ${C.brd}`,borderRadius:12,padding:20}}>
                 <div style={{fontWeight:700,fontSize:15,color:C.txt,marginBottom:16,display:"flex",alignItems:"center",gap:8}}>
-                  <span style={{color:C.org}}>👤</span> Profile Information
+                  Profile Information
                 </div>
 
                 <div style={{marginBottom:16}}>
@@ -456,7 +456,7 @@ function AccountSettings({user, onBack, onLogout}){
             <div style={{marginBottom:28}}>
               <div style={{background:C.card,border:`1px solid ${C.brd}`,borderRadius:12,padding:20}}>
                 <div style={{fontWeight:700,fontSize:15,color:C.txt,marginBottom:16,display:"flex",alignItems:"center",gap:8}}>
-                  <span style={{color:C.org}}>🕐</span> Timezone
+                  Timezone
                 </div>
                 <div style={{marginBottom:8}}>
                   <label style={ls}>Your Timezone</label>
@@ -476,7 +476,7 @@ function AccountSettings({user, onBack, onLogout}){
             <div style={{marginBottom:28}}>
               <div style={{background:C.card,border:`1px solid ${C.brd}`,borderRadius:12,padding:20}}>
                 <div style={{fontWeight:700,fontSize:15,color:C.txt,marginBottom:16,display:"flex",alignItems:"center",gap:8}}>
-                  <span style={{color:C.org}}>🔔</span> Notifications
+                  Notifications
                 </div>
                 <div style={{fontSize:13,color:C.mut,lineHeight:1.6,marginBottom:14}}>
                   Email reminders are sent based on your per-job reminder settings.
@@ -492,7 +492,7 @@ function AccountSettings({user, onBack, onLogout}){
             <div style={{marginBottom:28}}>
               <div style={{background:C.card,border:`1px solid ${C.brd}`,borderRadius:12,padding:20}}>
                 <div style={{fontWeight:700,fontSize:15,color:C.txt,marginBottom:12,display:"flex",alignItems:"center",gap:8}}>
-                  <span style={{color:C.org}}>⭐</span> Subscription
+                  Subscription
                 </div>
                 <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:12}}>
                   <div>
@@ -549,7 +549,7 @@ function AccountSettings({user, onBack, onLogout}){
 
             {/* Sign Out */}
             <button onClick={onLogout} style={{width:"100%",padding:"14px 16px",background:"transparent",border:`1px solid ${C.brd}`,borderRadius:10,color:C.err,fontSize:15,fontWeight:600,cursor:"pointer",marginBottom:20,display:"flex",alignItems:"center",justifyContent:"center",gap:8}}>
-              <span>🚪</span> Sign Out
+              Sign Out
             </button>
 
             <div style={{textAlign:"center",padding:"12px 0 24px",color:"#444",fontSize:11}}>
@@ -958,7 +958,6 @@ function CreateJob({user, onBack, onCreated}){
             <div style={{position:"absolute",left:0,right:0,top:"100%",zIndex:50,background:C.card,border:`1px solid ${C.brd}`,borderRadius:10,marginTop:4,overflow:"hidden",boxShadow:"0 8px 24px rgba(0,0,0,0.15)"}}>
               {jobCompanyMatches.map(m=>(
                 <button key={m.id} onClick={()=>selectJobCompany(m)} style={{display:"flex",alignItems:"center",gap:10,width:"100%",padding:"12px 14px",background:"transparent",border:"none",borderBottom:`1px solid ${C.brd}`,cursor:"pointer",textAlign:"left"}}>
-                  <span style={{fontSize:18}}>🏢</span>
                   <div style={{flex:1}}>
                     <div style={{fontSize:14,fontWeight:600,color:C.txt}}>{m.name}</div>
                     <div style={{fontSize:11,color:C.mut}}>Tap to select — their templates will be available</div>
@@ -970,7 +969,6 @@ function CreateJob({user, onBack, onCreated}){
           {/* Selected company badge */}
           {jobSelectedCompany&&(
             <div style={{display:"flex",alignItems:"center",gap:8,marginTop:6,padding:"8px 12px",background:"rgba(232,116,42,0.08)",border:"1px solid rgba(232,116,42,0.25)",borderRadius:8}}>
-              <span style={{fontSize:14}}>🏢</span>
               <div style={{flex:1}}>
                 <div style={{fontSize:13,fontWeight:600,color:C.txt}}>{jobSelectedCompany.name}</div>
                 {jobCompanyTemplates.length>0&&<div style={{fontSize:11,color:C.ok}}>{jobCompanyTemplates.length} template{jobCompanyTemplates.length>1?"s":""} available</div>}
@@ -985,10 +983,10 @@ function CreateJob({user, onBack, onCreated}){
           <label style={ls}>Report Type</label>
           <div style={{display:"flex",background:C.inp,borderRadius:10,padding:3}}>
             <button onClick={()=>setJobType("template")} style={{flex:1,padding:"12px 0",background:jobType==="template"?C.card:"transparent",border:"none",borderRadius:8,color:jobType==="template"?C.txt:C.mut,fontSize:14,fontWeight:700,cursor:"pointer"}}>
-              📄 Template
+              Template
             </button>
             <button onClick={()=>setJobType("worklog")} style={{flex:1,padding:"12px 0",background:jobType==="worklog"?C.card:"transparent",border:"none",borderRadius:8,color:jobType==="worklog"?C.txt:C.mut,fontSize:14,fontWeight:700,cursor:"pointer"}}>
-              👷 Work Log
+              Work Log
             </button>
           </div>
           <div style={{fontSize:11,color:C.mut,marginTop:6}}>
@@ -1004,7 +1002,7 @@ function CreateJob({user, onBack, onCreated}){
             {!tf?(
               <div onClick={()=>document.getElementById("fi").click()}
                 style={{border:`2px dashed ${C.brd}`,borderRadius:12,padding:"24px 20px",textAlign:"center",cursor:"pointer",background:C.inp}}>
-                <div style={{fontSize:28,marginBottom:6}}>📄</div>
+                <div style={{fontSize:28,marginBottom:6}}>—</div>
                 <p style={{color:C.lt,fontSize:13,fontWeight:600,marginBottom:4}}>Tap to upload a branded template</p>
                 <p style={{color:C.mut,fontSize:11}}>PDF only • Used as report background</p>
                 <input id="fi" type="file" accept=".pdf" style={{display:"none"}} onChange={e=>{if(!e.target.files[0])return;const f=e.target.files[0];setTf(f);const r=new FileReader();r.onload=()=>setTfB64(r.result.split(",")[1]);r.readAsDataURL(f);}}/>
@@ -1012,7 +1010,7 @@ function CreateJob({user, onBack, onCreated}){
             ):(
               <div style={{background:C.inp,border:`1px solid ${C.brd}`,borderRadius:12,padding:"14px 16px"}}>
                 <div style={{display:"flex",alignItems:"center",gap:12}}>
-                  <div style={{fontSize:24}}>📄</div>
+                  <div style={{fontSize:24}}>—</div>
                   <div style={{flex:1}}>
                     <div style={{fontSize:14,fontWeight:600,color:C.txt}}>{tf.name}</div>
                     <div style={{fontSize:12,color:C.ok}}>Template uploaded — will be used as report background</div>
@@ -1033,12 +1031,10 @@ function CreateJob({user, onBack, onCreated}){
           {!tf&&jobSelectedCompany&&jobCompanyTemplates.length>0&&(
             <div style={{marginBottom:12,background:"rgba(232,116,42,0.06)",border:`2px solid ${C.org}`,borderRadius:12,overflow:"hidden"}}>
               <div style={{padding:"10px 14px",borderBottom:`1px solid rgba(232,116,42,0.2)`,display:"flex",alignItems:"center",gap:8}}>
-                <span style={{fontSize:16}}>🏢</span>
                 <div style={{fontSize:13,fontWeight:700,color:C.org}}>{jobSelectedCompany.name} Templates</div>
               </div>
               {jobCompanyTemplates.map(t=>(
                 <div key={"co-"+t.id} onClick={()=>useSavedTemplate({...t,name:t.template_name||t.name||t.file_name})} style={{padding:"12px 16px",borderBottom:`1px solid rgba(232,116,42,0.12)`,display:"flex",alignItems:"center",gap:10,cursor:"pointer"}}>
-                  <span style={{fontSize:18}}>📄</span>
                   <div style={{flex:1}}>
                     <div style={{fontSize:13,fontWeight:600,color:C.txt}}>{t.template_name||t.name||t.file_name||"Template"}</div>
                     <div style={{fontSize:11,color:C.mut}}>{(t.field_config||[]).length} fields{t.file_type?" — "+t.file_type.toUpperCase():""}</div>
@@ -1053,7 +1049,7 @@ function CreateJob({user, onBack, onCreated}){
           {!tf&&savedTpls.length>0&&(
             <div style={{marginBottom:12}}>
               <button onClick={()=>setShowSaved(!showSaved)} style={{width:"100%",padding:"14px 18px",background:showSaved?C.blu+"18":C.card,border:`2px solid ${C.blu}`,borderRadius:12,color:C.blu,fontSize:15,fontWeight:700,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
-                <span>📋 Use a Saved Template ({savedTpls.length})</span>
+                <span>Use a Saved Template ({savedTpls.length})</span>
                 <span style={{fontSize:14}}>{showSaved?"▲":"▼"}</span>
               </button>
               {showSaved&&(
@@ -1061,7 +1057,6 @@ function CreateJob({user, onBack, onCreated}){
                   {savedTpls.map(t=>(
                     <div key={t.id} style={{padding:"12px 16px",borderBottom:`1px solid ${C.brd}`,display:"flex",alignItems:"center",gap:10}}>
                       <div onClick={()=>useSavedTemplate(t)} style={{display:"flex",alignItems:"center",gap:10,flex:1,cursor:"pointer"}}>
-                        <span style={{fontSize:18}}>📋</span>
                         <div style={{flex:1}}>
                           <div style={{fontSize:13,fontWeight:600,color:C.txt}}>{t.name}</div>
                           <div style={{fontSize:11,color:C.mut}}>{(t.field_config||[]).length} fields — {t.file_type?.toUpperCase()}</div>
@@ -1081,7 +1076,7 @@ function CreateJob({user, onBack, onCreated}){
           {!tf?(
             <div onDragOver={e=>{e.preventDefault();setDrag(true);}} onDragLeave={()=>setDrag(false)} onDrop={e=>{e.preventDefault();setDrag(false);if(e.dataTransfer.files.length)(usedSavedId?doFileWithSaved:doFile)(e.dataTransfer.files[0]);}} onClick={()=>document.getElementById("fi").click()}
               style={{border:`2px dashed ${drag?C.org:C.brd}`,borderRadius:12,padding:"32px 20px",textAlign:"center",cursor:"pointer",background:drag?"#1f1a14":C.inp}}>
-              <div style={{fontSize:32,marginBottom:8}}>{usedSavedId?"📋":"📄"}</div>
+              <div style={{fontSize:32,marginBottom:8}}>—</div>
               <p style={{color:C.lt,fontSize:14,fontWeight:600,marginBottom:4}}>{usedSavedId?"Now upload the actual file (parsing will be skipped)":"Drop your template here"}</p>
               <p style={{color:C.mut,fontSize:12}}>{usedSavedId?"Fields already loaded from saved template":"or tap to browse • PDF, DOCX, JPG, PNG"}</p>
               {!usedSavedId&&<p style={{color:C.mut,fontSize:11,marginTop:8,lineHeight:1.4,fontStyle:"italic"}}>Tip: Download the file to your phone first, then upload from your files. Uploading directly from email or cloud viewers may change the filename.</p>}
@@ -1090,7 +1085,7 @@ function CreateJob({user, onBack, onCreated}){
           ):(
             <div style={{background:C.inp,border:`1px solid ${C.brd}`,borderRadius:12,padding:"14px 16px"}}>
               <div style={{display:"flex",alignItems:"center",gap:12}}>
-                <div style={{fontSize:24}}>{usedSavedId?"📋":"📄"}</div>
+                <div style={{fontSize:24}}>—</div>
                 <div style={{flex:1}}>
                   <div style={{fontSize:14,fontWeight:600,color:C.txt}}>{tf.name}</div>
                   <div style={{fontSize:12,color:C.mut}}>{usedSavedId?"Using saved template — no parsing needed":"New upload"}</div>
@@ -1167,7 +1162,7 @@ function CreateJob({user, onBack, onCreated}){
             {/* Save as Reusable Template — after fields so users review first */}
             {!tplSaved&&!usedSavedId&&(
               <div style={{background:C.card,border:`2px solid ${C.blu}`,borderRadius:12,padding:"16px 18px",marginTop:16,textAlign:"center"}}>
-                <div style={{fontSize:20,marginBottom:6}}>💾</div>
+                <div style={{fontSize:20,marginBottom:6}}>—</div>
                 <div style={{fontSize:14,fontWeight:700,color:C.lt,marginBottom:4}}>Save This Template</div>
                 <div style={{fontSize:12,color:C.mut,marginBottom:12,lineHeight:1.4}}>Reuse these parsed fields on other jobs without re-parsing. Saves time and API costs.</div>
                 <button onClick={saveAsTemplate} disabled={savingTpl} style={{width:"100%",padding:"12px 0",background:C.blu,border:"none",borderRadius:8,color:"#fff",fontSize:14,fontWeight:700,cursor:savingTpl?"default":"pointer",opacity:savingTpl?0.6:1}}>
@@ -1195,7 +1190,7 @@ function CreateJob({user, onBack, onCreated}){
         </ToggleBox>
 
         {/* 2. Report Frequency */}
-        <ToggleBox icon="📊" label="Report Frequency" on={freqOn} setOn={v=>{setFreqOn(v);if(!v)setRemOn(false);}} desc="Set how often you'll file reports for this job">
+        <ToggleBox icon="—" label="Report Frequency" on={freqOn} setOn={v=>{setFreqOn(v);if(!v)setRemOn(false);}} desc="Set how often you'll file reports for this job">
           <div style={{display:"flex",gap:6,marginBottom:10,flexWrap:"wrap"}}>
             {DS.map(d=>{const a=days.includes(d);return<button key={d} onClick={()=>togDay(d)} style={{width:42,height:42,borderRadius:"50%",border:a?`2px solid ${C.org}`:`1px solid ${C.brd}`,background:a?C.org:"transparent",color:a?"#fff":C.mut,fontWeight:600,fontSize:11,cursor:"pointer"}}>{d}</button>;})}
           </div>
@@ -1232,10 +1227,10 @@ function ArchivedJobs({jobs, onBack, onSelect}){
         <span style={{fontSize:13,color:C.mut,marginLeft:"auto"}}>{jobs.length} job{jobs.length!==1?"s":""}</span>
       </div>
       <div style={{maxWidth:600,margin:"0 auto",padding:"20px"}}>
-        {jobs.length===0&&(<div style={{textAlign:"center",padding:"60px 20px",color:C.mut}}><div style={{fontSize:48,marginBottom:16}}>📁</div><p style={{fontSize:16,fontWeight:600,color:C.lt,marginBottom:6}}>No archived jobs</p><p style={{fontSize:14}}>Completed projects will appear here</p></div>)}
+        {jobs.length===0&&(<div style={{textAlign:"center",padding:"60px 20px",color:C.mut}}><div style={{fontSize:48,marginBottom:16,color:C.brd}}>—</div><p style={{fontSize:16,fontWeight:600,color:C.lt,marginBottom:6}}>No archived jobs</p><p style={{fontSize:14}}>Completed projects will appear here</p></div>)}
         {jobs.map(j=>(
           <button key={j.id} onClick={()=>onSelect(j)} style={{width:"100%",textAlign:"left",background:C.card,border:`1px solid ${C.brd}`,borderRadius:12,padding:"16px 18px",marginBottom:10,cursor:"pointer",display:"flex",alignItems:"center",gap:14}}>
-            <div style={{fontSize:20}}>📁</div>
+            <div style={{fontSize:16,fontWeight:700,color:C.mut}}>—</div>
             <div style={{flex:1}}><div style={{fontWeight:600,fontSize:16,color:C.txt,marginBottom:4}}>{j.name}</div><div style={{display:"flex",alignItems:"center",gap:8}}><span style={{fontSize:11,fontWeight:600,background:C.inp,border:`1px solid ${C.brd}`,borderRadius:6,padding:"2px 8px",color:C.mut}}>{SL[j.schedule]||j.schedule}</span>{j.site_address&&<span style={{fontSize:12,color:C.mut}}>{j.site_address}</span>}</div></div>
             <span style={{color:C.mut,fontSize:18}}>›</span>
           </button>
@@ -2113,7 +2108,7 @@ function WorkLogEditor({job, user, onBack, reportDate}){
         {/* Weather — Collapsible */}
         <div style={{background:C.card,border:`1px solid ${expandedSections.weather?C.org:C.brd}`,borderRadius:12,overflow:"hidden",marginBottom:10,transition:"border-color 0.2s"}}>
           <button onClick={()=>{if(!weatherEnabled)toggleWeather(true);toggleSection("weather");}} style={{width:"100%",display:"flex",alignItems:"center",gap:10,padding:"14px 16px",background:"none",border:"none",cursor:"pointer",textAlign:"left"}}>
-            <span style={{fontSize:16}}>🌤</span>
+            <span style={{fontSize:16}}>☀</span>
             <span style={{flex:1,fontWeight:700,fontSize:14,color:C.txt}}>Weather</span>
             <button onClick={(ev)=>{ev.stopPropagation();toggleWeather(!weatherEnabled);}} style={{width:42,height:24,borderRadius:12,border:"none",cursor:"pointer",background:weatherEnabled?C.org:C.brd,position:"relative",flexShrink:0}}>
               <div style={{width:18,height:18,borderRadius:"50%",background:"#fff",position:"absolute",top:3,left:weatherEnabled?21:3,transition:"left 0.2s"}}/>
@@ -2156,7 +2151,6 @@ function WorkLogEditor({job, user, onBack, reportDate}){
         {/* Contractor Cards */}
         <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:12}}>
           <div style={{display:"flex",alignItems:"center",gap:8}}>
-            <span style={{fontSize:18}}>👷</span>
             <span style={{fontWeight:700,fontSize:15}}>Contractors</span>
             <span style={{fontSize:12,color:C.mut,fontWeight:600}}>({contractors.length})</span>
           </div>
@@ -2169,7 +2163,7 @@ function WorkLogEditor({job, user, onBack, reportDate}){
           <div key={c.id} style={{background:C.card,border:`1px solid ${activeId===c.id?C.org:C.brd}`,borderRadius:12,marginBottom:10,overflow:"hidden",transition:"border-color 0.2s"}}>
             {/* Contractor name bar — tap to expand/collapse */}
             <button onClick={()=>setActiveId(activeId===c.id?null:c.id)} style={{width:"100%",display:"flex",alignItems:"center",gap:12,padding:"14px 16px",background:"none",border:"none",cursor:"pointer",textAlign:"left"}}>
-              <div style={{width:36,height:36,borderRadius:10,background:C.org+"22",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,flexShrink:0}}>👷</div>
+              <div style={{width:36,height:36,borderRadius:10,background:C.org+"22",display:"flex",alignItems:"center",justifyContent:"center",fontSize:12,fontWeight:700,color:C.org,flexShrink:0}}>C</div>
               <div style={{flex:1,minWidth:0}}>
                 <div style={{display:"flex",alignItems:"center",gap:6}}>
                   <div style={{fontSize:14,fontWeight:700,color:C.txt,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",flex:1}}>{c.name}</div>
@@ -2213,7 +2207,7 @@ function WorkLogEditor({job, user, onBack, reportDate}){
                     <label style={{fontSize:12,color:C.lt,fontWeight:600}}>Photos ({(c.photos||[]).length})</label>
                     <div style={{display:"flex",gap:6}}>
                       <button onClick={()=>{setPhotoTarget(c.id);setTimeout(()=>cameraRef.current?.click(),100);}} style={{padding:"6px 10px",background:C.org,border:"none",borderRadius:6,color:"#fff",fontSize:12,fontWeight:600,cursor:"pointer"}}>📷 Photo</button>
-                      <button onClick={()=>{setPhotoTarget(c.id);setTimeout(()=>libraryRef.current?.click(),100);}} style={{padding:"6px 10px",background:C.card,border:`1px solid ${C.brd}`,borderRadius:6,color:C.lt,fontSize:12,fontWeight:600,cursor:"pointer"}}>🖼️ Library</button>
+                      <button onClick={()=>{setPhotoTarget(c.id);setTimeout(()=>libraryRef.current?.click(),100);}} style={{padding:"6px 10px",background:C.card,border:`1px solid ${C.brd}`,borderRadius:6,color:C.lt,fontSize:12,fontWeight:600,cursor:"pointer"}}>+ Library</button>
                     </div>
                   </div>
                   {(c.photos||[]).length>0&&(
@@ -3352,7 +3346,7 @@ function ReportEditor({job, user, onBack, reportDate}){
 
         {editFields.length===0&&lockFields.length===0&&(
           <div style={{textAlign:"center",padding:"40px 20px",color:C.mut}}>
-            <div style={{fontSize:36,marginBottom:12}}>📋</div>
+            <div style={{fontSize:36,marginBottom:12,color:C.brd}}>—</div>
             <p style={{fontSize:15,fontWeight:600,color:C.lt,marginBottom:6}}>No template fields configured</p>
             <p style={{fontSize:13}}>Go back and upload a template in your job settings to get started.</p>
           </div>
@@ -3387,7 +3381,7 @@ function ReportEditor({job, user, onBack, reportDate}){
               <span>📷</span> Take Photo
             </button>
             <button onClick={()=>{photoRef.current.removeAttribute("capture");photoRef.current.click();}} style={{flex:1,padding:"14px 0",background:C.card,border:`1px solid ${C.brd}`,borderRadius:10,color:C.lt,fontSize:14,fontWeight:600,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",gap:8}}>
-              <span>🖼️</span> Library
+              + Library
             </button>
           </div>
           <input ref={photoRef} type="file" accept="image/*" multiple onChange={handlePhoto} style={{display:"none"}}/>
@@ -3591,7 +3585,7 @@ function JobDetail({job, user, onBack, onDeleted}){
           <div style={{fontWeight:700,fontSize:17}}>{job.name}</div>
           {job.site_address&&<div style={{fontSize:12,color:C.mut}}>{job.site_address}</div>}
         </div>
-        <button onClick={()=>setShowJobSet(!showJobSet)} style={{width:34,height:34,borderRadius:8,background:C.inp,border:`1px solid ${showJobSet?C.org:C.brd}`,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",fontSize:14,color:C.mut}}>⚙️</button>
+        <button onClick={()=>setShowJobSet(!showJobSet)} style={{width:34,height:34,borderRadius:8,background:C.inp,border:`1px solid ${showJobSet?C.org:C.brd}`,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",fontSize:12,fontWeight:700,color:C.mut}}>⚙</button>
       </div>
 
       <div style={{maxWidth:600,margin:"0 auto",padding:"20px"}}>
@@ -3629,7 +3623,7 @@ function JobDetail({job, user, onBack, onDeleted}){
         </div>
 
         {/* ── Photo Gallery ── */}
-        <Folder icon="📸" label="Photos" count={0} color={C.blu} open={showPhotos} setOpen={setShowPhotos}>
+        <Folder icon="📷" label="Photos" count={0} color={C.blu} open={showPhotos} setOpen={setShowPhotos}>
           <div style={{textAlign:"center",padding:"20px 0"}}>
             <div style={{fontSize:36,marginBottom:8}}>📷</div>
             <p style={{fontSize:14,fontWeight:600,color:C.lt,marginBottom:4}}>Job Photo Gallery</p>
@@ -3639,7 +3633,7 @@ function JobDetail({job, user, onBack, onDeleted}){
         </Folder>
 
         {/* ── Working Copies Folder ── */}
-        <Folder icon="✏️" label="Working Copies" count={working.length} color={C.org} open={showWorking} setOpen={setShowWorking}>
+        <Folder icon="📋" label="Working Copies" count={working.length} color={C.org} open={showWorking} setOpen={setShowWorking}>
           {working.length===0?(
             <div style={{textAlign:"center",padding:"16px 0",color:C.mut,fontSize:13}}>No drafts in progress</div>
           ):(
@@ -3698,14 +3692,13 @@ function JobDetail({job, user, onBack, onDeleted}){
           <div style={{background:C.card,border:`1px solid ${C.blu}`,borderRadius:12,padding:20,marginBottom:16}}>
             <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:6}}>
               <div style={{fontWeight:700,fontSize:15,color:C.blu,display:"flex",alignItems:"center",gap:8}}>
-                <span>👥</span> Project Team
+                Project Team
               </div>
               <button onClick={()=>setShowTeam(false)} style={{background:"none",border:"none",color:C.mut,cursor:"pointer",fontSize:20,padding:"0 4px"}}>✕</button>
             </div>
             <div style={{fontSize:12,color:C.mut,marginBottom:16,lineHeight:1.5}}>These people will receive an email with the report attached when you tap Submit Report.</div>
             {teamMembers.map((m,i)=>(
               <div key={i} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 0",borderBottom:i<teamMembers.length-1?`1px solid ${C.brd}`:"none"}}>
-                <div style={{width:32,height:32,borderRadius:8,background:C.inp,border:`1px solid ${C.brd}`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:14,flexShrink:0}}>👤</div>
                 <div style={{flex:1,minWidth:0}}>
                   <div style={{fontSize:14,fontWeight:600,color:C.lt}}>{m.name||"No name"}</div>
                   <div style={{fontSize:12,color:C.mut,wordBreak:"break-all"}}>{m.email}</div>
@@ -3774,7 +3767,7 @@ function JobDetail({job, user, onBack, onDeleted}){
         {showFieldEdit&&fieldEditFields&&(
           <div style={{background:C.card,border:`1px solid ${C.org}`,borderRadius:12,padding:16,marginBottom:16}}>
             <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:12}}>
-              <div style={{fontWeight:700,fontSize:15,color:C.org}}>📋 Edit Template Fields</div>
+              <div style={{fontWeight:700,fontSize:15,color:C.org}}>Edit Template Fields</div>
               <button onClick={()=>setShowFieldEdit(false)} style={{background:"none",border:"none",color:C.mut,cursor:"pointer",fontSize:20,padding:"0 4px"}}>✕</button>
             </div>
             <div style={{fontSize:11,color:C.mut,marginBottom:12,lineHeight:1.5}}>Change field modes and values. This affects all future reports for this job.</div>
@@ -3834,12 +3827,12 @@ function JobDetail({job, user, onBack, onDeleted}){
             </button>
             <button onClick={()=>setShowTeam(!showTeam)} style={{width:"100%",display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,padding:"14px 18px",background:"none",border:"none",borderBottom:`1px solid ${C.brd}`,cursor:"pointer",textAlign:"left"}}>
               <div style={{display:"flex",alignItems:"center",gap:10}}>
-                <span style={{fontSize:16}}>👥</span><span style={{fontSize:14,fontWeight:600,color:C.lt}}>Project Team</span>
+                <span style={{fontSize:14,fontWeight:600,color:C.lt}}>Project Team</span>
               </div>
               <span style={{fontSize:11,color:C.mut,background:C.inp,borderRadius:10,padding:"2px 8px"}}>{teamMembers.length}</span>
             </button>
             <button onClick={()=>{if(!fieldEditFields){const fc=job.field_config||{};const all=[...(fc.editable||[]).map(f=>({...f,mode:f.autoFill==="date"?"auto-date":f.autoFill==="increment"?"auto-num":"edit"})),...(fc.locked||[]).map(f=>({...f,mode:"lock"}))];setFieldEditFields(all);}setShowFieldEdit(!showFieldEdit);}} style={{width:"100%",display:"flex",alignItems:"center",gap:10,padding:"14px 18px",background:"none",border:"none",borderBottom:`1px solid ${C.brd}`,cursor:"pointer",textAlign:"left"}}>
-              <span style={{fontSize:16}}>📋</span><span style={{fontSize:14,fontWeight:600,color:C.lt}}>Edit Template Fields</span>
+              <span style={{fontSize:14,fontWeight:600,color:C.lt}}>Edit Template Fields</span>
             </button>
             <button onClick={reparseTemplate} disabled={reparsing} style={{width:"100%",display:"flex",alignItems:"center",gap:10,padding:"14px 18px",background:"none",border:"none",borderBottom:`1px solid ${C.brd}`,cursor:reparsing?"default":"pointer",textAlign:"left",opacity:reparsing?0.6:1}}>
               <span style={{fontSize:16}}>{reparsing?"⏳":"🔄"}</span><span style={{fontSize:14,fontWeight:600,color:C.lt}}>{reparsing?"Re-parsing template...":"Re-parse Template Fields"}</span>
@@ -3874,54 +3867,54 @@ function JobDetail({job, user, onBack, onDeleted}){
 
 /* ── Training Center ── */
 const GUIDES=[
-  {icon:"🚀",color:C.blu,title:"Getting Started",sub:"Create your first job and learn the basics",steps:[
-    {icon:"🔑",title:"Sign In",body:"Enter your email and password or create a new account. Your data syncs across all devices.",tip:"Name and email can't be changed after sign up — double-check before submitting."},
-    {icon:"🏠",title:"The Dashboard",body:"Your home screen. Active jobs show status dots: red = due, orange = in progress, green = submitted. Tap any job to open it.",tip:null},
-    {icon:"➕",title:"Create a Job",body:"Tap \"+ New Job\" and enter a job name. Upload a PDF template and the AI detects all fillable fields. Set each field to Edit, Lock, Auto-Date, or Auto-#.",tip:"Leave date and report number cells blank in your PDF template — auto-fill handles them."},
-    {icon:"💾",title:"Save as Template",body:"After parsing, tap \"Save as Reusable Template\" to reuse the same field layout on future jobs without re-parsing. Job-specific fields (project name, DSA #, etc.) become editable when you reuse it.",tip:null},
-    {icon:"🔽",title:"Switch Jobs",body:"Use the Jobs dropdown at the top to switch between active jobs.",tip:null},
+  {icon:"→",color:C.blu,title:"Getting Started",sub:"Create your first job and learn the basics",steps:[
+    {icon:"✓",title:"Sign In",body:"Enter your email and password or create a new account. Your data syncs across all devices.",tip:"Name and email can't be changed after sign up — double-check before submitting."},
+    {icon:"▬",title:"The Dashboard",body:"Your home screen. Active jobs show status dots: red = due, orange = in progress, green = submitted. Tap any job to open it.",tip:null},
+    {icon:"+",title:"Create a Job",body:"Tap \"+ New Job\" and enter a job name. Upload a PDF template and the AI detects all fillable fields. Set each field to Edit, Lock, Auto-Date, or Auto-#.",tip:"Leave date and report number cells blank in your PDF template — auto-fill handles them."},
+    {icon:"—",title:"Save as Template",body:"After parsing, tap \"Save as Reusable Template\" to reuse the same field layout on future jobs without re-parsing. Job-specific fields (project name, DSA #, etc.) become editable when you reuse it.",tip:null},
+    {icon:"▼",title:"Switch Jobs",body:"Use the Jobs dropdown at the top to switch between active jobs.",tip:null},
   ]},
-  {icon:"📝",color:C.ok,title:"Creating Reports",sub:"Build and submit daily field reports",steps:[
-    {icon:"▶️",title:"Start a Report",body:"From the job dashboard, tap \"Start Today's Report\". Locked fields are pre-filled. Auto-date shows today. Auto-# increments from your last report.",tip:"One report per day per job. Working copies can be edited anytime."},
-    {icon:"✏️",title:"Fill In Fields",body:"Editable fields are ready for your daily entries — notes, weather, hours, observations. Locked fields (project name, architect, contractor) are already filled in.",tip:null},
+  {icon:"—",color:C.ok,title:"Creating Reports",sub:"Build and submit daily field reports",steps:[
+    {icon:"▶",title:"Start a Report",body:"From the job dashboard, tap \"Start Today's Report\". Locked fields are pre-filled. Auto-date shows today. Auto-# increments from your last report.",tip:"One report per day per job. Working copies can be edited anytime."},
+    {icon:"✏",title:"Fill In Fields",body:"Editable fields are ready for your daily entries — notes, weather, hours, observations. Locked fields (project name, architect, contractor) are already filled in.",tip:null},
     {icon:"🎤",title:"Voice Dictation",body:"Tap any text field, then tap the mic on your keyboard. Speak naturally — your phone's built-in dictation does the rest. No extra setup needed.",tip:"Take notes throughout the day as things happen. Come back later and everything's saved."},
     {icon:"📷",title:"Photos",body:"Take or upload photos from the report editor. Choose layout: 1 per page, 2 side-by-side, or 4 per page (2x2 grid).",tip:null},
-    {icon:"💾",title:"Save & Submit",body:"Tap \"Save Working Copy\" to save progress. Tap \"Submit\" when done — the submit button generates a PDF using your original template with your entries overlaid.",tip:null},
+    {icon:"—",title:"Save & Submit",body:"Tap \"Save Working Copy\" to save progress. Tap \"Submit\" when done — the submit button generates a PDF using your original template with your entries overlaid.",tip:null},
   ]},
-  {icon:"📸",color:C.org,title:"Photos",sub:"Capture and organize site documentation",steps:[
+  {icon:"📷",color:C.org,title:"Photos",sub:"Capture and organize site documentation",steps:[
     {icon:"📷",title:"Take Photos",body:"Use \"Take Photo\" for camera or \"Library\" to pick from your phone. Photos attach to your report and appear in the layout you selected.",tip:"Context shots, close-ups of issues, and progress photos make the best documentation."},
-    {icon:"🗑️",title:"Remove Photos",body:"Tap the X on any photo thumbnail to remove it from the report.",tip:null},
+    {icon:"—",title:"Remove Photos",body:"Tap the X on any photo thumbnail to remove it from the report.",tip:null},
   ]},
-  {icon:"📤",color:"#a855f7",title:"Exporting & Sharing",sub:"Generate PDFs and email reports",steps:[
-    {icon:"📄",title:"PDF Generation",body:"The submit button generates a PDF from your original template with your daily entries overlaid. Includes a timestamp watermark.",tip:"Report numbers are sequential: DR#1, DR#2, DR#3 — based on submissions, not calendar days."},
-    {icon:"📧",title:"Email Reports",body:"Email the PDF to your project team on submit. Set up default recipients in your job's Project Team settings.",tip:null},
-    {icon:"🔄",title:"Past Reports",body:"Completed reports live in the Completed folder on your job dashboard. Re-download or resend anytime.",tip:null},
+  {icon:"→",color:"#a855f7",title:"Exporting & Sharing",sub:"Generate PDFs and email reports",steps:[
+    {icon:"—",title:"PDF Generation",body:"The submit button generates a PDF from your original template with your daily entries overlaid. Includes a timestamp watermark.",tip:"Report numbers are sequential: DR#1, DR#2, DR#3 — based on submissions, not calendar days."},
+    {icon:"—",title:"Email Reports",body:"Email the PDF to your project team on submit. Set up default recipients in your job's Project Team settings.",tip:null},
+    {icon:"↻",title:"Past Reports",body:"Completed reports live in the Completed folder on your job dashboard. Re-download or resend anytime.",tip:null},
   ]},
-  {icon:"💼",color:"#14b8a6",title:"Managing Jobs",sub:"Edit, update, and organize your projects",steps:[
-    {icon:"⚙️",title:"Job Settings",body:"Tap the gear icon on any job dashboard. From here: edit job name and address, manage your project team (name + email), edit template fields and modes, toggle scheduling, or delete the job.",tip:null},
-    {icon:"📋",title:"Edit Template Fields",body:"In Job Settings, tap \"Edit Template Fields\" to change any field's mode (Edit, Lock, Auto-Date, Auto-#) or update its value. Changes apply to all future reports.",tip:null},
-    {icon:"📦",title:"Archive a Job",body:"When a project is done, archive it. Reports and data are preserved but the job hides from your active list.",tip:"Archive instead of delete — you may need old reports later."},
+  {icon:"⚙",color:"#14b8a6",title:"Managing Jobs",sub:"Edit, update, and organize your projects",steps:[
+    {icon:"⚙",title:"Job Settings",body:"Tap the gear icon on any job dashboard. From here: edit job name and address, manage your project team (name + email), edit template fields and modes, toggle scheduling, or delete the job.",tip:null},
+    {icon:"—",title:"Edit Template Fields",body:"In Job Settings, tap \"Edit Template Fields\" to change any field's mode (Edit, Lock, Auto-Date, Auto-#) or update its value. Changes apply to all future reports.",tip:null},
+    {icon:"▬",title:"Archive a Job",body:"When a project is done, archive it. Reports and data are preserved but the job hides from your active list.",tip:"Archive instead of delete — you may need old reports later."},
   ]},
   {icon:"📅",color:C.blu,title:"Scheduling Calendar",sub:"Share your availability with GCs and subs",steps:[
     {icon:"📅",title:"Your Calendar",body:"Enable Jobsite Scheduling on any job (in Job Settings) and it appears on your shared calendar. One link covers all your scheduling-enabled jobs.",tip:null},
     {icon:"🔗",title:"Share Your Link",body:"Tap \"Share Calendar\" on the dashboard. Send the link to your GC, subs, or anyone who needs to request a site visit.",tip:"Set your Scheduling Display Name in Account Settings so people recognize your calendar."},
-    {icon:"📋",title:"Requests",body:"Visitors pick a job and date from your calendar link. You see the request and can approve or reschedule it.",tip:"Scheduling requests don't auto-create reports — start your report when you're on site."},
+    {icon:"—",title:"Requests",body:"Visitors pick a job and date from your calendar link. You see the request and can approve or reschedule it.",tip:"Scheduling requests don't auto-create reports — start your report when you're on site."},
   ]},
-  {icon:"🖼️",color:"#f59e0b",title:"Preparing Your Template",sub:"Visual guide to uploading a clean PDF",steps:[
-    {icon:"📄",title:"Start With a Clean PDF",body:"Export your report as a PDF with blank value cells. Labels stay, values go. The AI reads the labels to detect fields — blank cells give it a clean surface to write on.",tip:null,
+  {icon:"—",color:"#f59e0b",title:"Preparing Your Template",sub:"Visual guide to uploading a clean PDF",steps:[
+    {icon:"—",title:"Start With a Clean PDF",body:"Export your report as a PDF with blank value cells. Labels stay, values go. The AI reads the labels to detect fields — blank cells give it a clean surface to write on.",tip:null,
       illustration:{type:"form",rows:[
         {label:"Date:",value:"",good:true,note:"Leave blank — Auto-Date fills this"},
         {label:"Project Name:",value:"Woodland Park MS",good:true,note:"Pre-filled values become locked fields"},
         {label:"DR #:",value:"",good:true,note:"Leave blank — Auto-# fills this"},
       ]}},
-    {icon:"🚫",title:"Remove Old Dates & Numbers",body:"If your template has a date like \"04 February 2026\" or a report number already filled in, delete those values before uploading. The app overwrites them but the old text can show through underneath.",tip:null,
+    {icon:"✗",title:"Remove Old Dates & Numbers",body:"If your template has a date like \"04 February 2026\" or a report number already filled in, delete those values before uploading. The app overwrites them but the old text can show through underneath.",tip:null,
       illustration:{type:"compare",bad:{label:"Date:",value:"04 February 2026",caption:"Old date bleeds through"},good:{label:"Date:",value:"",caption:"Clean — auto-date fills it fresh"}}},
-    {icon:"📝",title:"Notes Section",body:"If you have a standing note (like a general availability message), put it in its own separate text box on your PDF and lock it as a field. Then create a second, blank text box labeled \"IOR Notes:\" for your daily entries. This keeps the standing note untouched and gives you a clean area to write in every day.",tip:null,
+    {icon:"—",title:"Notes Section",body:"If you have a standing note (like a general availability message), put it in its own separate text box on your PDF and lock it as a field. Then create a second, blank text box labeled \"IOR Notes:\" for your daily entries. This keeps the standing note untouched and gives you a clean area to write in every day.",tip:null,
       illustration:{type:"form",rows:[
         {label:"Standing Note:",value:"Available for daily communication...",good:true,note:"Separate box — lock this as a field"},
         {label:"IOR Notes:",value:"",good:true,note:"Blank — this is where you write daily notes"},
       ]}},
-    {icon:"📐",title:"Best Practices",body:"Use standard letter size (8.5\" x 11\"). Single page works best. Use real text labels with colons, not empty boxes. Delete any blank extra pages. Signature lines are automatically ignored.",tip:null,
+    {icon:"✓",title:"Best Practices",body:"Use standard letter size (8.5\" x 11\"). Single page works best. Use real text labels with colons, not empty boxes. Delete any blank extra pages. Signature lines are automatically ignored.",tip:null,
       illustration:{type:"checklist",items:[
         {text:"Single page PDF",ok:true},
         {text:"Clear labels with colons",ok:true},
@@ -3930,10 +3923,10 @@ const GUIDES=[
         {text:"Signature lines — ignored automatically",ok:true},
       ]}},
   ]},
-  {icon:"⚙️",color:C.mut,title:"Settings",sub:"Account, timezone, and preferences",steps:[
-    {icon:"👤",title:"Account Settings",body:"Tap the gear icon on the dashboard, then \"Account Settings\". View your profile, set timezone, and configure your scheduling display name.",tip:null},
-    {icon:"🔔",title:"Reminders",body:"Email reminders are set per-job during creation. You'll get reminded before your report is due based on your schedule.",tip:null},
-    {icon:"🚪",title:"Sign Out",body:"Account Settings → Sign Out. The app keeps you logged in by default. Your data stays saved when you come back.",tip:null},
+  {icon:"⚙",color:C.mut,title:"Settings",sub:"Account, timezone, and preferences",steps:[
+    {icon:"—",title:"Account Settings",body:"Tap the gear icon on the dashboard, then \"Account Settings\". View your profile, set timezone, and configure your scheduling display name.",tip:null},
+    {icon:"—",title:"Reminders",body:"Email reminders are set per-job during creation. You'll get reminded before your report is due based on your schedule.",tip:null},
+    {icon:"—",title:"Sign Out",body:"Account Settings → Sign Out. The app keeps you logged in by default. Your data stays saved when you come back.",tip:null},
   ]},
 ];
 
@@ -4174,29 +4167,29 @@ function Dashboard({user, onLogout}){
       <div style={{maxWidth:600,margin:"0 auto",padding:"24px 20px"}}>
         <LP style={{color:C.mut,marginBottom:20}}>Welcome to My Daily Reports. By accessing or using our service, you agree to be bound by these Terms of Service. Please read them carefully before using the application.</LP>
 
-        <LegalSection icon="📄" number={1} title="Acceptance of Terms">
+        <LegalSection icon="—" number={1} title="Acceptance of Terms">
           <LP>By creating an account or using My Daily Reports ("the Service"), you agree to these Terms of Service, our Privacy Policy, and any additional terms applicable to certain features. If you do not agree to these terms, you may not use the Service.</LP>
           <LP>We reserve the right to modify these terms at any time. Continued use of the Service after changes constitutes acceptance of the new terms. We will notify users of material changes via email or in-app notification.</LP>
         </LegalSection>
 
-        <LegalSection icon="🔄" number={2} title="Description of Service">
-          <LP>My Daily Reports is a mobile and web application designed for construction industry professionals, particularly Project Inspectors and Inspectors of Record (IOR), to create, manage, and export daily inspection reports. The Service includes:</LP>
-          <LB items={["Daily report creation and management","Photo documentation and attachment","PDF generation and export","Time tracking and job management","AI-powered document parsing (Premium feature)","Inspection request management (Premium feature)"]}/>
+        <LegalSection icon="→" number={2} title="Description of Service">
+          <LP>My Daily Reports is a mobile and web application designed for construction industry professionals, particularly Project Inspectors and Inspectors of Record (IOR), to create, manage, and export daily field reports. The Service includes:</LP>
+          <LB items={["Daily report creation and management","Photo documentation and attachment","PDF generation and export","Time tracking and job management","AI-powered document parsing (Premium feature)","Scheduling request management (Premium feature)"]}/>
         </LegalSection>
 
-        <LegalSection icon="👥" number={3} title="User Accounts and Registration">
+        <LegalSection icon="—" number={3} title="User Accounts and Registration">
           <LP>To use certain features, you must create an account. You agree to:</LP>
           <LB items={["Provide accurate, current, and complete information during registration","Maintain the security of your password and account","Accept responsibility for all activities under your account","Notify us immediately of any unauthorized use"]}/>
           <LP>You must be at least 18 years old to use this Service. Accounts registered by automated methods are not permitted.</LP>
         </LegalSection>
 
-        <LegalSection icon="💳" number={4} title="Subscription and Payments">
+        <LegalSection icon="—" number={4} title="Subscription and Payments">
           <LP>The Service offers free and paid subscription tiers:</LP>
           <LB items={["Free Tier: Limited to 1 job, 1 report per week, 2 photos per report","Silver Tier: Extended limits, draft saving, voice input","Premium Tier: Unlimited usage, AI features, advanced reporting","Enterprise Tier: All features plus priority support"]} boldPrefixes={["Free Tier:","Silver Tier:","Premium Tier:","Enterprise Tier:"]}/>
           <LP>Paid subscriptions are billed in advance on a monthly or annual basis. Subscriptions automatically renew unless cancelled before the renewal date. Refunds are handled according to applicable app store policies (Apple App Store, Google Play Store).</LP>
         </LegalSection>
 
-        <LegalSection icon="🏛" number={5} title="App Store Terms and Compliance">
+        <LegalSection icon="—" number={5} title="App Store Terms and Compliance">
           <LP>If you access the Service through Apple's App Store or Google Play:</LP>
           <LB items={["These terms are between you and My Daily Reports, not Apple or Google","Apple/Google have no obligation to provide maintenance or support","Apple/Google are third-party beneficiaries of these terms","In-app purchases are processed through respective app stores","Refund requests should be directed to the respective app store"]}/>
           <LP>We comply with Apple's App Store Review Guidelines and Google Play Developer Program Policies.</LP>
@@ -4208,7 +4201,7 @@ function Dashboard({user, onLogout}){
           <LP>We do not claim ownership of your User Content. You are responsible for ensuring you have rights to any content you upload. User Content is stored securely with access restricted to your account only.</LP>
         </LegalSection>
 
-        <LegalSection icon="©" number={7} title="Intellectual Property Rights">
+        <LegalSection icon="—" number={7} title="Intellectual Property Rights">
           <LP>The Service, including its original content, features, and functionality, is owned by My Daily Reports and protected by international copyright, trademark, and other intellectual property laws.</LP>
           <LP>You may not:</LP>
           <LB items={["Copy, modify, or distribute the application or its content","Reverse engineer, decompile, or disassemble the software","Remove any copyright or proprietary notices","Use the Service to develop competing products","Attempt to bypass subscription restrictions or access premium features without authorization"]}/>
@@ -4225,24 +4218,24 @@ function Dashboard({user, onLogout}){
           <LP><strong style={{color:C.txt}}>DISCLAIMER:</strong> The Service is provided "AS IS" without warranties of any kind. We do not warrant that reports generated will meet regulatory requirements or professional standards in any specific jurisdiction. AI features provide suggestions only and should be verified by qualified professionals.</LP>
         </LegalSection>
 
-        <LegalSection icon="🏛" number={10} title="Limitation of Liability">
+        <LegalSection icon="—" number={10} title="Limitation of Liability">
           <LP>TO THE MAXIMUM EXTENT PERMITTED BY LAW:</LP>
           <LB items={["We shall not be liable for any indirect, incidental, special, consequential, or punitive damages","Our total liability shall not exceed the amount paid by you in the 12 months preceding the claim","We are not liable for any loss of data, business interruption, or professional consequences"]}/>
           <LP>Some jurisdictions do not allow limitations on implied warranties or exclusion of certain damages, so these limitations may not apply to you.</LP>
         </LegalSection>
 
-        <LegalSection icon="🔁" number={11} title="Termination">
+        <LegalSection icon="→" number={11} title="Termination">
           <LP>We may terminate or suspend your account immediately, without prior notice, for conduct that we determine violates these Terms or is harmful to other users, us, or third parties. Upon termination:</LP>
           <LB items={["Your right to use the Service will immediately cease","You may export your data before termination if possible","We may delete your data after a reasonable retention period"]}/>
           <LP>You may terminate your account at any time through the app settings. Prepaid subscription fees are handled according to app store refund policies.</LP>
         </LegalSection>
 
-        <LegalSection icon="⚖️" number={12} title="Governing Law and Dispute Resolution">
+        <LegalSection icon="—" number={12} title="Governing Law and Dispute Resolution">
           <LP>These Terms shall be governed by the laws of the State of California, United States, without regard to its conflict of law provisions.</LP>
           <LP>Any disputes arising from these Terms or the Service shall first be attempted to be resolved through good-faith negotiation. If resolution is not reached within 30 days, disputes shall be submitted to binding arbitration in accordance with the rules of the American Arbitration Association.</LP>
         </LegalSection>
 
-        <LegalSection icon="💬" number={13} title="Contact Information">
+        <LegalSection icon="—" number={13} title="Contact Information">
           <LP>If you have questions about these Terms of Service, please contact us:</LP>
           <LB items={["Email: support@mydailyreports.app","In-app: Profile → Help & Support"]}/>
         </LegalSection>
@@ -4268,7 +4261,7 @@ function Dashboard({user, onLogout}){
       <div style={{maxWidth:600,margin:"0 auto",padding:"24px 20px"}}>
         <LP style={{color:C.mut,marginBottom:20}}>My Daily Reports ("we", "our", or "us") is committed to protecting your privacy. This Privacy Policy explains how we collect, use, disclose, and safeguard your information when you use our mobile and web application.</LP>
 
-        <LegalSection icon="📄" number={1} title="Information We Collect">
+        <LegalSection icon="—" number={1} title="Information We Collect">
           <p style={{fontWeight:700,fontSize:15,color:C.txt,marginBottom:6,marginTop:4}}>Account Information</p>
           <LB items={["Email address","Display name (optional)","Password (encrypted)"]}/>
           <p style={{fontWeight:700,fontSize:15,color:C.txt,marginBottom:6,marginTop:4}}>User-Generated Content</p>
@@ -4277,42 +4270,42 @@ function Dashboard({user, onLogout}){
           <LB items={["Device type and operating system","App version","Usage patterns and feature interactions","Error logs for troubleshooting"]}/>
         </LegalSection>
 
-        <LegalSection icon="👁" number={2} title="How We Use Your Information">
+        <LegalSection icon="—" number={2} title="How We Use Your Information">
           <LP>We use collected information to:</LP>
           <LB items={["Provide, maintain, and improve the Service","Generate PDF reports from your data","Process AI-powered features (document parsing, suggestions)","Send service-related notifications and updates","Respond to customer support requests","Detect and prevent fraud or abuse","Comply with legal obligations"]}/>
           <LP><strong style={{color:C.txt}}>AI Processing:</strong> When you use AI-powered features, your content may be processed by third-party AI services (such as Anthropic Claude) to provide functionality. This processing is done securely and data is not used to train AI models.</LP>
         </LegalSection>
 
-        <LegalSection icon="🔀" number={3} title="Information Sharing and Disclosure">
+        <LegalSection icon="→" number={3} title="Information Sharing and Disclosure">
           <LP>We do not sell your personal information. We may share information with:</LP>
           <LB items={["Service Providers: Third parties that help us operate the Service (hosting, payment processing, analytics)","AI Services: For processing AI-powered features (with data protection agreements in place)","Legal Requirements: When required by law or to protect our rights","Business Transfers: In connection with a merger, acquisition, or sale of assets"]} boldPrefixes={["Service Providers:","AI Services:","Legal Requirements:","Business Transfers:"]}/>
           <LP>Your reports and project data are never shared with other users or third parties without your explicit consent.</LP>
         </LegalSection>
 
-        <LegalSection icon="🛡" number={4} title="Data Security">
+        <LegalSection icon="—" number={4} title="Data Security">
           <LP>We implement industry-standard security measures including:</LP>
           <LB items={["Encryption of data in transit (TLS/SSL) and at rest","Row-Level Security (RLS) ensuring users can only access their own data","Secure authentication with password hashing","Regular security audits and monitoring","Access controls limiting employee access to user data"]}/>
           <LP>While we strive to protect your information, no method of transmission over the internet is 100% secure. We cannot guarantee absolute security.</LP>
         </LegalSection>
 
-        <LegalSection icon="🗂" number={5} title="Data Retention">
+        <LegalSection icon="—" number={5} title="Data Retention">
           <LP>We retain your information as follows:</LP>
           <LB items={["Account Data: Retained while your account is active","Reports and Content: Retained until you delete them or your account","Backups: May be retained for up to 30 days after deletion","Legal Requirements: Some data may be retained longer if required by law"]} boldPrefixes={["Account Data:","Reports and Content:","Backups:","Legal Requirements:"]}/>
           <LP>You can request deletion of your account and data at any time through the app settings.</LP>
         </LegalSection>
 
-        <LegalSection icon="🔄" number={6} title="Your Privacy Rights">
+        <LegalSection icon="→" number={6} title="Your Privacy Rights">
           <LP>Depending on your location, you may have the right to:</LP>
           <LB items={["Access: Request a copy of your personal data","Correction: Request correction of inaccurate data","Deletion: Request deletion of your personal data","Export: Download your data in a portable format","Opt-out: Unsubscribe from marketing communications"]} boldPrefixes={["Access:","Correction:","Deletion:","Export:","Opt-out:"]}/>
           <LP>To exercise these rights, contact us at support@mydailyreports.app or use the in-app settings.</LP>
         </LegalSection>
 
-        <LegalSection icon="🌐" number={7} title="International Data Transfers">
+        <LegalSection icon="—" number={7} title="International Data Transfers">
           <LP>Your information may be transferred to and processed in countries other than your country of residence. These countries may have different data protection laws.</LP>
           <LP>We ensure appropriate safeguards are in place for international transfers, including standard contractual clauses and compliance with applicable data protection regulations.</LP>
         </LegalSection>
 
-        <LegalSection icon="👶" number={8} title="Children's Privacy">
+        <LegalSection icon="—" number={8} title="Children's Privacy">
           <LP>The Service is not intended for users under 18 years of age. We do not knowingly collect personal information from children. If we become aware that we have collected data from a child, we will take steps to delete that information.</LP>
         </LegalSection>
 
@@ -4321,7 +4314,7 @@ function Dashboard({user, onLogout}){
           <LP>For material changes, we will provide additional notice via email or in-app notification. Your continued use of the Service after changes constitutes acceptance of the updated policy.</LP>
         </LegalSection>
 
-        <LegalSection icon="📧" number={10} title="Contact Us">
+        <LegalSection icon="—" number={10} title="Contact Us">
           <LP>If you have questions about this Privacy Policy or our data practices, please contact us:</LP>
           <LB items={["Email: privacy@mydailyreports.app","In-app: Profile → Help & Support"]}/>
           <LP>For data protection inquiries from the EU, you may also contact our Data Protection Officer at dpo@mydailyreports.app.</LP>
@@ -4382,9 +4375,9 @@ function Dashboard({user, onLogout}){
             <div style={{fontWeight:600,fontSize:14,color:C.txt,marginBottom:2}}>{user?.user_metadata?.full_name||"Inspector"}</div>
             <div style={{fontSize:12,color:C.mut}}>{user?.email}</div>
           </div>
-          <button onClick={()=>{setShowSet(false);setShowAcct(true);}} style={{width:"100%",padding:"12px 16px",background:"none",border:"none",textAlign:"left",color:C.lt,fontSize:14,cursor:"pointer",display:"flex",alignItems:"center",gap:10}}><span>👤</span> Account Settings</button>
+          <button onClick={()=>{setShowSet(false);setShowAcct(true);}} style={{width:"100%",padding:"12px 16px",background:"none",border:"none",textAlign:"left",color:C.lt,fontSize:14,cursor:"pointer",display:"flex",alignItems:"center",gap:10}}>Account Settings</button>
           <div style={{borderTop:`1px solid ${C.brd}`,margin:"4px 0"}}/>
-          <button onClick={()=>{setShowSet(false);onLogout();}} style={{width:"100%",padding:"12px 16px",background:"none",border:"none",textAlign:"left",color:"#ef4444",fontSize:14,cursor:"pointer",display:"flex",alignItems:"center",gap:10}}><span>🚪</span> Sign Out</button>
+          <button onClick={()=>{setShowSet(false);onLogout();}} style={{width:"100%",padding:"12px 16px",background:"none",border:"none",textAlign:"left",color:"#ef4444",fontSize:14,cursor:"pointer",display:"flex",alignItems:"center",gap:10}}>Sign Out</button>
         </div>
       )}
 
@@ -4399,7 +4392,7 @@ function Dashboard({user, onLogout}){
             {act.map(j=>{const s=stat(j.id,j.schedule);const sc=s==="submitted"?C.ok:s==="working"?C.org:s==="due"?"#ef4444":C.brd;return(
               <button key={j.id} onClick={()=>setSelJob(j)} style={{textAlign:"left",background:C.card,border:`1px solid ${C.brd}`,borderRadius:12,padding:14,cursor:"pointer",display:"flex",flexDirection:"column",gap:8,position:"relative",borderTop:`3px solid ${sc}`}}>
                 <div style={{display:"flex",alignItems:"center",gap:8}}>
-                  <div style={{width:36,height:36,borderRadius:8,background:C.inp,border:`1px solid ${C.brd}`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:18,flexShrink:0}}>{j.job_type==="worklog"?"👷":"📋"}</div>
+                  <div style={{width:36,height:36,borderRadius:8,background:C.inp,border:`1px solid ${C.brd}`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:12,fontWeight:700,color:C.mut,flexShrink:0}}>{j.job_type==="worklog"?"WL":"T"}</div>
                   <div style={{flex:1,minWidth:0}}>
                     <div style={{fontWeight:700,fontSize:14,color:C.txt,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{j.name}</div>
                   </div>
@@ -4414,7 +4407,7 @@ function Dashboard({user, onLogout}){
           </div>
         )}
 
-        {!loading&&act.length===0&&(<div style={{textAlign:"center",padding:"60px 20px",color:C.mut}}><div style={{fontSize:48,marginBottom:16}}>📋</div><p style={{fontSize:16,fontWeight:600,color:C.lt,marginBottom:6}}>No jobs yet</p><p style={{fontSize:14}}>Tap "+ New Job" to create your first project</p></div>)}
+        {!loading&&act.length===0&&(<div style={{textAlign:"center",padding:"60px 20px",color:C.mut}}><div style={{fontSize:48,marginBottom:16,color:C.brd}}>—</div><p style={{fontSize:16,fontWeight:600,color:C.lt,marginBottom:6}}>No jobs yet</p><p style={{fontSize:14}}>Tap "+ New Job" to create your first project</p></div>)}
 
         {/* ── Scheduling Calendar (full month) ── */}
         {!loading&&(()=>{
@@ -4637,12 +4630,12 @@ function SetupWizard({user, onComplete}){
   const tipS={background:"rgba(232,116,42,0.08)",border:`1px solid rgba(232,116,42,0.25)`,borderRadius:8,padding:"12px 14px",marginTop:12,fontSize:13,color:C.lt,lineHeight:1.6};
 
   const WIZARD_STEPS=[
-    {title:"Welcome",icon:"👋"},
-    {title:"Your Profile",icon:"👤"},
-    {title:"How It Works",icon:"📄"},
-    {title:"Template Prep",icon:"🔧"},
-    {title:"Subscription",icon:"⭐"},
-    {title:"Create Account",icon:"🚀"},
+    {title:"Welcome",icon:"✓"},
+    {title:"Your Profile",icon:"—"},
+    {title:"How It Works",icon:"—"},
+    {title:"Template Prep",icon:"—"},
+    {title:"Subscription",icon:"—"},
+    {title:"Create Account",icon:"→"},
   ];
 
   const allTemplateRead=readSections.parsing&&readSections.cleanDoc&&readSections.notes&&readSections.photos&&readSections.bestPractices;
@@ -4747,7 +4740,7 @@ function SetupWizard({user, onComplete}){
         {/* ── Step 1: Profile Setup ── */}
         {step===1&&(
           <div>
-            <h2 style={{fontSize:20,fontWeight:700,marginBottom:16}}>👤 Your Profile</h2>
+            <h2 style={{fontSize:20,fontWeight:700,marginBottom:16}}>Your Profile</h2>
             <div style={cardS}>
               <div style={{marginBottom:18}}>
                 <label style={ls}>Full Name</label>
@@ -4763,7 +4756,6 @@ function SetupWizard({user, onComplete}){
                     <div style={{padding:"10px 14px",borderBottom:`1px solid ${C.brd}`,fontSize:12,color:C.mut,fontWeight:600}}>Existing company found — want to join?</div>
                     {companyMatches.map(m=>(
                       <button key={m.id} onClick={()=>joinCompany(m)} style={{display:"flex",alignItems:"center",gap:10,width:"100%",padding:"12px 14px",background:"transparent",border:"none",borderBottom:`1px solid ${C.brd}`,cursor:"pointer",textAlign:"left"}}>
-                        <span style={{fontSize:18}}>🏢</span>
                         <div style={{flex:1}}>
                           <div style={{fontSize:14,fontWeight:600,color:C.txt}}>{m.name}</div>
                           <div style={{fontSize:11,color:C.mut}}>Tap to join and access their templates</div>
@@ -4779,7 +4771,6 @@ function SetupWizard({user, onComplete}){
                 {/* Selected company badge */}
                 {selectedCompany&&(
                   <div style={{display:"flex",alignItems:"center",gap:8,marginTop:6,padding:"8px 12px",background:"rgba(232,116,42,0.08)",border:`1px solid rgba(232,116,42,0.25)`,borderRadius:8}}>
-                    <span style={{fontSize:14}}>🏢</span>
                     <div style={{flex:1}}>
                       <div style={{fontSize:13,fontWeight:600,color:C.txt}}>Joining {selectedCompany.name}</div>
                       <div style={{fontSize:11,color:C.mut}}>You'll get access to their report templates</div>
@@ -4813,7 +4804,7 @@ function SetupWizard({user, onComplete}){
         {/* ── Step 2: How It Works ── */}
         {step===2&&(
           <div>
-            <h2 style={{fontSize:20,fontWeight:700,marginBottom:16}}>📄 How It Works</h2>
+            <h2 style={{fontSize:20,fontWeight:700,marginBottom:16}}>How It Works</h2>
             <div style={cardS}>
               <p style={{fontSize:14,color:C.lt,lineHeight:1.6,marginBottom:14}}>Upload your existing report template and our AI detects all the fields. You then mark each field as one of four types:</p>
               <div style={{display:"flex",flexDirection:"column",gap:8,marginBottom:14}}>
@@ -4842,7 +4833,7 @@ function SetupWizard({user, onComplete}){
         {/* ── Step 3: Template Preparation ── */}
         {step===3&&(
           <div>
-            <h2 style={{fontSize:20,fontWeight:700,marginBottom:4}}>🔧 Template Preparation</h2>
+            <h2 style={{fontSize:20,fontWeight:700,marginBottom:4}}>Template Preparation</h2>
             <p style={{fontSize:13,color:C.mut,marginBottom:16}}>Tap each section to review. All 5 required before continuing.</p>
 
             {[
@@ -4927,7 +4918,7 @@ function SetupWizard({user, onComplete}){
         {step===5&&(
           <div>
             <div style={{textAlign:"center",padding:"30px 0 20px"}}>
-              <div style={{fontSize:56,marginBottom:16}}>🚀</div>
+              <div style={{fontSize:56,marginBottom:16,color:C.brd}}>→</div>
               <h2 style={{fontSize:22,fontWeight:800,marginBottom:8}}>Almost There!</h2>
               <p style={{fontSize:15,color:C.lt,lineHeight:1.6,maxWidth:400,margin:"0 auto"}}>Create your account to start building jobs and generating reports.</p>
             </div>

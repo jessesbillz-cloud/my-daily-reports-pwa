@@ -4,11 +4,11 @@
 -- Run after 20260310_company_automation.sql migration
 -- ============================================================
 
--- VIS (Verified Inspection Services)
+-- VIS (Vital Inspection Services)
 INSERT INTO companies (id, name, created_by)
 VALUES (
   'a0000000-0000-0000-0000-000000000001',
-  'VIS - Verified Inspection Services',
+  'VIS - Vital Inspection Services',
   NULL
 )
 ON CONFLICT (id) DO NOTHING;
