@@ -30,7 +30,7 @@
 <script src="https://cdn.jsdelivr.net/npm/mammoth@1.6.0/mammoth.browser.min.js"></script>
 <script>if(window.pdfjsLib){window.pdfjsLib.GlobalWorkerOptions.workerSrc="";window.pdfjsLib.GlobalWorkerOptions.workerPort=null;window.pdfjsLib.disableWorker=true;}</script>
 <script type="text/babel">
-const { useState, useEffect, useRef, useCallback } = React;
+const { useState, useEffect, useRef, useCallback, useMemo } = React;
 const SB_URL = "https://wluvkmpncafugdbunlkw.supabase.co";
 const SB_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndsdXZrbXBuY2FmdWdkYnVubGt3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzIzMDU1MTUsImV4cCI6MjA4Nzg4MTUxNX0.HZpQ2xVGpf4EQ0BVDmIEuPqW5T_eNG5OqBNAqT03rH8";
 const C = {bg:"#0f0f0f",card:"#1a1a1a",brd:"#333",inp:"#222",org:"#e8742a",orgH:"#d4691f",blu:"#5a8fc0",txt:"#fff",mut:"#888",lt:"#ccc",err:"#ef4444",ok:"#22c55e"};
@@ -1527,95 +1527,41 @@ function WorkLogEditor({job, user, onBack, reportDate}){
     let y=H-M;
     let pageNum=1;
     const totalPagesRef={val:1}; // will update after building
-    let hasTemplate=false;
+    // ── Page 1 Header — always built fresh from job name + site address ──
+    // Clean, professional header for every work log. No template dependency.
+    // Logo upload support planned for future release.
+    page=doc.addPage([W,H]);
+    const headerH=90;
 
-    // ── Check for uploaded template to use as background ──
-    try{
-      const tpl=await db.getTemplate(job.id);
-      if(tpl&&tpl.storage_path){
-        let tplResp=await fetch(`${SB_URL}/storage/v1/object/report-source-docs/${tpl.storage_path}`,{
-          headers:{apikey:SB_KEY,Authorization:`Bearer ${AUTH_TOKEN||SB_KEY}`}
-        });
-        if(tplResp.ok){
-          const tplBytes=await tplResp.arrayBuffer();
-          const tplDoc=await PDFDocument.load(tplBytes);
-          const [copiedPage]=await doc.copyPages(tplDoc,[0]);
-          doc.addPage(copiedPage);
-          page=doc.getPages()[0];
-          hasTemplate=true;
+    // Dark header bar (charcoal, matches PI template style)
+    page.drawRectangle({x:0,y:H-headerH,width:W,height:headerH,color:rgb(.12,.12,.12)});
+    // Job name (large, white, left-aligned — prominent like a company heading)
+    const jobTitle=job.name||"Daily Work Log";
+    const titleSize=jobTitle.length>30?16:jobTitle.length>20?18:22;
+    page.drawText(jobTitle,{x:M,y:H-40,size:titleSize,font:fontB,color:rgb(1,1,1)});
+    // Site address (smaller, light gray, below job name)
+    if(job.site_address)page.drawText(job.site_address,{x:M,y:H-58,size:10,font,color:rgb(.72,.72,.72)});
 
-          // Analyze template to find the bottom of the dark header (company name + logo area)
-          // Everything below this gets white-outed and redrawn with fresh data
-          let darkHeaderBottom=0; // in top-down coords (pixels from top of page)
-          try{
-            const textItems=await extractPdfTextStructure(new Uint8Array(tplBytes));
-            const pg1Items=textItems.filter(t=>t.page===1).sort((a,b)=>a.y-b.y);
-            console.log("[tpl] pg1 text items:",pg1Items.length,pg1Items.slice(0,10).map(t=>({str:t.str,y:Math.round(t.y),h:Math.round(t.h)})));
-            // Find the bottom of ALL text in the top 35% of the page (header + info bar region)
-            const topItems=pg1Items.filter(t=>t.y<H*0.35);
-            // Find the company header items — typically company name, address (in top ~15%)
-            const headerItems=topItems.filter(t=>{
-              const txt=(t.str||"").toLowerCase();
-              const isInfoField=txt.includes("date")||txt.includes("job")||txt.includes("prepared")||txt.match(/^\d{2}[\/-]\d/);
-              return t.y<H*0.20&&!isInfoField;
-            });
-            if(headerItems.length>0){
-              darkHeaderBottom=Math.max(...headerItems.map(t=>t.y+t.h));
-            }
-            console.log("[tpl] darkHeaderBottom:",darkHeaderBottom);
-          }catch(e){console.log("Template text analysis failed:",e);}
-          // Fallback: if detection failed, assume header is about 100px from top
-          if(!darkHeaderBottom)darkHeaderBottom=100;
+    // Info bar below header (dark, with Date / Job # / Prepared By)
+    const infoBarH=26;
+    const infoBarY=H-headerH-infoBarH;
+    page.drawRectangle({x:M,y:infoBarY,width:CW,height:infoBarH,color:rgb(.22,.22,.22)});
+    const dateStr=new Date(todayISO+"T12:00:00").toLocaleDateString("en-US",{weekday:"short",month:"2-digit",day:"2-digit",year:"numeric",timeZone:tz});
+    const infoTextY=infoBarY+8;
+    // Date
+    page.drawText("Date",{x:M+8,y:infoTextY,size:8,font:fontB,color:rgb(.55,.55,.55)});
+    page.drawText(dateStr,{x:M+36,y:infoTextY,size:9,font:fontB,color:rgb(1,1,1)});
+    // Job #
+    const jobNum=job.job_number||job.name||"";
+    const jx=W*0.38;
+    page.drawText("Job #",{x:jx,y:infoTextY,size:8,font:fontB,color:rgb(.55,.55,.55)});
+    page.drawText(jobNum,{x:jx+34,y:infoTextY,size:9,font:fontB,color:rgb(1,1,1)});
+    // Prepared By
+    const px=W*0.62;
+    page.drawText("Prepared By",{x:px,y:infoTextY,size:8,font:fontB,color:rgb(.55,.55,.55)});
+    page.drawText(userName||"—",{x:px+66,y:infoTextY,size:9,font:fontB,color:rgb(1,1,1)});
 
-          // White-out everything below the dark header — covers old info bar, old weather, old data
-          const clearTopY=H-darkHeaderBottom; // PDF y-coord of bottom edge of dark header
-          page.drawRectangle({x:0,y:0,width:W,height:clearTopY,color:rgb(1,1,1)});
-
-          // Redraw a fresh info bar (orange/dark bar with our own Date / Job # / Prepared By)
-          const infoBarH=28;
-          const infoBarPdfY=clearTopY-infoBarH;
-          page.drawRectangle({x:M,y:infoBarPdfY,width:CW,height:infoBarH,color:rgb(.15,.15,.15)});
-
-          const dateStr=new Date(todayISO+"T12:00:00").toLocaleDateString("en-US",{weekday:"short",month:"2-digit",day:"2-digit",year:"numeric",timeZone:tz});
-          const infoTextY=infoBarPdfY+9;
-          // Date
-          page.drawText("Date",{x:M,y:infoTextY,size:9,font:fontB,color:rgb(.6,.6,.6)});
-          page.drawText(dateStr,{x:M+30,y:infoTextY,size:9,font:fontB,color:rgb(1,1,1)});
-          // Job #
-          const jobNum=job.job_number||job.name||"";
-          const jx=W*0.38;
-          page.drawText("Job #",{x:jx,y:infoTextY,size:9,font:fontB,color:rgb(.6,.6,.6)});
-          page.drawText(jobNum,{x:jx+34,y:infoTextY,size:9,font:fontB,color:rgb(1,1,1)});
-          // Prepared By
-          const px=W*0.62;
-          page.drawText("Prepared By",{x:px,y:infoTextY,size:9,font:fontB,color:rgb(.6,.6,.6)});
-          page.drawText(userName||"—",{x:px+66,y:infoTextY,size:9,font:fontB,color:rgb(1,1,1)});
-
-          y=infoBarPdfY-10; // start dynamic content below the fresh info bar
-        }
-      }
-    }catch(e){console.log("No template found, using default header");}
-
-    // ── Default header (only if no template uploaded) ──
-    if(!hasTemplate){
-      page=doc.addPage([W,H]);
-      // Header bar (dark gray)
-      page.drawRectangle({x:0,y:H-80,width:W,height:80,color:rgb(.3,.3,.3)});
-      page.drawText(job.name||"Daily Work Log",{x:M,y:H-40,size:22,font:fontB,color:rgb(1,1,1)});
-      if(job.site_address)page.drawText(job.site_address,{x:M,y:H-58,size:10,font,color:rgb(.85,.85,.85)});
-      y=H-90;
-      // Info row
-      page.drawRectangle({x:M,y:y-28,width:CW,height:28,color:rgb(.92,.57,.17)});
-      const infoPairs=[["Date",todayDisplay2],["Prepared By",userName]];
-      let ix=M+8;
-      infoPairs.forEach(([lbl,val])=>{
-        page.drawText(lbl+":",{x:ix,y:y-12,size:9,font:fontB,color:rgb(1,1,1)});
-        const lw=fontB.widthOfTextAtSize(lbl+":",9);
-        page.drawText(val||"—",{x:ix+lw+6,y:y-12,size:9,font,color:rgb(1,1,1)});
-        ix+=lw+6+font.widthOfTextAtSize(val||"—",9)+30;
-      });
-      y-=38;
-    }
+    y=infoBarY-10; // start dynamic content below info bar
 
     const ensureSpace=(needed)=>{
       if(y-needed<M+30){
@@ -1628,7 +1574,7 @@ function WorkLogEditor({job, user, onBack, reportDate}){
       pg.drawText(job.name||"Work Log",{x:M,y:20,size:8,font,color:rgb(.5,.5,.5)});
     };
 
-    // ── Weather section — Raken-style: 3 time slots with big temp, condition, details ──
+    // ── Weather section — MDR-style: 3 time slots with big temp, condition, details ──
     if(weatherEnabled&&(weatherAM||weatherMid||weatherPM)){
       // Parse weather string like "78°F Clear, Wind 19 mph, 14% humidity, 0.1" precip"
       const parseWx=(str)=>{
@@ -1692,7 +1638,7 @@ function WorkLogEditor({job, user, onBack, reportDate}){
       y-=(slotH+8);
     }
 
-    // ── Work Logs — Raken-style table ──
+    // ── Work Logs — MDR-style table ──
     // Section header bar
     ensureSpace(40);
     page.drawRectangle({x:M,y:y-30,width:CW,height:30,color:rgb(.45,.45,.45)});
@@ -1711,7 +1657,7 @@ function WorkLogEditor({job, user, onBack, reportDate}){
     y-=24;
 
     let totalHrs=0;
-    const lineH=17; // line height for description text — generous like Raken
+    const lineH=17; // line height for description text — generous like MDR
     const descFontSz=11;
     const nameFontSz=11;
     const attrSz=8; // attribution line size
@@ -1792,7 +1738,7 @@ function WorkLogEditor({job, user, onBack, reportDate}){
       y-=rowH;
     });
 
-    // Totals row (dark background like Raken)
+    // Totals row (dark background like MDR)
     ensureSpace(28);
     page.drawRectangle({x:M,y:y-28,width:CW,height:28,color:rgb(.35,.35,.35)});
     page.drawText("Total",{x:M+10,y:y-19,size:12,font:fontB,color:rgb(1,1,1)});
@@ -1801,10 +1747,10 @@ function WorkLogEditor({job, user, onBack, reportDate}){
     page.drawText(String(totalHrs),{x:M+nameW+descW+qtyW+(hrsW-fontB.widthOfTextAtSize(String(totalHrs),12))/2,y:y-19,size:12,font:fontB,color:rgb(1,1,1)});
     y-=36;
 
-    // ── Helper: draw a Raken-style text section ──
+    // ── Helper: draw a MDR-style text section ──
     const drawTextSection=(title,text)=>{
       if(!text){
-        // Draw "No entry" bar like Raken
+        // Draw "No entry" bar like MDR
         ensureSpace(34);
         page.drawRectangle({x:M,y:y-30,width:CW,height:30,color:rgb(.45,.45,.45)});
         page.drawText(title,{x:M+(CW-fontB.widthOfTextAtSize(title,14))/2,y:y-22,size:14,font:fontB,color:rgb(.92,.57,.17)});
@@ -1888,7 +1834,7 @@ function WorkLogEditor({job, user, onBack, reportDate}){
     });
     y-=10;
 
-    // ── Work Log Photos — Raken-style: grouped by contractor, 2-up, date stamps ──
+    // ── Work Log Photos — MDR-style: grouped by contractor, 2-up, date stamps ──
     const contractorsWithPhotos=contractors.filter(c=>(c.photos||[]).length>0);
     if(contractorsWithPhotos.length>0){
       // Section header bar
@@ -4669,11 +4615,11 @@ function Dashboard({user, onLogout}){
 }
 
 /* ── Setup Wizard (gates dashboard access for new users) ── */
-function SetupWizard({user, onComplete}){
+function SetupWizard({user, inviteCompany, onComplete}){
   const [step,setStep]=useState(0);
   const [saving,setSaving]=useState(false);
   const [fullName,setFullName]=useState(user?.user_metadata?.full_name||"");
-  const [companyName,setCompanyName]=useState("");
+  const [companyName,setCompanyName]=useState(inviteCompany||"");
   const [email,setEmail]=useState(user?.email||"");
   const [timezone,setTimezone]=useState(Intl.DateTimeFormat().resolvedOptions().timeZone);
   const [slug,setSlug]=useState(()=>(user?.user_metadata?.full_name||"").toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/(^-|-$)/g,""));
@@ -4684,6 +4630,8 @@ function SetupWizard({user, onComplete}){
   const [selectedCompany,setSelectedCompany]=useState(null); // {id,name} if user chose to join
   const [companySearching,setCompanySearching]=useState(false);
   const companyDebounce=useRef(null);
+  // Auto-search company if invite link provided
+  useEffect(()=>{if(inviteCompany&&inviteCompany.trim().length>=2)handleCompanyNameChange(inviteCompany);},[]);
   const SECTION_ORDER=["parsing","cleanDoc","notes","photos","bestPractices"];
   const toggleSection=(key)=>{setReadSections(p=>({...p,[key]:true}));setOpenSections(p=>{const wasOpen=p[key];if(wasOpen){const idx=SECTION_ORDER.indexOf(key);const nextKey=idx>=0&&idx<SECTION_ORDER.length-1?SECTION_ORDER[idx+1]:null;const next={};if(nextKey)next[nextKey]=true;return next;}return{[key]:true};});};
 
@@ -5251,6 +5199,11 @@ function App(){
   const [booting,setBooting]=useState(true);
   const [setupDone,setSetupDone]=useState(null); // null=loading, true/false
 
+  // Read ?company= from URL for invite links (e.g. app.mydailyreports.org?company=VIS)
+  const inviteCompany=useMemo(()=>{
+    try{const p=new URLSearchParams(window.location.search);return p.get("company")||"";}catch(e){return"";}
+  },[]);
+
   // Clear stale parse attempt counters from localStorage
   useEffect(()=>{try{Object.keys(localStorage).filter(k=>k.startsWith("mdr_parse_")).forEach(k=>localStorage.removeItem(k));}catch(e){}},[]);
 
@@ -5301,7 +5254,7 @@ function App(){
   if(!user)return<LoginScreen onAuth={handleAuth}/>;
 
   // Logged in but setup not complete — show wizard
-  if(setupDone===false)return<SetupWizard user={user} onComplete={()=>setSetupDone(true)}/>;
+  if(setupDone===false)return<SetupWizard user={user} inviteCompany={inviteCompany} onComplete={()=>setSetupDone(true)}/>;
 
   // Fully set up — show dashboard
   return<><Dashboard user={user} onLogout={handleLogout}/><InstallBanner/></>;
