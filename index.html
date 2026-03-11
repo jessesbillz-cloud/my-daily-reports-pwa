@@ -2252,12 +2252,11 @@ function WorkLogEditor({job, user, onBack, reportDate}){
               <div style={{flex:1,minWidth:0}}>
                 <div style={{display:"flex",alignItems:"center",gap:6}}>
                   <div style={{fontSize:14,fontWeight:700,color:C.txt,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",flex:1}}>{c.name}</div>
-                  <button onClick={(ev)=>{ev.stopPropagation();updateContractor(c.id,"locked",!c.locked);}} style={{background:c.locked?C.org+"22":"transparent",border:`1px solid ${c.locked?C.org:C.brd}`,borderRadius:6,cursor:"pointer",padding:"2px 8px",fontSize:11,fontWeight:700,color:c.locked?C.org:C.mut,display:"flex",alignItems:"center",gap:3}} title={c.locked?"This contractor will carry over to tomorrow's report":"Tap to keep this contractor on tomorrow's report"}>🔒 {c.locked?"Saved":"Save"}</button>
+                  {c.locked&&<span style={{fontSize:10,fontWeight:700,color:C.org,background:C.org+"18",borderRadius:4,padding:"2px 6px"}}>Carries Over</span>}
                 </div>
                 <div style={{fontSize:11,color:C.mut}}>
                   {c.hours?`${c.hours} hrs`:"No hours"} · {c.quantity||1} {parseInt(c.quantity||1)===1?"person":"people"}
                   {(c.photos||[]).length>0&&` · ${c.photos.length} photo${c.photos.length>1?"s":""}`}
-                  {c.locked&&<span style={{color:C.org}}> · Carries over {c.carryDesc===false?"(name only)":"(name + work)"}</span>}
                 </div>
               </div>
               <span style={{color:activeId===c.id?C.org:C.mut,fontSize:18,transform:activeId===c.id?"rotate(180deg)":"none",transition:"transform 0.2s",padding:"4px 8px"}}>▼</span>
@@ -2288,16 +2287,15 @@ function WorkLogEditor({job, user, onBack, reportDate}){
                   </div>
                 </div>
 
-                {/* Carry-over toggle — only visible when contractor is saved */}
-                {c.locked&&(
-                  <div style={{marginBottom:14,padding:"10px 12px",background:C.org+"0A",border:`1px solid ${C.org}22`,borderRadius:8}}>
-                    <div style={{fontSize:12,fontWeight:600,color:C.lt,marginBottom:6}}>Carry over to tomorrow:</div>
-                    <div style={{display:"flex",gap:8}}>
-                      <button onClick={()=>updateContractor(c.id,"carryDesc",true)} style={{flex:1,padding:"8px 0",background:c.carryDesc!==false?C.org:C.card,border:`1px solid ${c.carryDesc!==false?C.org:C.brd}`,borderRadius:6,color:c.carryDesc!==false?"#fff":C.mut,fontSize:12,fontWeight:600,cursor:"pointer"}}>Name + Work</button>
-                      <button onClick={()=>updateContractor(c.id,"carryDesc",false)} style={{flex:1,padding:"8px 0",background:c.carryDesc===false?C.org:C.card,border:`1px solid ${c.carryDesc===false?C.org:C.brd}`,borderRadius:6,color:c.carryDesc===false?"#fff":C.mut,fontSize:12,fontWeight:600,cursor:"pointer"}}>Name Only</button>
-                    </div>
+                {/* Carry-over toggle */}
+                <div style={{marginBottom:14,padding:"10px 12px",background:C.org+"0A",border:`1px solid ${C.org}22`,borderRadius:8}}>
+                  <div style={{fontSize:12,fontWeight:600,color:C.lt,marginBottom:6}}>Carry over to tomorrow:</div>
+                  <div style={{display:"flex",gap:8}}>
+                    <button onClick={()=>{updateContractor(c.id,"locked",true);updateContractor(c.id,"carryDesc",true);}} style={{flex:1,padding:"8px 0",background:c.locked&&c.carryDesc!==false?C.org:C.card,border:`1px solid ${c.locked&&c.carryDesc!==false?C.org:C.brd}`,borderRadius:6,color:c.locked&&c.carryDesc!==false?"#fff":C.mut,fontSize:12,fontWeight:600,cursor:"pointer"}}>Name + Work</button>
+                    <button onClick={()=>{updateContractor(c.id,"locked",true);updateContractor(c.id,"carryDesc",false);}} style={{flex:1,padding:"8px 0",background:c.locked&&c.carryDesc===false?C.org:C.card,border:`1px solid ${c.locked&&c.carryDesc===false?C.org:C.brd}`,borderRadius:6,color:c.locked&&c.carryDesc===false?"#fff":C.mut,fontSize:12,fontWeight:600,cursor:"pointer"}}>Name Only</button>
+                    {c.locked&&<button onClick={()=>{updateContractor(c.id,"locked",false);updateContractor(c.id,"carryDesc",true);}} style={{padding:"8px 12px",background:"transparent",border:`1px solid ${C.brd}`,borderRadius:6,color:C.mut,fontSize:12,fontWeight:600,cursor:"pointer"}}>Clear</button>}
                   </div>
-                )}
+                </div>
 
                 {/* Photos for this contractor */}
                 <div style={{marginBottom:14}}>
@@ -4076,7 +4074,7 @@ const GUIDES=[
   ]},
   {icon:"▬",color:C.org,title:"Work Log Reports",sub:"Track contractors, hours, and daily activity",steps:[
     {icon:"+",title:"Add Contractors",body:"Tap \"+ Add Contractor\" and enter their name. Add a work description, hours, and quantity (number of people). Use your keyboard mic to dictate descriptions.",tip:null},
-    {icon:"🔒",title:"Save Contractors",body:"Tap the lock icon to save a contractor for tomorrow. Choose \"Name + Work\" to carry over the description too, or \"Name Only\" to start fresh each day. Hours and photos always reset.",tip:"Use \"Name + Work\" for crews doing the same task every day. Use \"Name Only\" when the work changes daily."},
+    {icon:"🔒",title:"Save Contractors",body:"Expand a contractor and choose \"Name + Work\" or \"Name Only\" under Carry Over to keep them on tomorrow's report. Hours and photos always reset.",tip:"Use \"Name + Work\" for crews doing the same task every day. Use \"Name Only\" when the work changes daily."},
     {icon:"📷",title:"Photos",body:"Each contractor has Photo and Library buttons at the bottom of their card. Take a photo with your camera or pick from your library. Photos are grouped by contractor in the report.",tip:"Context shots, close-ups of issues, and progress photos make the best documentation."},
     {icon:"—",title:"Custom Sections",body:"Need to track something extra? Tap \"+ Add Category\" to create new sections like Materials or Equipment. In the Survey, tap \"+ Add Concern\" to add custom questions.",tip:null},
     {icon:"✓",title:"Preview & Submit",body:"Tap \"View Report\" to preview the PDF. Weather, work logs, notes, survey — it's all there. Hit \"Submit Report\" to generate and email the final PDF.",tip:null},
