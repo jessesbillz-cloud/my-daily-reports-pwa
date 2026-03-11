@@ -362,6 +362,9 @@ function AccountSettings({user, onBack, onLogout}){
   const [slug,setSlug]=useState("");
   const [showDelete,setShowDelete]=useState(false);
   const [deleteConfirm,setDeleteConfirm]=useState("");
+  const [companyMatches,setCompanyMatches]=useState([]);
+  const [selectedCompany,setSelectedCompany]=useState(null);
+  const companyDebounce=useRef(null);
 
   const TZ_OPTIONS = [
     "America/New_York","America/Chicago","America/Denver","America/Phoenix",
@@ -382,6 +385,7 @@ function AccountSettings({user, onBack, onLogout}){
           setProfile(p);
           if(p.full_name)setFullName(p.full_name);
           if(p.company_name)setCompanyName(p.company_name);
+          if(p.company_id)setSelectedCompany({id:p.company_id,name:p.company_name||""});
           if(p.timezone)setTimezone(p.timezone);
           if(p.slug)setSlug(p.slug);
         }
@@ -392,14 +396,44 @@ function AccountSettings({user, onBack, onLogout}){
 
   const flash=(m,t="ok")=>{setMsg(m);setMsgType(t);setTimeout(()=>setMsg(""),3000);};
 
+  const handleCompanySearch=(val)=>{
+    setCompanyName(val);
+    setSelectedCompany(null);
+    if(companyDebounce.current)clearTimeout(companyDebounce.current);
+    if(val.trim().length<2){setCompanyMatches([]);return;}
+    companyDebounce.current=setTimeout(async()=>{
+      try{const matches=await db.searchCompanies(val.trim());setCompanyMatches(matches);}catch(e){setCompanyMatches([]);}
+    },400);
+  };
+  const selectCompany=(company)=>{
+    setSelectedCompany(company);
+    setCompanyName(company.name);
+    setCompanyMatches([]);
+  };
+  const clearCompany=()=>{
+    setSelectedCompany(null);
+    setCompanyName("");
+    setCompanyMatches([]);
+  };
+
   const saveProfile=async()=>{
     setSaving(true);
     try{
       const slugVal=slug.trim()||fullName.trim().toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/(^-|-$)/g,"");
+      let companyId=null;
+      // If user selected a registered company, assign them
+      if(selectedCompany){
+        try{
+          companyId=await db.assignCompany(user.id,selectedCompany.name);
+          // Sync company templates
+          if(companyId){try{await db.copyCompanyTemplatesDB(user.id,companyId);}catch(e){console.error("Template sync:",e);}}
+        }catch(e){console.error("Company assign:",e);companyId=selectedCompany.id;}
+      }
       const data={
         id:user.id,
         full_name:fullName.trim(),
-        company_name:companyName.trim()||null,
+        company_name:(selectedCompany?.name||companyName).trim()||null,
+        company_id:companyId||null,
         timezone,
         slug:slugVal,
       };
@@ -467,11 +501,35 @@ function AccountSettings({user, onBack, onLogout}){
                   <div style={{fontSize:11,color:C.mut,marginTop:4}}>Set during sign up</div>
                 </div>
 
-                <div style={{marginBottom:16}}>
-                  <label style={ls}>Company Name</label>
-                  <input type="text" value={companyName} onChange={e=>setCompanyName(e.target.value)} placeholder="e.g. ABC Construction" style={fs}/>
-                  <div style={{fontSize:11,color:C.mut,marginTop:4}}>Emails will appear as: <strong style={{color:C.txt}}>{companyName||"Your Company"} &lt;reports@mydailyreports.org&gt;</strong></div>
-                  <div style={{fontSize:11,color:C.mut,marginTop:2}}>Set this once — it's how your name shows in your recipients' inbox.</div>
+                <div style={{marginBottom:16,position:"relative"}}>
+                  <label style={ls}>Company</label>
+                  {selectedCompany?(
+                    <div style={{display:"flex",alignItems:"center",gap:8,padding:"10px 12px",background:"rgba(232,116,42,0.08)",border:"1px solid rgba(232,116,42,0.25)",borderRadius:8}}>
+                      <div style={{flex:1}}>
+                        <div style={{fontSize:13,fontWeight:600,color:C.txt}}>{selectedCompany.name}</div>
+                        <div style={{fontSize:11,color:C.ok}}>Linked — company templates available</div>
+                      </div>
+                      <button onClick={clearCompany} style={{background:"none",border:"none",color:C.mut,cursor:"pointer",fontSize:16,padding:"0 4px"}}>✕</button>
+                    </div>
+                  ):(
+                    <input type="text" value={companyName} onChange={e=>handleCompanySearch(e.target.value)} placeholder="Search for your company..." style={fs}/>
+                  )}
+                  {companyMatches.length>0&&!selectedCompany&&(
+                    <div style={{position:"absolute",left:0,right:0,top:"100%",zIndex:50,background:C.card,border:`1px solid ${C.brd}`,borderRadius:10,marginTop:4,overflow:"hidden",boxShadow:"0 8px 24px rgba(0,0,0,0.15)"}}>
+                      {companyMatches.map(m=>(
+                        <button key={m.id} onClick={()=>selectCompany(m)} style={{display:"flex",alignItems:"center",gap:10,width:"100%",padding:"12px 14px",background:"transparent",border:"none",borderBottom:`1px solid ${C.brd}`,cursor:"pointer",textAlign:"left"}}>
+                          <div style={{flex:1}}>
+                            <div style={{fontSize:14,fontWeight:600,color:C.txt}}>{m.name}</div>
+                            <div style={{fontSize:11,color:C.mut}}>Tap to link your account</div>
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  <div style={{fontSize:11,color:C.mut,marginTop:4}}>
+                    {selectedCompany?"This company's templates will be available when creating jobs.":"Type to search for a registered company. This also sets your email sender name."}
+                  </div>
+                  <div style={{fontSize:11,color:C.mut,marginTop:2}}>Emails appear as: <strong style={{color:C.txt}}>{companyName||selectedCompany?.name||"Your Company"} &lt;reports@mydailyreports.org&gt;</strong></div>
                 </div>
 
                 <div style={{marginBottom:16}}>
@@ -4698,7 +4756,7 @@ function Dashboard({user, onLogout}){
 
         {/* ── Subscribe to Calendar section ── */}
         {showSubDash&&hasScheduling&&(()=>{
-          const icsURL=`${SB_URL}/functions/v1/calendar-feed?slug=${profileSlug||user?.user_metadata?.full_name?.toLowerCase().replace(/\\s+/g,"-")||"inspector"}`;
+          const icsURL=`${SB_URL}/functions/v1/calendar-feed?slug=${profileSlug||user?.user_metadata?.full_name?.toLowerCase().replace(/\s+/g,"-")||"inspector"}`;
           return(
             <div style={{background:C.card,border:`1px solid ${C.brd}`,borderRadius:12,overflow:"hidden",marginBottom:12,position:"relative"}}>
               <button onClick={()=>setShowSubDash(false)} style={{position:"absolute",top:10,right:10,background:C.inp,border:`1px solid ${C.brd}`,color:C.txt,width:28,height:28,borderRadius:"50%",fontSize:16,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",lineHeight:1}}>&times;</button>
