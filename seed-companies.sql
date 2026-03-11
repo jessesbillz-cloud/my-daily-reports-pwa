@@ -31,6 +31,15 @@ VALUES (
 )
 ON CONFLICT (id) DO NOTHING;
 
+-- Precision Inspection
+INSERT INTO companies (id, name, created_by)
+VALUES (
+  'a0000000-0000-0000-0000-000000000004',
+  'Precision Inspection',
+  NULL
+)
+ON CONFLICT (id) DO NOTHING;
+
 -- Note: Company templates will be added via admin.html once PDFs are uploaded.
 -- Each company_templates row links to a parsed field_config and a storage_path
 -- in the company-templates bucket under {company_id}/{filename}.

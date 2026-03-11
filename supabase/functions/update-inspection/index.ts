@@ -18,7 +18,7 @@ serve(async (req) => {
     const supabase = createClient(supabaseUrl, supabaseKey);
 
     const body = await req.json();
-    const { request_id, action, action_by, reason, new_date, new_time } = body;
+    const { request_id, action, action_by, reason, new_date, new_time, new_duration, new_notes } = body;
 
     if (!request_id || !action) {
       return new Response(
@@ -167,11 +167,11 @@ serve(async (req) => {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     } else if (action === "edit") {
-      if (!new_date && !new_time) {
+      if (!new_date && !new_time && !new_duration && new_notes === undefined) {
         return new Response(
           JSON.stringify({
             success: false,
-            error: "Nothing to update — provide new_date or new_time",
+            error: "Nothing to update — provide new_date, new_time, new_duration, or new_notes",
           }),
           {
             status: 400,
@@ -187,6 +187,8 @@ serve(async (req) => {
         old_time: existing.inspection_time,
         new_date: new_date || existing.inspection_date,
         new_time: new_time || existing.inspection_time,
+        new_duration: new_duration || null,
+        new_notes: new_notes || null,
       };
 
       const editHistory = [...(existing.edit_history || []), editEntry];
@@ -197,6 +199,8 @@ serve(async (req) => {
         updates.requested_date = new_date; // keep in sync for main app calendar
       }
       if (new_time) updates.inspection_time = new_time;
+      if (new_duration) updates.duration = new_duration;
+      if (new_notes !== undefined) updates.notes = new_notes;
 
       const { error: updateError } = await supabase
         .from("inspection_requests")
@@ -259,11 +263,43 @@ serve(async (req) => {
           headers: { ...corsHeaders, "Content-Type": "application/json" },
         }
       );
+    } else if (action === "delete") {
+      const { error: updateError } = await supabase
+        .from("inspection_requests")
+        .update({
+          status: "deleted",
+          deleted_by: action_by || "Admin",
+          deleted_at: new Date().toISOString(),
+        })
+        .eq("id", request_id);
+
+      if (updateError) {
+        return new Response(
+          JSON.stringify({ success: false, error: updateError.message }),
+          {
+            status: 500,
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          }
+        );
+      }
+
+      await sendEmail(
+        `DELETED: ${projectName} — ${typeLabel} on ${existing.inspection_date}`,
+        "#666",
+        "Scheduling Request Deleted",
+        `<tr><td style="padding:8px 0;font-weight:bold;">Date:</td><td>${existing.inspection_date}</td></tr>
+         <tr><td style="padding:8px 0;font-weight:bold;">Deleted By:</td><td>${action_by || "Admin"}</td></tr>
+         <tr><td style="padding:8px 0;font-weight:bold;">Status:</td><td style="color:#c44;font-weight:bold;">Deleted</td></tr>`
+      );
+
+      return new Response(JSON.stringify({ success: true, action: "delete" }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
     } else {
       return new Response(
         JSON.stringify({
           success: false,
-          error: `Unknown action: ${action}. Use cancel, edit, or schedule.`,
+          error: `Unknown action: ${action}. Use cancel, edit, delete, or schedule.`,
         }),
         {
           status: 400,

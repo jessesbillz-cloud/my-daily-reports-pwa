@@ -66,6 +66,7 @@ serve(async (req) => {
         .select("*")
         .eq("project", project)
         .neq("status", "cancelled")
+        .neq("status", "deleted")
         .order("inspection_date", { ascending: true });
 
       if (error) {
@@ -112,6 +113,7 @@ serve(async (req) => {
         .select("*, jobs(name, site_address)")
         .eq("user_id", resolvedUserId)
         .neq("status", "cancelled")
+        .neq("status", "deleted")
         .order("requested_date", { ascending: true });
 
       if (error) {

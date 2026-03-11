@@ -85,7 +85,8 @@ details[open] .collapsible-summary::after { content: '−'; }
     </div>
 </div>
 <div style="display:flex;justify-content:center;gap:8px;margin-bottom:12px;">
-    <button onclick="document.getElementById('shareCalSection').style.display=document.getElementById('shareCalSection').style.display==='none'?'block':'none';" style="padding:8px 14px;font-size:12px;font-weight:700;color:#fff;background:#5a8fc0;border:none;border-radius:20px;cursor:pointer;white-space:nowrap;">Share Calendar</button>
+    <button id="shareCopyBtn" onclick="shareCalendarLink()" style="padding:8px 14px;font-size:12px;font-weight:700;color:#fff;background:#5a8fc0;border:none;border-radius:20px;cursor:pointer;white-space:nowrap;">Share</button>
+    <button onclick="document.getElementById('shareCalSection').style.display='block';" style="padding:8px 14px;font-size:12px;font-weight:700;color:#fff;background:#5a8fc0;border:none;border-radius:20px;cursor:pointer;white-space:nowrap;">Subscribe</button>
 </div>
 <div class="tabs" id="tabBar">
 <div class="tab active" onclick="switchTab('calendar')">Calendar</div>
@@ -109,7 +110,8 @@ details[open] .collapsible-summary::after { content: '−'; }
 </div>
 <!-- SUBSCRIBE TO CALENDAR (below the calendar, initially hidden — toggled by Share Calendar button) -->
 <div id="shareCalSection" class="card" style="display:none;">
-<div style="padding:16px;">
+<div style="padding:16px;position:relative;">
+<button onclick="document.getElementById('shareCalSection').style.display='none';" style="position:absolute;top:10px;right:10px;background:#333;border:1px solid #555;color:#fff;width:32px;height:32px;border-radius:50%;font-size:18px;cursor:pointer;display:flex;align-items:center;justify-content:center;line-height:1;">&times;</button>
 <div style="text-align:center;margin-bottom:12px;">
 <div style="color:#5a8fc0;font-weight:600;font-size:14px;">Subscribe to Calendar</div>
 <div style="color:#888;font-size:12px;margin-top:4px;">Sync this schedule to your phone or computer</div>
@@ -142,6 +144,7 @@ details[open] .collapsible-summary::after { content: '−'; }
 <label class="field-label">Date *</label>
 <input type="date" id="iDate" class="field-input">
 <label class="field-label">Time *</label>
+<div style="background:rgba(90,143,192,0.1);border:1px solid #5a8fc0;border-radius:6px;padding:8px 12px;margin-bottom:10px;font-size:12px;color:#5a8fc0;font-weight:600;">Allow travel time between inspections when scheduling</div>
 <select id="iTime" class="field-input">
 <option value="">Select time</option>
 <option value="flexible">Flexible — anytime today</option>
@@ -215,7 +218,10 @@ details[open] .collapsible-summary::after { content: '−'; }
 <details class="collapsible-section">
     <summary class="collapsible-summary">Additional Email Recipients</summary>
     <div style="padding-bottom:10px;">
-        <input type="text" id="additionalEmailsList" class="field-input" placeholder="Emails separated by commas">
+        <div style="display:flex;gap:8px;align-items:center;">
+            <input type="text" id="additionalEmailsList" class="field-input" placeholder="Emails separated by commas" style="margin-bottom:0;flex:1;" onkeydown="if(event.key==='Enter')addAdditionalEmails();">
+            <button onclick="addAdditionalEmails()" style="padding:10px 16px;background:#5a8fc0;border:none;border-radius:6px;color:#fff;font-size:13px;font-weight:700;cursor:pointer;white-space:nowrap;">Add</button>
+        </div>
     </div>
 </details>
 <button onclick="submitIR()" id="submitBtn" class="submit-btn">Submit Scheduling Request</button>
@@ -284,26 +290,48 @@ function showDay(d){
     var list=document.getElementById('dayDetailList');
     var header=document.getElementById('dayDetailHeader');
     header.textContent="Schedule for "+d;
-    var evts=(mD[d]||[]).filter(function(e){return e.status!=='cancelled';});
+    // Filter out deleted, but keep cancelled (shown ghosted)
+    var evts=(mD[d]||[]).filter(function(e){return e.status!=='deleted';});
     if(evts.length===0){
         list.innerHTML='<div style="color:#888;padding:10px;">No visits scheduled</div>';
     } else {
         var html='';
         evts.forEach(function(e){
-            html+='<div class="evt-row">';
+            var isCancelled=e.status==='cancelled';
+            var isScheduled=e.status==='scheduled';
+            var rowStyle=isCancelled?'opacity:0.45;text-decoration:line-through;':'';
+            html+='<div class="evt-row" style="'+rowStyle+'">';
             html+='<span class="evt-time">'+(e.flexible_display==='flexible'?'Flexible':e.inspection_time.substring(0,5))+'</span>';
             html+=' — <span class="evt-type">'+(e.inspection_types||[]).join(', ')+'</span>';
             if(e.project!==PROJ) html+=' <span style="color:#888;font-size:11px;">('+e.project+')</span>';
             if(e.inspection_identifier) html+='<div style="color:#e8742a;font-weight:700;font-size:13px;margin:4px 0;">'+e.inspection_identifier+'</div>';
             html+='<div style="font-size:11px;color:#888;margin-top:4px;">By: '+e.submitted_by+'</div>';
             if(e.location_detail) html+='<div style="font-size:11px;color:#5a8fc0;margin-top:2px;">📍 '+e.location_detail+'</div>';
-            if(e.status==='scheduled') html+='<div style="color:#4a4;font-size:13px;font-weight:700;margin-top:6px;padding:4px 10px;background:rgba(74,170,74,0.12);border:1px solid #4a4;border-radius:6px;display:inline-block;">✅ Scheduled</div>';
-            else html+='<div style="color:#e8742a;font-size:12px;font-weight:600;margin-top:4px;">⏳ Pending</div>';
-            if(e.project===PROJ){
+            if(e.duration) html+='<div style="font-size:11px;color:#888;margin-top:2px;">Duration: '+(e.duration>=60?(e.duration/60)+'hr':e.duration+'min')+'</div>';
+            if(isCancelled){
+                html+='<div style="color:#c44;font-size:12px;font-weight:600;margin-top:4px;">Cancelled</div>';
+            } else if(isScheduled){
+                html+='<div style="color:#4a4;font-size:13px;font-weight:700;margin-top:6px;padding:4px 10px;background:rgba(74,170,74,0.12);border:1px solid #4a4;border-radius:6px;display:inline-block;">✅ Scheduled</div>';
+            } else {
+                html+='<div style="color:#e8742a;font-size:12px;font-weight:600;margin-top:4px;">⏳ Pending</div>';
+            }
+            // Actions — only for non-cancelled events on this project
+            if(!isCancelled && e.project===PROJ){
                 html+='<div class="evt-actions">';
-                html+='<button class="btn-edit" onclick="editInsp(\''+e.id+'\',\''+e.inspection_date+'\',\''+e.inspection_time.substring(0,5)+'\')">Edit</button>';
-                html+='<button class="btn-cancel" onclick="cancelInsp(\''+e.id+'\',\''+e.project+'\',\'Regular\',\''+e.inspection_date+'\',\''+e.inspection_time.substring(0,5)+'\')">Cancel</button>';
-                if(isAdmin && e.status!=='scheduled') html+='<button style="color:#fff;background:#e8742a;border:none;padding:6px 14px;border-radius:6px;font-size:12px;font-weight:700;cursor:pointer;" onclick="scheduleInsp(\''+e.id+'\')">Schedule</button>';
+                if(isAdmin){
+                    if(!isScheduled){
+                        // Pending: green Confirm Schedule button
+                        html+='<button style="color:#fff;background:#4a4;border:none;padding:6px 14px;border-radius:6px;font-size:12px;font-weight:700;cursor:pointer;" onclick="scheduleInsp(\''+e.id+'\')">Confirm Schedule</button>';
+                    }
+                    // Admin always gets Edit / Delete / Cancel
+                    html+='<button class="btn-edit" onclick="editInspAdmin(\''+e.id+'\',\''+e.inspection_date+'\',\''+e.inspection_time.substring(0,5)+'\',\''+(e.duration||'')+'\')">Edit</button>';
+                    html+='<button style="color:#fff;background:#c44;border:none;padding:5px 12px;border-radius:4px;font-size:11px;font-weight:700;cursor:pointer;text-transform:uppercase;" onclick="deleteInsp(\''+e.id+'\')">Delete</button>';
+                    html+='<button class="btn-cancel" onclick="cancelInsp(\''+e.id+'\',\''+e.project+'\',\'Regular\',\''+e.inspection_date+'\',\''+e.inspection_time.substring(0,5)+'\')">Cancel</button>';
+                } else {
+                    // Non-admin: Edit + Cancel (for own submissions)
+                    html+='<button class="btn-edit" onclick="editInsp(\''+e.id+'\',\''+e.inspection_date+'\',\''+e.inspection_time.substring(0,5)+'\')">Edit</button>';
+                    html+='<button class="btn-cancel" onclick="cancelInsp(\''+e.id+'\',\''+e.project+'\',\'Regular\',\''+e.inspection_date+'\',\''+e.inspection_time.substring(0,5)+'\')">Cancel</button>';
+                }
                 html+='</div>';
             }
             html+='</div>';
@@ -350,8 +378,47 @@ fetch(SB+'/functions/v1/update-inspection',{method:'POST',headers:{'Authorizatio
 .then(function(r){return r.json();}).then(function(data){if(data.success){alert('Updated.'); overlay.remove(); loadMD();} else {alert('Error: '+data.error);}});
 };
 }
+function editInspAdmin(id,oldDate,oldTime,oldDur){
+    showEditModalAdmin(id,oldDate,oldTime,oldDur);
+}
+function showEditModalAdmin(id,oldDate,oldTime,oldDur){
+var overlay=document.createElement('div'); overlay.style.cssText='position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.8);z-index:1000;display:flex;align-items:center;justify-content:center;padding:20px;';
+var modal=document.createElement('div'); modal.style.cssText='background:#1a1a1a;border-radius:12px;padding:30px;max-width:400px;width:100%;border:1px solid #333;';
+var durOpts=['30','60','120','240','480'];
+var durLabels=['30 min','1 hr','2 hr','4 hr','All Day'];
+var durHtml='<select id="eDur" class="field-input">';
+durOpts.forEach(function(v,i){durHtml+='<option value="'+v+'"'+(v===oldDur?' selected':'')+'>'+durLabels[i]+'</option>';});
+durHtml+='</select>';
+modal.innerHTML='<h3 style="color:#e8742a;margin-bottom:20px;">Edit Inspection</h3>'
++'<label style="color:#ccc;font-size:13px;">Date</label><input type="date" id="eaDate" value="'+oldDate+'" class="field-input">'
++'<label style="color:#ccc;font-size:13px;">Time</label><input type="time" id="eaTime" value="'+oldTime+'" class="field-input">'
++'<label style="color:#ccc;font-size:13px;">Duration</label>'+durHtml
++'<label style="color:#ccc;font-size:13px;">Notes</label><textarea id="eaNotes" class="field-input" rows="3" placeholder="Optional notes"></textarea>'
++'<div style="display:flex;gap:10px;margin-top:20px;"><button id="caEdit" style="flex:1;background:#333;color:#fff;padding:12px;border:none;border-radius:8px;cursor:pointer;">Cancel</button><button id="saEdit" style="flex:1;background:#e8742a;color:#fff;padding:12px;border:none;border-radius:8px;cursor:pointer;">Save</button></div>';
+overlay.appendChild(modal); document.body.appendChild(overlay);
+document.getElementById('caEdit').onclick=function(){overlay.remove();};
+document.getElementById('saEdit').onclick=function(){
+var nD=document.getElementById('eaDate').value, nT=document.getElementById('eaTime').value;
+var nDur=document.getElementById('eDur').value, nNotes=document.getElementById('eaNotes').value;
+fetch(SB+'/functions/v1/update-inspection',{method:'POST',headers:{'Authorization':'Bearer '+AK,'apikey':AK,'Content-Type':'application/json'},body:JSON.stringify({request_id:id,action:'edit',action_by:'Admin',new_date:nD,new_time:nT,new_duration:nDur,new_notes:nNotes})})
+.then(function(r){return r.json();}).then(function(data){if(data.success){overlay.remove(); loadMD();} else {alert('Error: '+data.error);}});
+};
+}
+function deleteInsp(id){
+if(!confirm('Delete this inspection request? This cannot be undone.')) return;
+fetch(SB+'/functions/v1/update-inspection',{method:'POST',headers:{'Authorization':'Bearer '+AK,'apikey':AK,'Content-Type':'application/json'},body:JSON.stringify({request_id:id,action:'delete',action_by:'Admin'})})
+.then(function(r){return r.json();}).then(function(data){if(data.success){loadMD();} else {alert('Error: '+(data.error||'Unknown'));}})
+.catch(function(err){alert('Failed: '+err.message);});
+}
 var calFeedURL=SB+'/functions/v1/calendar-feed?project='+encodeURIComponent(PROJ);
 function copyCalendarURL(){ navigator.clipboard.writeText(calFeedURL); document.getElementById('copyBtn').textContent='URL Copied!'; }
+function shareCalendarLink(){
+    var shareURL=window.location.href;
+    navigator.clipboard.writeText(shareURL);
+    var btn=document.getElementById('shareCopyBtn');
+    btn.textContent='Copied!'; btn.style.background='#4a4';
+    setTimeout(function(){ btn.textContent='Share'; btn.style.background='#5a8fc0'; },2000);
+}
 function switchTab(t){
 document.querySelectorAll('.tab')[0].classList.toggle('active',t==='calendar');
 document.querySelectorAll('.tab')[1].classList.toggle('active',t==='request');
@@ -361,7 +428,7 @@ document.getElementById('requestView').style.display=t==='request'?'block':'none
 function changeMonth(dir){ cM+=dir; if(cM>11){cM=0;cY++;} if(cM<0){cM=11;cY--;} renderCal(); loadMD(); }
 function ds(y,m,d){return y+'-'+String(m+1).padStart(2,'0')+'-'+String(d).padStart(2,'0');}
 function loadMD(){
-    var base=SB+'/rest/v1/inspection_requests?or=(status.neq.cancelled,status.is.null)';
+    var base=SB+'/rest/v1/inspection_requests?status=neq.deleted';
     var hdrs={headers:{'apikey':AK,'Authorization':'Bearer '+AK}};
     Promise.all([
         fetch(base+'&inspection_types=cs.%7BRegular%7D',hdrs).then(function(r){return r.json();}),
@@ -474,9 +541,65 @@ function refreshDropdownAndEmails(){
         emailContainer.appendChild(lbl);
     });
 }
+function checkSchedulingConflicts(date,time,types,dur){
+    var dayEvents=(mD[date]||[]).filter(function(e){return e.status!=='cancelled' && e.status!=='deleted';});
+    if(dayEvents.length===0) return null;
+    var blockingTypes=['Concrete','Shotcrete','Grout'];
+    var isBlocking=types.some(function(t){return blockingTypes.indexOf(t)>=0;});
+    var reqMinutes=parseInt(time.split(':')[0])*60+parseInt(time.split(':')[1]);
+    var reqEnd=reqMinutes+parseInt(dur||60);
+    var warnings=[];
+    dayEvents.forEach(function(e){
+        var eTime=e.inspection_time?e.inspection_time.substring(0,5):'';
+        if(!eTime||e.flexible_display==='flexible') return;
+        var eMin=parseInt(eTime.split(':')[0])*60+parseInt(eTime.split(':')[1]);
+        var eDur=parseInt(e.duration||60);
+        var eEnd=eMin+eDur;
+        var overlaps=(reqMinutes<eEnd && reqEnd>eMin);
+        if(!overlaps) return;
+        var eTypes=e.inspection_types||[];
+        var eIsBlocking=eTypes.some(function(t){return blockingTypes.indexOf(t)>=0;});
+        // Rule 1: Blocking types cannot overlap anything
+        if(isBlocking || eIsBlocking){
+            warnings.push((eTypes.join('/')||'Inspection')+' at '+eTime+(e.project!==PROJ?' ('+e.project+')':'')+' — blocking type conflict');
+        }
+        // Rule 2: Regular cannot overlap Regular across different jobs
+        else if(types.indexOf('Regular')>=0 && eTypes.indexOf('Regular')>=0 && e.project!==PROJ){
+            warnings.push('Regular at '+eTime+' ('+e.project+') — cannot overlap Regular across jobs');
+        }
+    });
+    return warnings.length>0?warnings:null;
+}
+function addAdditionalEmails(){
+    var input=document.getElementById('additionalEmailsList');
+    var raw=input.value.trim();
+    if(!raw){return;}
+    var emails=raw.split(',').map(function(e){return e.trim();}).filter(function(e){return e && e.indexOf('@')>0;});
+    if(emails.length===0){alert('Please enter valid email addresses.');return;}
+    emails.forEach(function(email){
+        // Check if already in savedContacts
+        var exists=savedContacts.some(function(c){return c.email===email;});
+        if(!exists){
+            var newContact={name:email.split('@')[0],email:email,company:'',project:PROJ};
+            savedContacts.push(newContact);
+            // Save to Supabase in background
+            fetch(SB+'/rest/v1/contacts',{method:'POST',headers:{'apikey':AK,'Authorization':'Bearer '+AK,'Content-Type':'application/json','Prefer':'resolution=merge-duplicates'},body:JSON.stringify({name:newContact.name,email:email,company:null,project:PROJ})}).catch(function(){});
+        }
+    });
+    renderTeamList();
+    refreshDropdownAndEmails();
+    input.value='';
+}
 function submitIR(){
     var d=document.getElementById('iDate').value, t=document.getElementById('iTime').value, nm=document.getElementById('iName').value;
     if(!nm||allFiles.length===0||!d||!t||!inspType||!inspDur){alert('Missing required fields.'); return;}
+    // Conflict check (non-blocking warning)
+    if(t!=='flexible'){
+        var conflicts=checkSchedulingConflicts(d,t,[inspType],inspDur);
+        if(conflicts){
+            if(!confirm('Scheduling conflict detected:\n\n'+conflicts.join('\n')+'\n\nSubmit anyway?')) return;
+        }
+    }
     var emails=[];
     document.querySelectorAll('.emailCheck:checked').forEach(function(cb){emails.push(cb.value);});
     var addl=document.getElementById('additionalEmailsList').value.trim();

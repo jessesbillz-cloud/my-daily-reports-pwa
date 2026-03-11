@@ -693,7 +693,7 @@ function CreateJob({user, onBack, onCreated}){
       }
     }catch(e){
       console.error("Parse error:",e);
-      setErr("Could not parse template fields. You can still create the job and configure fields later.");
+      setErr("Could not parse template fields: "+(e.message||e)+". You can still create the job and configure fields later.");
     }finally{setParsing(false);}
   };
 
@@ -1029,39 +1029,35 @@ function CreateJob({user, onBack, onCreated}){
         <div style={{marginBottom:20}}>
           <label style={ls}>Template</label>
 
-          {/* Saved & Company Templates picker */}
-          {!tf&&(savedTpls.length>0||jobCompanyTemplates.length>0)&&(
+          {/* Company Templates — shown prominently when a matching company is selected */}
+          {!tf&&jobSelectedCompany&&jobCompanyTemplates.length>0&&(
+            <div style={{marginBottom:12,background:"rgba(232,116,42,0.06)",border:`2px solid ${C.org}`,borderRadius:12,overflow:"hidden"}}>
+              <div style={{padding:"10px 14px",borderBottom:`1px solid rgba(232,116,42,0.2)`,display:"flex",alignItems:"center",gap:8}}>
+                <span style={{fontSize:16}}>🏢</span>
+                <div style={{fontSize:13,fontWeight:700,color:C.org}}>{jobSelectedCompany.name} Templates</div>
+              </div>
+              {jobCompanyTemplates.map(t=>(
+                <div key={"co-"+t.id} onClick={()=>useSavedTemplate({...t,name:t.template_name||t.name||t.file_name})} style={{padding:"12px 16px",borderBottom:`1px solid rgba(232,116,42,0.12)`,display:"flex",alignItems:"center",gap:10,cursor:"pointer"}}>
+                  <span style={{fontSize:18}}>📄</span>
+                  <div style={{flex:1}}>
+                    <div style={{fontSize:13,fontWeight:600,color:C.txt}}>{t.template_name||t.name||t.file_name||"Template"}</div>
+                    <div style={{fontSize:11,color:C.mut}}>{(t.field_config||[]).length} fields{t.file_type?" — "+t.file_type.toUpperCase():""}</div>
+                  </div>
+                  <span style={{color:C.org,fontSize:12,fontWeight:700}}>Use →</span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Saved Templates picker — user's own saved templates */}
+          {!tf&&savedTpls.length>0&&(
             <div style={{marginBottom:12}}>
               <button onClick={()=>setShowSaved(!showSaved)} style={{width:"100%",padding:"14px 18px",background:showSaved?C.blu+"18":C.card,border:`2px solid ${C.blu}`,borderRadius:12,color:C.blu,fontSize:15,fontWeight:700,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
-                <span>📋 Use a Saved Template ({savedTpls.length+jobCompanyTemplates.length})</span>
+                <span>📋 Use a Saved Template ({savedTpls.length})</span>
                 <span style={{fontSize:14}}>{showSaved?"▲":"▼"}</span>
               </button>
               {showSaved&&(
                 <div style={{marginTop:8,background:C.inp,border:`1px solid ${C.brd}`,borderRadius:10,overflow:"hidden",maxHeight:300,overflowY:"auto"}}>
-                  {/* Company templates first */}
-                  {jobCompanyTemplates.length>0&&(
-                    <div style={{padding:"8px 14px",borderBottom:`1px solid ${C.brd}`,background:"rgba(232,116,42,0.06)"}}>
-                      <div style={{fontSize:11,fontWeight:700,color:C.org,textTransform:"uppercase",letterSpacing:1}}>🏢 {jobSelectedCompany?.name||"Company"} Templates</div>
-                    </div>
-                  )}
-                  {jobCompanyTemplates.map(t=>(
-                    <div key={"co-"+t.id} style={{padding:"12px 16px",borderBottom:`1px solid ${C.brd}`,display:"flex",alignItems:"center",gap:10}}>
-                      <div onClick={()=>useSavedTemplate({...t,name:t.template_name||t.name||t.file_name})} style={{display:"flex",alignItems:"center",gap:10,flex:1,cursor:"pointer"}}>
-                        <span style={{fontSize:18}}>🏢</span>
-                        <div style={{flex:1}}>
-                          <div style={{fontSize:13,fontWeight:600,color:C.txt}}>{t.template_name||t.name||t.file_name||"Template"}</div>
-                          <div style={{fontSize:11,color:C.mut}}>{(t.field_config||[]).length} fields{t.file_type?" — "+t.file_type.toUpperCase():""}</div>
-                        </div>
-                        <span style={{color:C.org,fontSize:12,fontWeight:600}}>Use</span>
-                      </div>
-                    </div>
-                  ))}
-                  {/* User's saved templates */}
-                  {savedTpls.length>0&&jobCompanyTemplates.length>0&&(
-                    <div style={{padding:"8px 14px",borderBottom:`1px solid ${C.brd}`,background:"rgba(90,143,192,0.06)"}}>
-                      <div style={{fontSize:11,fontWeight:700,color:C.blu,textTransform:"uppercase",letterSpacing:1}}>📋 Your Saved Templates</div>
-                    </div>
-                  )}
                   {savedTpls.map(t=>(
                     <div key={t.id} style={{padding:"12px 16px",borderBottom:`1px solid ${C.brd}`,display:"flex",alignItems:"center",gap:10}}>
                       <div onClick={()=>useSavedTemplate(t)} style={{display:"flex",alignItems:"center",gap:10,flex:1,cursor:"pointer"}}>
@@ -4525,7 +4521,7 @@ function Dashboard({user, onLogout}){
                               }
                               await loadRequests();
                             }catch(er){alert("Error: "+er.message);}}} style={{flex:1,padding:"7px 0",fontSize:12,fontWeight:700,borderRadius:6,background:"#22c55e",border:"none",color:"#fff",cursor:"pointer"}}>
-                              ✓ Scheduled
+                              Confirm Schedule
                             </button>
                           )}
                           {rq.status==="scheduled"&&(

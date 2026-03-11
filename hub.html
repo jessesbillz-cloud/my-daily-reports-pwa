@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Inspection Scheduling</title>
+<title>Scheduling Request</title>
 <style>
 * { box-sizing: border-box; margin: 0; padding: 0; }
 body { font-family: 'Segoe UI', Roboto, -apple-system, sans-serif; background: #0f0f0f; color: #fff; padding: 20px; text-align: center; }
@@ -83,7 +83,7 @@ function renderHub(profile,jobs){
   var html='';
   html+='<div class="header">';
   html+='<h1>'+name+'</h1>';
-  html+='<p>Inspection Scheduling</p>';
+  html+='<p>Scheduling Request</p>';
   html+='</div>';
 
   if(jobs.length===0){
@@ -106,6 +106,7 @@ function renderHub(profile,jobs){
   }
 
   html+='<div class="footer-branding">';
+  html+='<div style="display:flex;align-items:center;justify-content:center;gap:10px;margin-bottom:8px;"><img src="logo.jpg" alt="Logo" style="width:30px;height:30px;border-radius:6px;"></div>';
   html+='<p><a href="https://mydailyreports.org" style="color:#e8742a;text-decoration:none;font-weight:700;">Powered by My Daily Reports</a></p>';
   html+='</div>';
 
