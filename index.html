@@ -891,11 +891,14 @@ function CreateJob({user, onBack, onCreated}){
     setShowSaved(false);
     // Download the template file — check company-templates bucket first, then report-source-docs
     if(tpl.storage_path){
-        const bucket=tpl.storage_path.startsWith("company-templates/")?"company-templates":"report-source-docs";
-        const path=tpl.storage_path.startsWith("company-templates/")?tpl.storage_path.replace("company-templates/",""):tpl.storage_path;
+        const isCompanyBucket=tpl.storage_path.startsWith("company-templates/");
+        const bucket=isCompanyBucket?"company-templates":"report-source-docs";
+        const path=isCompanyBucket?tpl.storage_path.replace("company-templates/",""):tpl.storage_path;
         const token=AUTH_TOKEN||SB_KEY;
-        console.log("[useSavedTemplate] Downloading from",bucket,"/",path);
-        const resp=await fetch(`${SB_URL}/storage/v1/object/${bucket}/${path}`,{headers:{apikey:SB_KEY,Authorization:`Bearer ${token}`}});
+        console.log("[useSavedTemplate] Downloading from",bucket,"/",path,"public:",isCompanyBucket);
+        const resp=isCompanyBucket
+          ?await fetch(`${SB_URL}/storage/v1/object/public/${bucket}/${path}`)
+          :await fetch(`${SB_URL}/storage/v1/object/${bucket}/${path}`,{headers:{apikey:SB_KEY,Authorization:`Bearer ${token}`}});
         console.log("[useSavedTemplate] Download status:",resp.status);
         if(resp.ok){
           const blob=await resp.blob();
@@ -1091,7 +1094,7 @@ function CreateJob({user, onBack, onCreated}){
           {jobSelectedCompany&&jobCompanyTemplates.length>0&&jobType==="template"&&!tf&&(
             <div style={{marginTop:8,border:`1px solid ${C.brd}`,borderRadius:10,overflow:"hidden",background:C.card}}>
               <button onClick={()=>setShowCompanyTpls(!showCompanyTpls)} style={{width:"100%",padding:"10px 14px",background:"transparent",border:"none",color:C.lt,fontSize:13,fontWeight:600,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
-                <span>Use Template ({jobCompanyTemplates.length})</span>
+                <span>Company Template ({jobCompanyTemplates.length})</span>
                 <span style={{fontSize:12,color:C.mut}}>{showCompanyTpls?"▲":"▼"}</span>
               </button>
               {showCompanyTpls&&jobCompanyTemplates.map(t=>(
@@ -1160,7 +1163,7 @@ function CreateJob({user, onBack, onCreated}){
           {!tf&&savedTpls.length>0&&(
             <div style={{marginBottom:12}}>
               <button onClick={()=>setShowSaved(!showSaved)} style={{width:"100%",padding:"14px 18px",background:showSaved?C.blu+"18":C.card,border:`2px solid ${C.blu}`,borderRadius:12,color:C.blu,fontSize:15,fontWeight:700,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
-                <span>Use a Saved Template ({savedTpls.length})</span>
+                <span>My Templates ({savedTpls.length})</span>
                 <span style={{fontSize:14}}>{showSaved?"▲":"▼"}</span>
               </button>
               {showSaved&&(
@@ -1275,16 +1278,16 @@ function CreateJob({user, onBack, onCreated}){
             {!tplSaved&&!usedSavedId&&(
               <div style={{background:C.card,border:`2px solid ${C.blu}`,borderRadius:12,padding:"16px 18px",marginTop:16,textAlign:"center"}}>
                 <div style={{fontSize:20,marginBottom:6}}>—</div>
-                <div style={{fontSize:14,fontWeight:700,color:C.lt,marginBottom:4}}>Save This Template</div>
-                <div style={{fontSize:12,color:C.mut,marginBottom:12,lineHeight:1.4}}>Reuse these parsed fields on other jobs without re-parsing. Saves time and API costs.</div>
+                <div style={{fontSize:14,fontWeight:700,color:C.lt,marginBottom:4}}>Save to My Templates</div>
+                <div style={{fontSize:12,color:C.mut,marginBottom:12,lineHeight:1.4}}>Save these fields to your account for reuse on future jobs. Only visible to you.</div>
                 <button onClick={saveAsTemplate} disabled={savingTpl} style={{width:"100%",padding:"12px 0",background:C.blu,border:"none",borderRadius:8,color:"#fff",fontSize:14,fontWeight:700,cursor:savingTpl?"default":"pointer",opacity:savingTpl?0.6:1}}>
-                  {savingTpl?"Saving...":"Save as Reusable Template"}
+                  {savingTpl?"Saving...":"Save to My Templates"}
                 </button>
               </div>
             )}
             {tplSaved&&!usedSavedId&&(
               <div style={{background:"rgba(34,197,94,0.08)",border:`1px solid ${C.ok}`,borderRadius:10,padding:"12px 16px",marginTop:16,textAlign:"center"}}>
-                <span style={{fontSize:14,color:C.ok,fontWeight:700}}>✓ Template saved — available on all future jobs</span>
+                <span style={{fontSize:14,color:C.ok,fontWeight:700}}>Saved to My Templates</span>
               </div>
             )}
           </div>
