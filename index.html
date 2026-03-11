@@ -1544,39 +1544,30 @@ function WorkLogEditor({job, user, onBack, reportDate}){
           page=doc.getPages()[0];
           hasTemplate=true;
 
-          // Analyze template text to find the dark header bar and the info bar below it
-          let darkHeaderBottom=0; // bottom of dark header (logo area) in top-down coords
-          let infoBarTop=0;      // top of info bar in top-down coords
-          let infoBarBottom=0;   // bottom of info bar in top-down coords
+          // Analyze template to find the bottom of the dark header (company name + logo area)
+          // Everything below this gets white-outed and redrawn with fresh data
+          let darkHeaderBottom=0; // in top-down coords (pixels from top of page)
           try{
             const textItems=await extractPdfTextStructure(new Uint8Array(tplBytes));
             const pg1Items=textItems.filter(t=>t.page===1).sort((a,b)=>a.y-b.y);
             console.log("[tpl] pg1 text items:",pg1Items.length,pg1Items.slice(0,10).map(t=>({str:t.str,y:Math.round(t.y),h:Math.round(t.h)})));
-
-            // Find info bar items by keyword
-            const infoItems=pg1Items.filter(t=>{
+            // Find the bottom of ALL text in the top 35% of the page (header + info bar region)
+            const topItems=pg1Items.filter(t=>t.y<H*0.35);
+            // Find the company header items — typically company name, address (in top ~15%)
+            const headerItems=topItems.filter(t=>{
               const txt=(t.str||"").toLowerCase();
-              return t.y<H*0.35&&(txt.includes("date")||txt.includes("job")||txt.includes("prepared")||txt.match(/^\d{2}[\/-]\d/));
+              const isInfoField=txt.includes("date")||txt.includes("job")||txt.includes("prepared")||txt.match(/^\d{2}[\/-]\d/);
+              return t.y<H*0.20&&!isInfoField;
             });
-            // Find dark header items (company name, address — before info bar)
-            const headerItems=pg1Items.filter(t=>t.y<H*0.25&&!infoItems.includes(t));
-
             if(headerItems.length>0){
               darkHeaderBottom=Math.max(...headerItems.map(t=>t.y+t.h));
             }
-            if(infoItems.length>0){
-              infoBarTop=Math.min(...infoItems.map(t=>t.y));
-              infoBarBottom=Math.max(...infoItems.map(t=>t.y+t.h));
-            }
-            console.log("[tpl] darkHeaderBottom:",darkHeaderBottom,"infoBarTop:",infoBarTop,"infoBarBottom:",infoBarBottom);
+            console.log("[tpl] darkHeaderBottom:",darkHeaderBottom);
           }catch(e){console.log("Template text analysis failed:",e);}
+          // Fallback: if detection failed, assume header is about 100px from top
+          if(!darkHeaderBottom)darkHeaderBottom=100;
 
-          // Use detected positions, with sensible fallbacks
-          if(!infoBarBottom)infoBarBottom=200;
-          if(!infoBarTop)infoBarTop=darkHeaderBottom||150;
-          if(!darkHeaderBottom)darkHeaderBottom=infoBarTop-5;
-
-          // White-out everything from just below the dark header (covering the old info bar + all content below)
+          // White-out everything below the dark header — covers old info bar, old weather, old data
           const clearTopY=H-darkHeaderBottom; // PDF y-coord of bottom edge of dark header
           page.drawRectangle({x:0,y:0,width:W,height:clearTopY,color:rgb(1,1,1)});
 
