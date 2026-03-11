@@ -1688,19 +1688,19 @@ function WorkLogEditor({job, user, onBack, reportDate}){
     let y=H-M;
     let pageNum=1;
     const totalPagesRef={val:1}; // will update after building
-    // ── Page 1 Header — logo + job name + site address ──
+    // ── Page 1 Header — light grey bar, title LEFT, logo RIGHT ──
     page=doc.addPage([W,H]);
     const headerH=90;
+    const hdrPad=10; // inner padding
 
-    // Dark header bar
-    page.drawRectangle({x:0,y:H-headerH,width:W,height:headerH,color:rgb(.12,.12,.12)});
+    // Light grey header bar with margins
+    page.drawRectangle({x:M,y:H-headerH,width:CW,height:headerH,color:rgb(.85,.85,.85)});
 
     // Embed logo — try company logo first, fall back to MDR logo
     let logoImg=null;
-    let logoW=0;
+    let logoDrawW=0,logoDrawH=0;
     try{
       let logoBytes=null;let isJpg=true;
-      // Try company logo from Supabase storage
       if(job.company_id){
         try{
           const co=await db.getCompany(job.company_id);
@@ -1714,38 +1714,40 @@ function WorkLogEditor({job, user, onBack, reportDate}){
           }
         }catch(e){console.error("Company logo fetch:",e);}
       }
-      // Fall back to MDR logo
       if(!logoBytes){
         const logoResp=await fetch("logo.jpg");
         if(logoResp.ok)logoBytes=new Uint8Array(await logoResp.arrayBuffer());
       }
       if(logoBytes){
         logoImg=isJpg?await doc.embedJpg(logoBytes):await doc.embedPng(logoBytes);
-        const logoSize=60;
-        const scl=Math.min(logoSize/logoImg.width,logoSize/logoImg.height);
-        logoW=logoImg.width*scl;
-        const logoH2=logoImg.height*scl;
-        page.drawImage(logoImg,{x:M,y:H-headerH+(headerH-logoH2)/2,width:logoW,height:logoH2});
-        logoW+=12; // gap after logo
+        const logoMaxH=headerH-2*hdrPad;
+        const logoMaxW=140;
+        const scl=Math.min(logoMaxW/logoImg.width,logoMaxH/logoImg.height);
+        logoDrawW=logoImg.width*scl;
+        logoDrawH=logoImg.height*scl;
+        // Logo on RIGHT side, vertically centered
+        const logoX=W-M-hdrPad-logoDrawW;
+        const logoY2=H-headerH+(headerH-logoDrawH)/2;
+        page.drawImage(logoImg,{x:logoX,y:logoY2,width:logoDrawW,height:logoDrawH});
       }
     }catch(e){console.error("Logo embed:",e);}
 
-    // Job name (large, white, after logo)
+    // Job title — large, dark text, LEFT side
     const jobTitle=job.name||"Daily Work Log";
-    const titleStartX=M+logoW;
+    const titleStartX=M+hdrPad;
+    const maxTitleW=CW-logoDrawW-3*hdrPad; // leave room for logo
     let titleSize=jobTitle.length>30?16:jobTitle.length>20?18:22;
-    const maxTitleW=W-titleStartX-M;
     while(titleSize>10&&fontB.widthOfTextAtSize(jobTitle,titleSize)>maxTitleW)titleSize-=1;
     if(fontB.widthOfTextAtSize(jobTitle,titleSize)>maxTitleW){
       const words=jobTitle.split(" ");let l1="",l2="";
       for(const w of words){const t=l1?l1+" "+w:w;if(fontB.widthOfTextAtSize(t,titleSize)>maxTitleW&&l1){l2=words.slice(words.indexOf(w)).join(" ");break;}else l1=t;}
-      page.drawText(l1,{x:titleStartX,y:H-36,size:titleSize,font:fontB,color:rgb(1,1,1)});
-      if(l2)page.drawText(l2,{x:titleStartX,y:H-50,size:titleSize,font:fontB,color:rgb(1,1,1)});
+      page.drawText(l1,{x:titleStartX,y:H-36,size:titleSize,font:fontB,color:rgb(.15,.15,.15)});
+      if(l2)page.drawText(l2,{x:titleStartX,y:H-50,size:titleSize,font:fontB,color:rgb(.15,.15,.15)});
     }else{
-      page.drawText(jobTitle,{x:titleStartX,y:H-40,size:titleSize,font:fontB,color:rgb(1,1,1)});
+      page.drawText(jobTitle,{x:titleStartX,y:H-40,size:titleSize,font:fontB,color:rgb(.15,.15,.15)});
     }
-    // Site address
-    if(job.site_address)page.drawText(job.site_address,{x:titleStartX,y:H-58,size:10,font,color:rgb(.72,.72,.72)});
+    // Site address below title
+    if(job.site_address)page.drawText(job.site_address,{x:titleStartX,y:H-58,size:10,font,color:rgb(.35,.35,.35)});
 
     // Info bar below header (dark, with Date / Job # / Prepared By)
     const infoBarH=26;
