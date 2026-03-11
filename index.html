@@ -2901,6 +2901,7 @@ function ReportEditor({job, user, onBack, reportDate}){
         baseName=baseName.replace(/\{report_number\}/g,rptNum);
         baseName=baseName.replace(/\{date\}/g,formatDate(conv.dateFormat));
         baseName=baseName.replace(/\{year\}/g,fmtYYYY);
+        baseName=baseName.replace(/\{project\}/g,(job.name||"").replace(/\s+/g,"_"));
         const docxFilename=baseName+".docx";
         // Save report
         const vals={};const lockVals={};
@@ -3166,6 +3167,7 @@ function ReportEditor({job, user, onBack, reportDate}){
       const dateStr=formatDate(conv.dateFormat);
       baseName=baseName.replace(/\{date\}/g,dateStr);
       baseName=baseName.replace(/\{year\}/g,fmtYYYY);
+      baseName=baseName.replace(/\{project\}/g,(job.name||"").replace(/\s+/g,"_"));
       const pdfFilename=baseName+".pdf";
 
       // ── 8. Save report, upload PDF, send email — all at once ──
@@ -3639,6 +3641,7 @@ function JobDetail({job, user, onBack, onDeleted}){
     const dateStr=formatDate(conv.dateFormat);
     n=n.replace(/\{date\}/g,dateStr);
     n=n.replace(/\{year\}/g,yyyy);
+    n=n.replace(/\{project\}/g,(job.name||"").replace(/\s+/g,"_"));
     return n;
   };
 
