@@ -2014,6 +2014,25 @@ function WorkLogEditor({job, user, onBack, reportDate}){
   const [weatherPM,setWeatherPM]=useState("");
   const photoRef=useRef(null);
   const [photoTarget,setPhotoTarget]=useState(null); // contractor id for photo upload
+  const [sectionPhotos,setSectionPhotos]=useState({}); // {materials:[{data,name,ts}], ...}
+  const sectionPhotoRef=useRef(null);
+  const [sectionPhotoTarget,setSectionPhotoTarget]=useState(null); // section key
+  const handleSectionPhoto=(e)=>{
+    const files=Array.from(e.target.files||[]);
+    if(!files.length||!sectionPhotoTarget)return;
+    files.forEach(file=>{
+      const reader=new FileReader();
+      reader.onload=async(ev)=>{
+        const compressed=await compressPhoto(ev.target.result);
+        setSectionPhotos(p=>({...p,[sectionPhotoTarget]:[...(p[sectionPhotoTarget]||[]),{data:compressed,name:file.name,ts:Date.now()}]}));
+      };
+      reader.readAsDataURL(file);
+    });
+    e.target.value="";
+  };
+  const removeSectionPhoto=(secKey,idx)=>{
+    setSectionPhotos(p=>{const arr=[...(p[secKey]||[])];arr.splice(idx,1);return{...p,[secKey]:arr};});
+  };
   const [weatherLoading,setWeatherLoading]=useState(false);
 
   const fs={width:"100%",padding:"12px 14px",background:C.inp,border:`1px solid ${C.brd}`,borderRadius:10,color:C.txt,fontSize:15};
@@ -2105,6 +2124,7 @@ function WorkLogEditor({job, user, onBack, reportDate}){
             if(c.weatherAM)setWeatherAM(c.weatherAM);
             if(c.weatherMid)setWeatherMid(c.weatherMid);
             if(c.weatherPM)setWeatherPM(c.weatherPM);
+            if(c.sectionPhotos)setSectionPhotos(c.sectionPhotos);
           }
         } else {
           // No report for today — carry over contractors from most recent previous report
@@ -2205,7 +2225,7 @@ function WorkLogEditor({job, user, onBack, reportDate}){
 
   const buildContent=()=>({
     contractors,generalNotes,safetyNotes,materials,equipment,qualityControl,customCategories,survey,
-    weatherEnabled,weatherAM,weatherMid,weatherPM,
+    weatherEnabled,weatherAM,weatherMid,weatherPM,sectionPhotos,
     reportType:"worklog"
   });
 
@@ -2234,7 +2254,7 @@ function WorkLogEditor({job, user, onBack, reportDate}){
     // Light grey header bar with margins
     page.drawRectangle({x:M,y:H-headerH,width:CW,height:headerH,color:rgb(.85,.85,.85)});
 
-    // Embed logo — try job company logo, then user's profile company logo, then MDR logo
+    // Embed company logo — try job's company, then user's profile company (no MDR fallback)
     let logoImg=null;
     let logoDrawW=0,logoDrawH=0;
     try{
@@ -2257,10 +2277,7 @@ function WorkLogEditor({job, user, onBack, reportDate}){
           }
         }catch(e){console.error("Company logo fetch:",e);}
       }
-      if(!logoBytes){
-        const logoResp=await fetch("logo.jpg");
-        if(logoResp.ok)logoBytes=new Uint8Array(await logoResp.arrayBuffer());
-      }
+      // No MDR fallback — only show company logo if found
       if(logoBytes){
         logoImg=isJpg?await doc.embedJpg(logoBytes):await doc.embedPng(logoBytes);
         const logoMaxH=headerH-2*hdrPad;
@@ -2579,20 +2596,55 @@ function WorkLogEditor({job, user, onBack, reportDate}){
       }
     }
 
+    // Helper: draw section photos inline
+    const drawSectionPhotos=async(secKey)=>{
+      const photos=sectionPhotos[secKey]||[];
+      if(!photos.length)return;
+      const cols=4,photoGap=6;
+      const imgW=Math.floor((CW-(cols-1)*photoGap)/cols);
+      const imgH=Math.floor(imgW*0.75);
+      let pi=0;
+      while(pi<photos.length){
+        const row=photos.slice(pi,pi+cols);
+        ensureSpace(imgH+10);
+        for(let ri=0;ri<row.length;ri++){
+          try{
+            const ph=row[ri];
+            const imgBytes=Uint8Array.from(atob(ph.data.split(",")[1]||""),ch=>ch.charCodeAt(0));
+            let img;
+            if(ph.data.includes("image/png"))img=await doc.embedPng(imgBytes);
+            else img=await doc.embedJpg(imgBytes);
+            const xPos=M+ri*(imgW+photoGap);
+            const scl=Math.min(imgW/img.width,imgH/img.height,1);
+            const pw=img.width*scl,ph2=img.height*scl;
+            page.drawImage(img,{x:xPos,y:y-ph2,width:pw,height:ph2});
+          }catch(e){console.error("Section photo embed:",e);}
+        }
+        pi+=row.length;
+        y-=(imgH+photoGap);
+      }
+      y-=4;
+    };
+
     // ── Materials ──
     drawTextSection("Materials",materials);
+    await drawSectionPhotos("materials");
 
     // ── Equipment ──
     drawTextSection("Equipment",equipment);
+    await drawSectionPhotos("equipment");
 
     // ── General Notes ──
     drawTextSection("General Notes",generalNotes);
+    await drawSectionPhotos("generalNotes");
 
     // ── Site Safety Observations ──
     drawTextSection("Site Safety Observations",safetyNotes);
+    await drawSectionPhotos("safetyNotes");
 
     // ── Quality Control Observations ──
     drawTextSection("Quality Control Observations",qualityControl);
+    await drawSectionPhotos("qualityControl");
 
     // ── Custom Categories ──
     if(customCategories&&customCategories.length>0){
@@ -2766,10 +2818,13 @@ function WorkLogEditor({job, user, onBack, reportDate}){
       if(recipients.length===0){showToast("No team emails configured. Add them in Job Settings.");setEmailing(false);return;}
       let senderName="My Daily Reports";
       try{const prof=await db.getProfile(user.id);if(prof?.company_name)senderName=prof.company_name;}catch(e){}
-      const r=await fetch(`${SB_URL}/functions/v1/send-report`,{
+      // Refresh token before sending to avoid 401
+      if(!AUTH_TOKEN)await refreshAuthToken();
+      let r=await fetch(`${SB_URL}/functions/v1/send-report`,{
         method:"POST",headers:{"Content-Type":"application/json",Authorization:`Bearer ${AUTH_TOKEN||SB_KEY}`,apikey:SB_KEY},
         body:JSON.stringify({to:recipients,subject:`${submitSuccess.jobName} — Daily Work Log ${submitSuccess.todayDisplay}`,html_body:submitSuccess.emailHtml,pdf_base64:submitSuccess.pdfBase64,pdf_filename:submitSuccess.pdfFilename,sender_name:senderName})
       });
+      if(r.status===401){await refreshAuthToken();r=await fetch(`${SB_URL}/functions/v1/send-report`,{method:"POST",headers:{"Content-Type":"application/json",Authorization:`Bearer ${AUTH_TOKEN||SB_KEY}`,apikey:SB_KEY},body:JSON.stringify({to:recipients,subject:`${submitSuccess.jobName} — Daily Work Log ${submitSuccess.todayDisplay}`,html_body:submitSuccess.emailHtml,pdf_base64:submitSuccess.pdfBase64,pdf_filename:submitSuccess.pdfFilename,sender_name:senderName})});}
       if(!r.ok){const errBody=await r.json().catch(()=>({}));console.error("Email API response:",r.status,errBody);throw new Error(errBody.error||`Email send failed (${r.status})`);}
       showToast("Report emailed to "+recipients.length+" recipient"+(recipients.length>1?"s":"")+"!");
     }catch(e){
@@ -2795,13 +2850,13 @@ function WorkLogEditor({job, user, onBack, reportDate}){
   useEffect(()=>{
     if(contractors.filter(c=>c.active!==false).length===0||submitSuccess)return;
     const t=setInterval(()=>{
-      const hash=JSON.stringify({contractors,generalNotes,safetyNotes,materials,equipment,qualityControl,customCategories,survey,weatherAM,weatherMid,weatherPM});
+      const hash=JSON.stringify({contractors,generalNotes,safetyNotes,materials,equipment,qualityControl,customCategories,survey,weatherAM,weatherMid,weatherPM,sectionPhotos});
       if(hash===lastSaveHash.current)return; // nothing changed
       lastSaveHash.current=hash;
       saveWorking();
     },30000);
     return()=>clearInterval(t);
-  },[contractors,generalNotes,safetyNotes,materials,equipment,qualityControl,customCategories,survey,weatherEnabled,weatherAM,weatherMid,weatherPM,submitSuccess]);
+  },[contractors,generalNotes,safetyNotes,materials,equipment,qualityControl,customCategories,survey,weatherEnabled,weatherAM,weatherMid,weatherPM,sectionPhotos,submitSuccess]);
 
   const totalHours=contractors.filter(c=>c.active!==false).reduce((sum,c)=>{
     const h=parseFloat(c.hours)||0;
@@ -3030,6 +3085,22 @@ function WorkLogEditor({job, user, onBack, reportDate}){
             {expandedSections[sec.key]&&(
               <div style={{padding:"0 16px 16px"}}>
                 <textarea value={sec.val} onChange={e=>sec.set(e.target.value)} placeholder={sec.placeholder} rows={3} style={{...fs,resize:"vertical",minHeight:70,lineHeight:1.5}}/>
+                <div style={{display:"flex",alignItems:"center",gap:8,marginTop:8}}>
+                  <button onClick={()=>{setSectionPhotoTarget(sec.key);setTimeout(()=>sectionPhotoRef.current?.click(),50);}} style={{display:"flex",alignItems:"center",gap:4,padding:"6px 12px",background:C.inp,border:`1px solid ${C.brd}`,borderRadius:8,color:C.lt,fontSize:12,fontWeight:600,cursor:"pointer"}}>
+                    📷 Add Photo
+                  </button>
+                  {(sectionPhotos[sec.key]||[]).length>0&&<span style={{fontSize:11,color:C.mut}}>{(sectionPhotos[sec.key]||[]).length} photo{(sectionPhotos[sec.key]||[]).length!==1?"s":""}</span>}
+                </div>
+                {(sectionPhotos[sec.key]||[]).length>0&&(
+                  <div style={{display:"flex",gap:8,marginTop:8,flexWrap:"wrap"}}>
+                    {(sectionPhotos[sec.key]||[]).map((ph,pi)=>(
+                      <div key={pi} style={{position:"relative",width:60,height:60,borderRadius:6,overflow:"hidden",border:`1px solid ${C.brd}`}}>
+                        <img src={ph.data} alt="" style={{width:"100%",height:"100%",objectFit:"cover"}}/>
+                        <button onClick={()=>removeSectionPhoto(sec.key,pi)} style={{position:"absolute",top:1,right:1,background:"rgba(0,0,0,0.6)",border:"none",color:"#fff",fontSize:10,width:16,height:16,borderRadius:"50%",cursor:"pointer",lineHeight:1,padding:0}}>✕</button>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -3104,6 +3175,7 @@ function WorkLogEditor({job, user, onBack, reportDate}){
       {/* Hidden photo inputs — separate for camera vs library */}
       <input ref={cameraRef} type="file" accept="image/*" capture="environment" style={{display:"none"}} onChange={handlePhotoUpload}/>
       <input ref={libraryRef} type="file" accept="image/*" multiple style={{display:"none"}} onChange={handlePhotoUpload}/>
+      <input ref={sectionPhotoRef} type="file" accept="image/*" capture="environment" multiple style={{display:"none"}} onChange={handleSectionPhoto}/>
 
       {/* Toast */}
       {toast&&<div style={{position:"fixed",top:60,left:"50%",transform:"translateX(-50%)",background:C.card,border:`1px solid ${C.ok}`,borderRadius:10,padding:"10px 20px",fontSize:14,fontWeight:600,color:C.ok,zIndex:9999}}>{toast}</div>}
@@ -3690,6 +3762,7 @@ function ReportEditor({job, user, onBack, reportDate}){
       if(isPdfTemplate&&fcSource==="acroform"){
         console.log("[submit] Using AcroForm fill-by-name path");
         pdfDoc=await PDFDocument.load(tplBytes,{ignoreEncryption:true});
+        const acroFont=await pdfDoc.embedFont(StandardFonts.Helvetica);
         try{
           const form=pdfDoc.getForm();
           allFields.forEach(f=>{
@@ -3725,11 +3798,15 @@ function ReportEditor({job, user, onBack, reportDate}){
                 // Text field (most common)
                 const tf=form.getTextField(pfn);
                 tf.setText(String(f.val));
+                // Set font size if field has one
+                if(f.fontSize)try{tf.setFontSize(f.fontSize);}catch(e){}
               }
             }catch(fieldErr){
               console.warn("[submit] Could not fill AcroForm field '"+pfn+"':",fieldErr.message);
             }
           });
+          // Update appearances then flatten to get clean rendering
+          try{form.updateFieldAppearances(acroFont);}catch(e){console.warn("updateFieldAppearances:",e.message);}
           form.flatten();
         }catch(formErr){
           console.error("[submit] AcroForm fill failed:",formErr);
@@ -4101,10 +4178,12 @@ function ReportEditor({job, user, onBack, reportDate}){
       // Get company name for dynamic sender
       let senderName="My Daily Reports";
       try{const prof=await db.getProfile(user.id);if(prof?.company_name)senderName=prof.company_name;}catch(e){}
-      const r=await fetch(`${SB_URL}/functions/v1/send-report`,{
+      if(!AUTH_TOKEN)await refreshAuthToken();
+      let r=await fetch(`${SB_URL}/functions/v1/send-report`,{
         method:"POST",headers:{"Content-Type":"application/json",Authorization:`Bearer ${AUTH_TOKEN||SB_KEY}`,apikey:SB_KEY},
         body:JSON.stringify({to:recipients,subject:`${submitSuccess.jobName} — Daily Report ${submitSuccess.todayDisplay}`,html_body:submitSuccess.emailHtml,pdf_base64:submitSuccess.pdfBase64,pdf_filename:submitSuccess.pdfFilename,sender_name:senderName})
       });
+      if(r.status===401){await refreshAuthToken();r=await fetch(`${SB_URL}/functions/v1/send-report`,{method:"POST",headers:{"Content-Type":"application/json",Authorization:`Bearer ${AUTH_TOKEN||SB_KEY}`,apikey:SB_KEY},body:JSON.stringify({to:recipients,subject:`${submitSuccess.jobName} — Daily Report ${submitSuccess.todayDisplay}`,html_body:submitSuccess.emailHtml,pdf_base64:submitSuccess.pdfBase64,pdf_filename:submitSuccess.pdfFilename,sender_name:senderName})});}
       if(!r.ok){const errBody=await r.json().catch(()=>({}));console.error("Email API response:",r.status,errBody);throw new Error(errBody.error||`Email send failed (${r.status})`);}
       showToast("Report emailed to "+recipients.length+" recipient"+(recipients.length>1?"s":"")+"!");
     }catch(e){
@@ -4458,6 +4537,8 @@ function JobDetail({job, user, onBack, onDeleted}){
   const [showSchedSet,setShowSchedSet]=useState(false);
   const [schedEnabled,setSchedEnabled]=useState(!!job.scheduling_enabled);
   const [schedSaving,setSchedSaving]=useState(false);
+  const [jdSlug,setJdSlug]=useState("");
+  useEffect(()=>{db.getProfile(user.id).then(p=>{if(p?.slug)setJdSlug(p.slug);}).catch(()=>{});},[user.id]);
   const [showFieldEdit,setShowFieldEdit]=useState(false);
   const [fieldEditFields,setFieldEditFields]=useState(null); // null=not loaded
   const [fieldEditSaving,setFieldEditSaving]=useState(false);
@@ -4635,19 +4716,9 @@ function JobDetail({job, user, onBack, onDeleted}){
               </div>
             )}
           </div>
-          {todayRpt?(
-            <button onClick={()=>openReport(today)} className="btn-o" style={{width:"100%",padding:"14px 0",background:C.blu,border:`1px solid ${C.blu}`,borderRadius:10,color:"#fff",fontSize:16,fontWeight:700,cursor:"pointer"}}>
-              {todayRpt.status==="submitted"?"Edit Submitted Report":"Continue Editing"}
-            </button>
-          ):reportStarted?(
-            <button onClick={()=>openReport(today)} className="btn-o" style={{width:"100%",padding:"14px 0",background:C.blu,border:`1px solid ${C.blu}`,borderRadius:10,color:"#fff",fontSize:16,fontWeight:700,cursor:"pointer"}}>
-              Continue Editing
-            </button>
-          ):(
-            <button onClick={()=>openReport(today)} className="btn-o" style={{width:"100%",padding:"14px 0",background:C.org,border:`1px solid ${C.blu}`,borderRadius:10,color:"#fff",fontSize:16,fontWeight:700,cursor:"pointer"}}>
-              Start Today's Report
-            </button>
-          )}
+          <button onClick={()=>openReport(today)} className="btn-o" style={{width:"100%",padding:"14px 0",background:todayRpt||reportStarted?C.blu:C.org,border:`1px solid ${C.blu}`,borderRadius:10,color:"#fff",fontSize:16,fontWeight:700,cursor:"pointer"}}>
+            {todayRpt?(todayRpt.status==="submitted"?"Edit Submitted Report":"Continue Editing"):reportStarted?"Continue Editing":"Start Today's Report"}
+          </button>
         </div>
 
         {/* ── Photo Gallery ── */}
@@ -4770,9 +4841,9 @@ function JobDetail({job, user, onBack, onDeleted}){
                 <div style={{fontSize:12,color:C.ok,lineHeight:1.5,marginBottom:12}}>This job will appear on your shared calendar. Anyone with your calendar link can request visits for this job.</div>
                 <div style={{background:C.inp,border:`1px solid ${C.brd}`,borderRadius:8,padding:12,marginBottom:12}}>
                   <div style={{fontSize:12,fontWeight:700,color:C.blu,marginBottom:6}}>Your Calendar Link</div>
-                  <div style={{fontSize:11,color:C.org,wordBreak:"break-all",marginBottom:8,fontWeight:600}}>{`${window.location.origin}${window.location.pathname.replace(/index\.html$/,"").replace(/\/$/,"")}/hub.html?i=${slug}`}</div>
-                  <button onClick={async()=>{const url=`${window.location.origin}${window.location.pathname.replace(/index\.html$/,"").replace(/\/$/,"")}/hub.html?i=${slug}`;try{await navigator.clipboard.writeText(url);alert("Calendar link copied!");}catch(e){alert(url);}}} style={{width:"100%",padding:"8px 0",fontSize:12,fontWeight:700,borderRadius:6,background:C.blu,border:"none",color:"#fff",cursor:"pointer",marginBottom:4}}>Copy Calendar Link</button>
-                  <button onClick={()=>{window.open(`${window.location.origin}${window.location.pathname.replace(/index\.html$/,"").replace(/\/$/,"")}/hub.html?i=${slug}&admin=true`,"_blank");}} style={{width:"100%",padding:"8px 0",fontSize:12,fontWeight:700,borderRadius:6,background:"transparent",border:`1px solid ${C.brd}`,color:C.lt,cursor:"pointer",marginBottom:10}}>Open My Calendar (Admin)</button>
+                  <div style={{fontSize:11,color:C.org,wordBreak:"break-all",marginBottom:8,fontWeight:600}}>{`${window.location.origin}${window.location.pathname.replace(/index\.html$/,"").replace(/\/$/,"")}/hub.html?i=${jdSlug||user?.user_metadata?.full_name?.toLowerCase().replace(/\s+/g,"-")||"inspector"}`}</div>
+                  <button onClick={async()=>{const s=jdSlug||user?.user_metadata?.full_name?.toLowerCase().replace(/\s+/g,"-")||"inspector";const url=`${window.location.origin}${window.location.pathname.replace(/index\.html$/,"").replace(/\/$/,"")}/hub.html?i=${s}`;try{await navigator.clipboard.writeText(url);alert("Calendar link copied!");}catch(e){alert(url);}}} style={{width:"100%",padding:"8px 0",fontSize:12,fontWeight:700,borderRadius:6,background:C.blu,border:"none",color:"#fff",cursor:"pointer",marginBottom:4}}>Copy Calendar Link</button>
+                  <button onClick={()=>{const s=jdSlug||user?.user_metadata?.full_name?.toLowerCase().replace(/\s+/g,"-")||"inspector";window.open(`${window.location.origin}${window.location.pathname.replace(/index\.html$/,"").replace(/\/$/,"")}/hub.html?i=${s}&admin=true`,"_blank");}} style={{width:"100%",padding:"8px 0",fontSize:12,fontWeight:700,borderRadius:6,background:"transparent",border:`1px solid ${C.brd}`,color:C.lt,cursor:"pointer",marginBottom:10}}>Open My Calendar (Admin)</button>
                   <details style={{borderTop:`1px solid ${C.brd}`,paddingTop:8}}>
                     <summary style={{fontSize:12,color:C.blu,fontWeight:600,cursor:"pointer",listStyle:"none",display:"flex",justifyContent:"space-between",alignItems:"center"}}>Subscribe to Your Own Calendar<span style={{fontSize:14}}>+</span></summary>
                     <div style={{paddingTop:8,fontSize:12,color:C.lt,lineHeight:1.6}}>
@@ -5588,13 +5659,23 @@ function Dashboard({user, onLogout}){
 
         {/* ── Subscribe to Calendar section ── */}
         {showSubDash&&(()=>{
-          const icsURL=`${SB_URL}/functions/v1/calendar-feed?slug=${profileSlug||user?.user_metadata?.full_name?.toLowerCase().replace(/\s+/g,"-")||"inspector"}`;
+          const slug=profileSlug||user?.user_metadata?.full_name?.toLowerCase().replace(/\s+/g,"-")||"inspector";
+          const calURL=`${window.location.origin}${window.location.pathname.replace(/index\.html$/,"").replace(/\/$/,"")}/hub.html?i=${slug}`;
+          const icsURL=`${SB_URL}/functions/v1/calendar-feed?slug=${slug}`;
           return(
             <div style={{background:C.card,border:`1px solid ${C.brd}`,borderRadius:12,overflow:"hidden",marginBottom:12,position:"relative"}}>
               <button onClick={()=>setShowSubDash(false)} style={{position:"absolute",top:10,right:10,background:C.inp,border:`1px solid ${C.brd}`,color:C.txt,width:28,height:28,borderRadius:"50%",fontSize:16,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",lineHeight:1}}>&times;</button>
               <div style={{padding:"16px 16px 4px",textAlign:"center"}}>
-                <div style={{color:C.blu,fontWeight:600,fontSize:14}}>Subscribe to Your Calendar</div>
-                <div style={{color:C.mut,fontSize:12,marginTop:4}}>Sync your scheduling calendar to your phone or computer</div>
+                <div style={{color:C.blu,fontWeight:600,fontSize:14}}>Share Your Calendar</div>
+                <div style={{color:C.mut,fontSize:12,marginTop:4}}>Share your scheduling calendar link or subscribe on your devices</div>
+              </div>
+              <div style={{padding:"8px 16px"}}>
+                <div style={{fontSize:12,fontWeight:700,color:C.org,marginBottom:6}}>Calendar Share Link</div>
+                <div style={{background:C.inp,border:`1px solid ${C.brd}`,borderRadius:6,padding:"10px 12px",display:"flex",alignItems:"center",gap:8}}>
+                  <div style={{flex:1,fontSize:12,color:C.lt,wordBreak:"break-all",lineHeight:1.4}}>{calURL}</div>
+                  <button onClick={async(e)=>{const btn=e.currentTarget;try{await navigator.clipboard.writeText(calURL);btn.textContent="Copied!";btn.style.background="#22c55e";setTimeout(()=>{btn.textContent="Copy";btn.style.background=C.blu;},2000);}catch(err){alert(calURL);}}} style={{background:C.blu,color:"#fff",border:"none",borderRadius:4,padding:"6px 12px",fontSize:12,fontWeight:700,cursor:"pointer",whiteSpace:"nowrap",minWidth:52}}>Copy</button>
+                </div>
+                <div style={{fontSize:11,color:C.mut,marginTop:6,marginBottom:8}}>Send this link to your GC and subs so they can request site visits.</div>
               </div>
               <div style={{padding:"12px 16px"}}>
                 <div style={{background:C.inp,border:`1px solid ${C.brd}`,borderRadius:6,padding:"10px 12px",marginBottom:12,display:"flex",alignItems:"center",gap:8}}>
