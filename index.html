@@ -654,6 +654,10 @@ function AccountSettings({user, onBack, onLogout}){
       if(selectedCompany){
         try{
           companyId=await db.assignCompany(user.id,selectedCompany.name);
+          // Refresh profile to pick up role set by assign_company
+          db._profileCache={};
+          const updatedProfile=await db.getProfile(user.id);
+          if(updatedProfile?.company_role)setCompanyRole(updatedProfile.company_role);
           // Sync company templates
           if(companyId){try{await db.copyCompanyTemplatesDB(user.id,companyId);}catch(e){console.error("Template sync RPC:",e);try{const cts=await db.getCompanyTemplates(companyId);if(cts.length)await db.copyCompanyTemplatesToUser(cts,user.id);}catch(e2){console.error("Template sync fallback:",e2);}}}
         }catch(e){console.error("Company assign:",e);companyId=selectedCompany.id;}
