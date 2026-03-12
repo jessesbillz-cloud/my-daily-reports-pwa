@@ -319,21 +319,18 @@ const db = {
     return true;
   },
   async deleteAccount(userId){
-    const h=this._h();
-    // Delete related data first (order matters for foreign keys)
-    const tables=["reports","templates","saved_templates","scheduling_requests","jobs","profiles"];
-    const userCol={profiles:"id",reports:"user_id",templates:"user_id",saved_templates:"user_id",scheduling_requests:"user_id",jobs:"user_id"};
-    for(const t of tables){
-      const col=userCol[t]||"user_id";
-      const r=await fetch(`${SB_URL}/rest/v1/${t}?${col}=eq.${userId}`,{method:"DELETE",headers:h});
-      if(!r.ok&&r.status!==404){console.warn(`Delete ${t}:`,r.status);} // log but continue
+    // Call edge function — uses service role to bypass RLS and delete auth user
+    if(!AUTH_TOKEN)await refreshAuthToken();
+    const r=await fetch(`${SB_URL}/functions/v1/delete-account`,{
+      method:"POST",
+      headers:{"Content-Type":"application/json",apikey:SB_KEY,Authorization:`Bearer ${AUTH_TOKEN}`},
+      body:JSON.stringify({})
+    });
+    if(!r.ok){
+      const err=await r.json().catch(()=>({}));
+      throw new Error(err.error||"Delete failed ("+r.status+")");
     }
-    // Delete the auth user via Supabase GoTrue API — user can delete themselves
-    try{
-      const r=await fetch(`${SB_URL}/auth/v1/user`,{method:"DELETE",headers:{apikey:SB_KEY,Authorization:`Bearer ${AUTH_TOKEN}`}});
-      if(!r.ok)console.warn("Auth user delete:",r.status,await r.text().catch(()=>""));
-    }catch(e){console.warn("Auth delete error:",e);}
-    return true;
+    return await r.json();
   },
   // Save or update a report (works for both working_copy and submitted)
   // Uses cached report ID to skip existence check on repeat saves
