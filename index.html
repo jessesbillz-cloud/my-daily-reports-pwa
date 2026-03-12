@@ -319,9 +319,20 @@ const db = {
     return true;
   },
   async deleteAccount(userId){
-    // Delete jobs, then profile
-    await fetch(`${SB_URL}/rest/v1/jobs?user_id=eq.${userId}`,{method:"DELETE",headers:this._h()});
-    await fetch(`${SB_URL}/rest/v1/profiles?id=eq.${userId}`,{method:"DELETE",headers:this._h()});
+    const h=this._h();
+    // Delete related data first (order matters for foreign keys)
+    const tables=["reports","templates","saved_templates","scheduling_requests","jobs","profiles"];
+    const userCol={profiles:"id",reports:"user_id",templates:"user_id",saved_templates:"user_id",scheduling_requests:"user_id",jobs:"user_id"};
+    for(const t of tables){
+      const col=userCol[t]||"user_id";
+      const r=await fetch(`${SB_URL}/rest/v1/${t}?${col}=eq.${userId}`,{method:"DELETE",headers:h});
+      if(!r.ok&&r.status!==404){console.warn(`Delete ${t}:`,r.status);} // log but continue
+    }
+    // Delete the auth user via Supabase GoTrue API — user can delete themselves
+    try{
+      const r=await fetch(`${SB_URL}/auth/v1/user`,{method:"DELETE",headers:{apikey:SB_KEY,Authorization:`Bearer ${AUTH_TOKEN}`}});
+      if(!r.ok)console.warn("Auth user delete:",r.status,await r.text().catch(()=>""));
+    }catch(e){console.warn("Auth delete error:",e);}
     return true;
   },
   // Save or update a report (works for both working_copy and submitted)
@@ -648,13 +659,18 @@ function AccountSettings({user, onBack, onLogout}){
     }finally{setSaving(false);}
   };
 
+  const [deleting,setDeleting]=useState(false);
   const handleDelete=async()=>{
-    if(deleteConfirm!=="DELETE MY ACCOUNT")return;
+    if(deleteConfirm!=="DELETE MY ACCOUNT"||deleting)return;
+    setDeleting(true);
     try{
       await db.deleteAccount(user.id);
-      flash("Account deleted");
+      flash("Account deleted — signing out...");
       setTimeout(()=>onLogout(),1500);
-    }catch(e){flash("Delete failed: "+e.message,"err");}
+    }catch(e){
+      flash("Delete failed: "+e.message,"err");
+      setDeleting(false);
+    }
   };
 
   const fs={width:"100%",padding:"12px 14px",background:C.inp,border:`1px solid ${C.brd}`,borderRadius:10,color:C.txt,fontSize:15};
@@ -856,8 +872,8 @@ function AccountSettings({user, onBack, onLogout}){
                       <button onClick={()=>{setShowDelete(false);setDeleteConfirm("");}} style={{flex:1,padding:"10px 0",background:C.inp,border:`1px solid ${C.brd}`,borderRadius:8,color:C.lt,fontSize:14,fontWeight:600,cursor:"pointer"}}>
                         Cancel
                       </button>
-                      <button onClick={handleDelete} disabled={deleteConfirm!=="DELETE MY ACCOUNT"} style={{flex:1,padding:"10px 0",background:deleteConfirm==="DELETE MY ACCOUNT"?"#ef4444":C.brd,border:"none",borderRadius:8,color:"#fff",fontSize:14,fontWeight:700,cursor:deleteConfirm==="DELETE MY ACCOUNT"?"pointer":"default",opacity:deleteConfirm==="DELETE MY ACCOUNT"?1:0.5}}>
-                        Delete Permanently
+                      <button onClick={handleDelete} disabled={deleteConfirm!=="DELETE MY ACCOUNT"||deleting} style={{flex:1,padding:"10px 0",background:deleteConfirm==="DELETE MY ACCOUNT"&&!deleting?"#ef4444":C.brd,border:"none",borderRadius:8,color:"#fff",fontSize:14,fontWeight:700,cursor:deleteConfirm==="DELETE MY ACCOUNT"&&!deleting?"pointer":"default",opacity:deleteConfirm==="DELETE MY ACCOUNT"?1:0.5}}>
+                        {deleting?"Deleting...":"Delete Permanently"}
                       </button>
                     </div>
                   </div>
