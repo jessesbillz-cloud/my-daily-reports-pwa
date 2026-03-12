@@ -214,11 +214,14 @@ const db = {
     throw new Error(msg||"Profile save failed");
   },
   async deleteJob(jobId){
-    // Delete related templates, reports, then the job itself
-    await fetch(`${SB_URL}/rest/v1/templates?job_id=eq.${jobId}`,{method:"DELETE",headers:this._h()});
-    await fetch(`${SB_URL}/rest/v1/reports?job_id=eq.${jobId}`,{method:"DELETE",headers:this._h()});
-    const r=await fetch(`${SB_URL}/rest/v1/jobs?id=eq.${jobId}`,{method:"DELETE",headers:this._h()});
-    if(!r.ok)throw new Error("Delete failed");return true;
+    // Delete related data first: field_configs, templates, reports, then the job
+    const h=this._h();
+    const del=async(tbl,col)=>{const r=await fetch(`${SB_URL}/rest/v1/${tbl}?${col}=eq.${jobId}`,{method:"DELETE",headers:h});if(!r.ok){const t=await r.text().catch(()=>"");console.error(`Delete ${tbl} failed:`,r.status,t);}};
+    await del("templates","job_id");
+    await del("reports","job_id");
+    const r=await fetch(`${SB_URL}/rest/v1/jobs?id=eq.${jobId}`,{method:"DELETE",headers:h});
+    if(!r.ok){const t=await r.text().catch(()=>"");throw new Error("Delete job failed: "+r.status+" "+(t||""));}
+    return true;
   },
   async deleteAccount(userId){
     // Delete jobs, then profile
@@ -4224,16 +4227,25 @@ function JobDetail({job, user, onBack, onDeleted}){
 
   const doDelete=async()=>{
     setDeleting(true);
-    try{await db.deleteJob(job.id);onDeleted();}
-    catch(e){alert("Delete failed: "+e.message);setDeleting(false);}
+    try{
+      await db.deleteJob(job.id);
+      showToast("Job deleted");
+      onDeleted();
+    }catch(e){
+      console.error("Delete job failed:",e);
+      alert("Delete failed: "+e.message);
+      setDeleting(false);
+    }
   };
 
   const saveJobEdit=async()=>{
     setEditSaving(true);
     try{
-      const r=await fetch(`${SB_URL}/rest/v1/jobs?id=eq.${job.id}`,{method:"PATCH",headers:db._h(),body:JSON.stringify({name:editName.trim(),site_address:editAddr.trim()||null})});
-      if(!r.ok)throw new Error("Save failed");
-      job.name=editName.trim();job.site_address=editAddr.trim()||null;
+      const body={name:editName.trim(),site_address:editAddr.trim()||null};
+      const r=await fetch(`${SB_URL}/rest/v1/jobs?id=eq.${job.id}`,{method:"PATCH",headers:db._h(),body:JSON.stringify(body)});
+      if(!r.ok){const t=await r.text().catch(()=>"");console.error("Save job failed:",r.status,t);throw new Error("Save failed: "+r.status);}
+      job.name=body.name;job.site_address=body.site_address;
+      showToast("Job updated!");
       setShowEditJob(false);
     }catch(e){alert(e.message);}
     finally{setEditSaving(false);}
@@ -4550,32 +4562,6 @@ function JobDetail({job, user, onBack, onDeleted}){
             <button onClick={()=>{if(!fieldEditFields){const fc=job.field_config||{};const all=[...(fc.editable||[]).map(f=>({...f,mode:f.autoFill==="date"?"auto-date":f.autoFill==="increment"?"auto-num":"edit"})),...(fc.locked||[]).map(f=>({...f,mode:"lock"}))];setFieldEditFields(all);}setShowFieldEdit(!showFieldEdit);}} style={{width:"100%",display:"flex",alignItems:"center",gap:10,padding:"14px 18px",background:"none",border:"none",borderBottom:`1px solid ${C.brd}`,cursor:"pointer",textAlign:"left"}}>
               <span style={{fontSize:14,fontWeight:600,color:C.lt}}>Edit Template Fields</span>
             </button>
-            <button onClick={async()=>{
-              try{
-                const tpl=await db.getTemplate(job.id);
-                if(!tpl||!tpl.storage_path){showToast("No template found.");return;}
-                if(!tpl.storage_path.toLowerCase().endsWith(".pdf")&&!tpl.file_type?.toLowerCase()?.includes("pdf")){showToast("Visual field placement only works with PDF templates.");return;}
-                const tplResp=await fetch(`${SB_URL}/storage/v1/object/report-source-docs/${tpl.storage_path}`,{headers:{apikey:SB_KEY,Authorization:`Bearer ${AUTH_TOKEN||SB_KEY}`}});
-                if(!tplResp.ok)throw new Error("Could not download template.");
-                const buf=await tplResp.arrayBuffer();
-                const u8=new Uint8Array(buf);const chunks=[];for(let i=0;i<u8.length;i+=8192)chunks.push(String.fromCharCode.apply(null,u8.subarray(i,i+8192)));
-                setVisualEditorB64(btoa(chunks.join("")));
-                // Convert existing field_config to flat field array for editor
-                const fc=job.field_config||{};
-                const existing=[...(fc.editable||[]).map(f=>({...f,mode:f.autoFill==="date"?"auto-date":f.autoFill==="increment"?"auto-num":"edit",fieldType:f.multiline?"textarea":"text"})),...(fc.locked||[]).map(f=>({...f,mode:"lock",fieldType:f.multiline?"textarea":"text"}))];
-                setFieldEditFields(existing);
-                setShowVisualFieldEditor(true);
-              }catch(e){showToast("Error: "+e.message);}
-            }} style={{width:"100%",display:"flex",alignItems:"center",gap:10,padding:"14px 18px",background:"none",border:"none",borderBottom:`1px solid ${C.brd}`,cursor:"pointer",textAlign:"left"}}>
-              <span style={{fontSize:16}}>📍</span><span style={{fontSize:14,fontWeight:600,color:C.org}}>Place Fields Visually</span>
-            </button>
-            <button onClick={reparseTemplate} disabled={reparsing} style={{width:"100%",display:"flex",alignItems:"center",gap:10,padding:"14px 18px",background:"none",border:"none",borderBottom:`1px solid ${C.brd}`,cursor:reparsing?"default":"pointer",textAlign:"left",opacity:reparsing?0.6:1}}>
-              <span style={{fontSize:16}}>{reparsing?"⏳":"🔄"}</span><span style={{fontSize:14,fontWeight:600,color:C.mut}}>{reparsing?"Re-parsing template...":"Re-parse Template Fields (AI)"}</span>
-            </button>
-            <button onClick={()=>reuploadRef.current?.click()} disabled={reuploading} style={{width:"100%",display:"flex",alignItems:"center",gap:10,padding:"14px 18px",background:"none",border:"none",borderBottom:`1px solid ${C.brd}`,cursor:reuploading?"default":"pointer",textAlign:"left",opacity:reuploading?0.6:1}}>
-              <span style={{fontSize:14,fontWeight:600,color:C.lt}}>{reuploading?"Uploading...":"Re-upload Template File"}</span>
-            </button>
-            <input ref={reuploadRef} type="file" accept=".pdf,.docx,.doc,.jpg,.jpeg,.png" onChange={handleReuploadTemplate} style={{display:"none"}}/>
             <button onClick={()=>{setShowSchedSet(!showSchedSet);setShowTeam(false);}} style={{width:"100%",display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,padding:"14px 18px",background:"none",border:"none",borderBottom:`1px solid ${C.brd}`,cursor:"pointer",textAlign:"left"}}>
               <div style={{display:"flex",alignItems:"center",gap:10}}>
                 <span style={{fontSize:16}}>📅</span><span style={{fontSize:14,fontWeight:600,color:C.lt}}>Jobsite Scheduling</span>
