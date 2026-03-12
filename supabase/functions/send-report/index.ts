@@ -111,7 +111,6 @@ serve(async (req) => {
               {
                 filename: pdf_filename || "report.pdf",
                 content: pdf_base64,
-                type: "application/pdf",
               },
             ]
           : [],
@@ -121,8 +120,9 @@ serve(async (req) => {
     const result = await response.json();
 
     if (!response.ok) {
+      console.error("Resend API error:", response.status, JSON.stringify(result));
       return new Response(
-        JSON.stringify({ error: result.message || "Email send failed" }),
+        JSON.stringify({ error: result.message || result.name || "Email send failed", details: result }),
         {
           status: response.status,
           headers: { ...corsHeaders, "Content-Type": "application/json" },

@@ -178,6 +178,25 @@ function MDRLogo({size=36}){
   return <img src="logo.jpg" alt="My Daily Reports" style={{width:size,height:size,borderRadius:size>40?8:4,objectFit:"contain"}}/>;
 }
 
+// Refresh auth token if stale — returns true if refreshed
+async function refreshAuthToken(){
+  try{
+    const stored=localStorage.getItem("mdr_session");
+    if(!stored)return false;
+    const session=JSON.parse(stored);
+    if(!session.refresh_token)return false;
+    const r=await fetch(`${SB_URL}/auth/v1/token?grant_type=refresh_token`,{
+      method:"POST",headers:{"Content-Type":"application/json",apikey:SB_KEY},
+      body:JSON.stringify({refresh_token:session.refresh_token})
+    });
+    if(r.ok){
+      const d=await r.json();
+      if(d.access_token){AUTH_TOKEN=d.access_token;authSaveSession(d.refresh_token,session.user);return true;}
+    }
+  }catch(e){console.error("Token refresh failed:",e);}
+  return false;
+}
+
 /* ── Database Layer ── */
 const db = {
   _h(){return{"Content-Type":"application/json",apikey:SB_KEY,Authorization:`Bearer ${AUTH_TOKEN||SB_KEY}`,Prefer:"return=representation"};},
@@ -230,24 +249,36 @@ const db = {
     return true;
   },
   // Save or update a report (works for both working_copy and submitted)
+  // Uses cached report ID to skip existence check on repeat saves
+  _reportIdCache:{},
+  _tplBytesCache:{}, // {storagePath: ArrayBuffer} — cache template file downloads
   async saveReport(d){
-    // Check if ANY report exists for this job+date (regardless of status)
+    const cacheKey=d.job_id+"_"+d.report_date;
+    const cachedId=this._reportIdCache[cacheKey];
+    d.updated_at=new Date().toISOString();
+    // Fast path: if we already know the report ID, just PATCH directly (1 call)
+    if(cachedId){
+      const r=await fetch(`${SB_URL}/rest/v1/reports?id=eq.${cachedId}`,{method:"PATCH",headers:this._h(),body:JSON.stringify(d)});
+      if(r.ok){const j=await r.json();return j[0];}
+      // If PATCH failed (maybe row was deleted), fall through to check+create
+    }
+    // Check if report exists
     const chk=await fetch(`${SB_URL}/rest/v1/reports?select=id,status&job_id=eq.${d.job_id}&report_date=eq.${d.report_date}&limit=1`,{headers:this._h()});
     const existing=chk.ok?await chk.json():[];
     if(existing.length>0){
-      // Update existing report
-      const r=await fetch(`${SB_URL}/rest/v1/reports?id=eq.${existing[0].id}`,{method:"PATCH",headers:this._h(),body:JSON.stringify({...d,updated_at:new Date().toISOString()})});
+      this._reportIdCache[cacheKey]=existing[0].id;
+      const r=await fetch(`${SB_URL}/rest/v1/reports?id=eq.${existing[0].id}`,{method:"PATCH",headers:this._h(),body:JSON.stringify(d)});
       if(!r.ok){const e=await r.json();throw new Error(e.message||"Save failed");}
       return(await r.json())[0];
     }else{
-      // Get next report number for this job (max existing + 1, fallback to count)
       const cntR=await fetch(`${SB_URL}/rest/v1/reports?select=report_number&job_id=eq.${d.job_id}&order=report_number.desc&limit=1`,{headers:this._h()});
       const topRpt=cntR.ok?await cntR.json():[];
       if(topRpt[0]?.report_number){d.report_number=topRpt[0].report_number+1;}else{const countR=await fetch(`${SB_URL}/rest/v1/reports?select=id&job_id=eq.${d.job_id}&limit=0`,{headers:{...this._h(),Prefer:"count=exact"}});const total=parseInt(countR.headers.get("content-range")?.split("/")[1]||"0");d.report_number=total+1;}
-      // Create new report
       const r=await fetch(`${SB_URL}/rest/v1/reports`,{method:"POST",headers:this._h(),body:JSON.stringify(d)});
       if(!r.ok){const e=await r.json();throw new Error(e.message||"Save failed");}
-      return(await r.json())[0];
+      const created=(await r.json())[0];
+      if(created?.id)this._reportIdCache[cacheKey]=created.id;
+      return created;
     }
   },
   // Get today's report for a job + date (any status)
@@ -272,8 +303,35 @@ const db = {
   },
   // Get the template record for a job
   async getTemplate(jobId){
-    const r=await fetch(`${SB_URL}/rest/v1/templates?job_id=eq.${jobId}&select=*&limit=1`,{headers:this._h()});
-    if(!r.ok)return null;const d=await r.json();return d[0]||null;
+    let r=await fetch(`${SB_URL}/rest/v1/templates?job_id=eq.${jobId}&select=*&limit=1`,{headers:this._h()});
+    if(!r.ok){
+      console.error("getTemplate failed:",r.status,await r.text().catch(()=>""));
+      // Try refreshing token and retrying
+      if(r.status===401||r.status===403){
+        const refreshed=await refreshAuthToken();
+        if(refreshed){
+          r=await fetch(`${SB_URL}/rest/v1/templates?job_id=eq.${jobId}&select=*&limit=1`,{headers:this._h()});
+          if(r.ok){const d=await r.json();return d[0]||null;}
+        }
+      }
+      return null;
+    }
+    const d=await r.json();return d[0]||null;
+  },
+  // Download template file bytes with caching
+  async downloadTemplateBytes(storagePath){
+    if(this._tplBytesCache[storagePath])return this._tplBytesCache[storagePath];
+    let r=await fetch(`${SB_URL}/storage/v1/object/report-source-docs/${storagePath}`,{
+      headers:{apikey:SB_KEY,Authorization:`Bearer ${AUTH_TOKEN||SB_KEY}`}
+    });
+    if(r.status===401||r.status===403){
+      const refreshed=await refreshAuthToken();
+      if(refreshed)r=await fetch(`${SB_URL}/storage/v1/object/report-source-docs/${storagePath}`,{headers:{apikey:SB_KEY,Authorization:`Bearer ${AUTH_TOKEN||SB_KEY}`}});
+    }
+    if(!r.ok)throw new Error("Could not download template ("+r.status+"). Try signing out and back in.");
+    const buf=await r.arrayBuffer();
+    this._tplBytesCache[storagePath]=buf;
+    return buf;
   },
   // Save template page images (rendered from PDF during job creation)
   async saveTemplatePages(userId,jobId,pageImages){
@@ -2566,7 +2624,7 @@ function WorkLogEditor({job, user, onBack, reportDate}){
         method:"POST",headers:{"Content-Type":"application/json",Authorization:`Bearer ${AUTH_TOKEN||SB_KEY}`,apikey:SB_KEY},
         body:JSON.stringify({to:recipients,subject:`${submitSuccess.jobName} — Daily Work Log ${submitSuccess.todayDisplay}`,html_body:submitSuccess.emailHtml,pdf_base64:submitSuccess.pdfBase64,pdf_filename:submitSuccess.pdfFilename,sender_name:senderName})
       });
-      if(!r.ok){const errBody=await r.json().catch(()=>({}));throw new Error(errBody.error||`Email send failed (${r.status})`);}
+      if(!r.ok){const errBody=await r.json().catch(()=>({}));console.error("Email API response:",r.status,errBody);throw new Error(errBody.error||`Email send failed (${r.status})`);}
       showToast("Report emailed to "+recipients.length+" recipient"+(recipients.length>1?"s":"")+"!");
     }catch(e){
       console.error("Email error:",e);
@@ -3066,13 +3124,13 @@ function ReportEditor({job, user, onBack, reportDate}){
     }).catch(e=>console.error("Field config update error:",e));
   };
 
-  // Re-lock an editable field that was previously unlocked
+  // Lock an editable field — saves value and moves to locked section
   const relockField=(name)=>{
     const f=editFields.find(x=>x.name===name);
     if(!f)return;
     const val=vals[name]||f.value||"";
     const newEdit=editFields.filter(x=>x.name!==name);
-    const restored={name:f.name,value:val};
+    const restored={name:f.name,value:val,x:f.x,y:f.y,w:f.w,h:f.h,page:f.page};
     const newLock=[...lockFields,restored];
     setEditFields(newEdit);
     setLockFields(newLock);
@@ -3082,7 +3140,8 @@ function ReportEditor({job, user, onBack, reportDate}){
     // Persist field config change to Supabase
     db.updateJobFieldConfig(job.id,{locked:newLock,editable:newEdit}).then(()=>{
       job.field_config={locked:newLock,editable:newEdit};
-    }).catch(e=>console.error("Field config update error:",e));
+      showToast(`"${name}" locked`);
+    }).catch(e=>{console.error("Field config update error:",e);showToast("Lock failed: "+e.message);});
   };
 
   // Save locked field value changes back to job config
@@ -3159,17 +3218,23 @@ function ReportEditor({job, user, onBack, reportDate}){
         ctx.fillStyle="#ffffff";
         ctx.fillRect(drawX-1,f.y*scale-1,(f.w||120)*scale+2,(f.h||sz)*scale+2);
       }
-      // Signature stamp — render as "Signed: Name — via My Daily Reports" with timestamp
+      // Signature stamp — "Signed by Name on Day, Date at Time — powered by My Daily Reports"
       const isSig=(f.name||"").toLowerCase().includes("signature")||(f.autoFill==="name"&&(f.name||"").toLowerCase().includes("inspector"));
       if(isSig){
         const sigSz=sz*0.85;
+        const now=new Date();
+        const dayName=now.toLocaleDateString("en-US",{weekday:"long"});
+        const datePart=now.toLocaleDateString("en-US",{month:"long",day:"numeric",year:"numeric"});
+        const timePart=now.toLocaleTimeString("en-US",{hour:"numeric",minute:"2-digit",hour12:true});
         ctx.font="italic "+sigSz+"px Helvetica, Arial, sans-serif";
         ctx.fillStyle="#1a1a1a";
-        const sigDate=new Date().toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"});
-        ctx.fillText(f.val,drawX,drawY);
-        ctx.font=(sigSz*0.7)+"px Helvetica, Arial, sans-serif";
-        ctx.fillStyle="#555555";
-        ctx.fillText("Signed via My Daily Reports — "+sigDate,drawX,drawY+sigSz*1.2);
+        ctx.fillText("Signed by "+f.val,drawX,drawY);
+        ctx.font=(sigSz*0.65)+"px Helvetica, Arial, sans-serif";
+        ctx.fillStyle="#666666";
+        ctx.fillText(dayName+", "+datePart+" at "+timePart,drawX,drawY+sigSz*1.15);
+        ctx.font="italic "+(sigSz*0.55)+"px Helvetica, Arial, sans-serif";
+        ctx.fillStyle="#999999";
+        ctx.fillText("powered by My Daily Reports",drawX,drawY+sigSz*2.1);
         return;
       }
       ctx.fillStyle="#000000";
@@ -3216,16 +3281,8 @@ function ReportEditor({job, user, onBack, reportDate}){
         const allFields=buildEditableFields();
         const fieldValues={};
         allFields.forEach(f=>{if(f.val)fieldValues[f.name]=f.val;});
-        // Download template
-        let dlResp=await fetch(`${SB_URL}/storage/v1/object/report-source-docs/${tplRecord.storage_path}`,{
-          headers:{apikey:SB_KEY,Authorization:`Bearer ${AUTH_TOKEN||SB_KEY}`}
-        });
-        if(dlResp.status===401||dlResp.status===403){
-          const refreshed=await authGetSession();
-          if(refreshed){dlResp=await fetch(`${SB_URL}/storage/v1/object/report-source-docs/${tplRecord.storage_path}`,{headers:{apikey:SB_KEY,Authorization:`Bearer ${AUTH_TOKEN||SB_KEY}`}});}
-        }
-        if(!dlResp.ok)throw new Error("Could not download template ("+dlResp.status+").");
-        const tplBytes=new Uint8Array(await dlResp.arrayBuffer());
+        // Download template (cached)
+        const tplBytes=new Uint8Array(await db.downloadTemplateBytes(tplRecord.storage_path));
         const tplChunks=[];for(let i=0;i<tplBytes.length;i+=8192)tplChunks.push(String.fromCharCode.apply(null,tplBytes.subarray(i,i+8192)));
         const tplB64=btoa(tplChunks.join(""));
         // Call generate-docx to fill template with field values
@@ -3249,16 +3306,7 @@ function ReportEditor({job, user, onBack, reportDate}){
         setViewLoading(false);
         return;
       }
-      let tplResp=await fetch(`${SB_URL}/storage/v1/object/report-source-docs/${tplRecord.storage_path}`,{
-        headers:{apikey:SB_KEY,Authorization:`Bearer ${AUTH_TOKEN||SB_KEY}`}
-      });
-      // If auth fails, try refreshing the session and retry once
-      if(tplResp.status===401||tplResp.status===403){
-        const refreshed=await authGetSession();
-        if(refreshed){tplResp=await fetch(`${SB_URL}/storage/v1/object/report-source-docs/${tplRecord.storage_path}`,{headers:{apikey:SB_KEY,Authorization:`Bearer ${AUTH_TOKEN||SB_KEY}`}});}
-      }
-      if(!tplResp.ok)throw new Error("Could not download template ("+tplResp.status+"). Try signing out and back in.");
-      const tplBytes=await tplResp.arrayBuffer();
+      const tplBytes=await db.downloadTemplateBytes(tplRecord.storage_path);
       // Validate PDF magic bytes
       const header=new Uint8Array(tplBytes.slice(0,5));
       const headerStr=String.fromCharCode(...header);
@@ -3376,15 +3424,7 @@ function ReportEditor({job, user, onBack, reportDate}){
       const tplRecord=await db.getTemplate(job.id);
       if(!tplRecord){console.error("Submit: no template record for job:",job.id);throw new Error("No template record found. Go to Job Settings and re-upload your template.");}
       if(!tplRecord.storage_path){console.error("Submit: template has no storage_path:",JSON.stringify(tplRecord));throw new Error("Template file is missing. Go to Job Settings and re-upload your template.");}
-      let tplResp=await fetch(`${SB_URL}/storage/v1/object/report-source-docs/${tplRecord.storage_path}`,{
-        headers:{apikey:SB_KEY,Authorization:`Bearer ${AUTH_TOKEN||SB_KEY}`}
-      });
-      if(tplResp.status===401||tplResp.status===403){
-        const refreshed=await authGetSession();
-        if(refreshed){tplResp=await fetch(`${SB_URL}/storage/v1/object/report-source-docs/${tplRecord.storage_path}`,{headers:{apikey:SB_KEY,Authorization:`Bearer ${AUTH_TOKEN||SB_KEY}`}});}
-      }
-      if(!tplResp.ok)throw new Error("Could not download template ("+tplResp.status+"). Try signing out and back in.");
-      const tplBytes=await tplResp.arrayBuffer();
+      const tplBytes=await db.downloadTemplateBytes(tplRecord.storage_path);
       const isPdfTemplate=tplRecord.file_type==="pdf";
       const isDocxTemplate=tplRecord.file_type==="docx"||tplRecord.file_type==="doc";
 
@@ -3509,8 +3549,23 @@ function ReportEditor({job, user, onBack, reportDate}){
           }
           const fieldName="mdr_"+(fieldIdx++)+"_"+(f.name||"field").replace(/[^a-zA-Z0-9]/g,"_");
           const tf=form.createTextField(fieldName);
+          // For multiline fields, auto-shrink font if text won't fit
+          let useSz=isSig?sz*0.85:sz;
+          if(f.multiline&&fieldH>sz*3){
+            const approxLineH=useSz*1.3;
+            const maxLines=Math.floor(fieldH/approxLineH);
+            // Estimate actual lines needed (rough word-wrap calc)
+            const avgCharW=useSz*0.5;
+            const charsPerLine=Math.floor(fieldW/avgCharW);
+            const estLines=charsPerLine>0?Math.ceil(fieldVal.length/charsPerLine):1;
+            if(estLines>maxLines&&maxLines>0){
+              // Shrink font to fit — minimum 6pt
+              const ratio=maxLines/estLines;
+              useSz=Math.max(6,useSz*ratio);
+            }
+          }
           tf.setText(fieldVal);
-          tf.setFontSize(isSig?sz*0.85:sz);
+          tf.setFontSize(useSz);
           if(f.multiline||isSig)tf.enableMultiline();
           tf.addToPage(page,{x:f.x,y:pdfY,width:fieldW,height:fieldH,
             borderWidth:0});
@@ -3531,16 +3586,23 @@ function ReportEditor({job, user, onBack, reportDate}){
           const page=pages[pageIdx];const pageH=page.getHeight();
           const sz=f.fontSize||10;
           const fieldH=f.h||sz+4;
-          // Y-flip: pdf.js stores y from top, pdf-lib draws from bottom
-          // Baseline offset: drawText aligns to baseline, so offset by ~0.75*fontSize to center in box
-          const pdfY=pageH-f.y-fieldH+sz*0.75;
           const isSig=(f.name||"").toLowerCase().includes("signature")||(f.autoFill==="name"&&(f.name||"").toLowerCase().includes("inspector"));
           if(isSig){
+            // Signature: place near bottom of field area
+            const pdfY=pageH-f.y-fieldH+sz*0.75;
             const sigSz=sz*0.85;
-            const sigDate=new Date().toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"});
-            page.drawText(String(f.val),{x:f.x+2,y:pdfY,size:sigSz,font:fontItalic,color:rgb(0.1,0.1,0.1)});
-            page.drawText("Signed via My Daily Reports \u2014 "+sigDate,{x:f.x+2,y:pdfY-sigSz*1.2,size:sigSz*0.7,font,color:rgb(0.33,0.33,0.33)});
+            const now=new Date();
+            const dayName=now.toLocaleDateString("en-US",{weekday:"long"});
+            const datePart=now.toLocaleDateString("en-US",{month:"long",day:"numeric",year:"numeric"});
+            const timePart=now.toLocaleTimeString("en-US",{hour:"numeric",minute:"2-digit",hour12:true});
+            page.drawText("Signed by "+String(f.val),{x:f.x+2,y:pdfY,size:sigSz,font:fontItalic,color:rgb(0.1,0.1,0.1)});
+            page.drawText(dayName+", "+datePart+" at "+timePart,{x:f.x+2,y:pdfY-sigSz*1.15,size:sigSz*0.65,font,color:rgb(0.4,0.4,0.4)});
+            page.drawText("powered by My Daily Reports",{x:f.x+2,y:pdfY-sigSz*2.1,size:sigSz*0.55,font:fontItalic,color:rgb(0.6,0.6,0.6)});
           }else if(f.multiline&&f.w){
+            // Multiline: start text at TOP of field and clip at bottom
+            const fieldTopPDF=pageH-f.y;
+            const fieldBottomPDF=pageH-f.y-fieldH;
+            const textStartY=fieldTopPDF-sz; // first baseline just below top edge
             const maxW=f.w;const rawLines=f.val.split(/\n/).filter(l=>l.trim());
             const lines=[];
             rawLines.forEach(rl=>{
@@ -3548,8 +3610,11 @@ function ReportEditor({job, user, onBack, reportDate}){
               words.forEach(w=>{const test=cur?cur+" "+w:w;const tw=font.widthOfTextAtSize(test,sz);if(tw>maxW&&cur){lines.push(cur);cur=w;}else cur=test;});
               if(cur)lines.push(cur);
             });
-            lines.forEach((ln,i)=>{const ly=pdfY-(i*sz*1.3);if(ly>0)page.drawText(ln,{x:f.x+2,y:ly,size:sz,font,color:rgb(0,0,0)});});
+            // Only draw lines that fit within the field boundary
+            lines.forEach((ln,i)=>{const ly=textStartY-(i*sz*1.3);if(ly>=fieldBottomPDF)page.drawText(ln,{x:f.x+2,y:ly,size:sz,font,color:rgb(0,0,0)});});
           }else{
+            // Single line: center in field
+            const pdfY=pageH-f.y-fieldH+sz*0.75;
             page.drawText(String(f.val),{x:f.x+2,y:pdfY,size:sz,font,color:rgb(0,0,0)});
           }
         });
@@ -3812,7 +3877,7 @@ function ReportEditor({job, user, onBack, reportDate}){
         method:"POST",headers:{"Content-Type":"application/json",Authorization:`Bearer ${AUTH_TOKEN||SB_KEY}`,apikey:SB_KEY},
         body:JSON.stringify({to:recipients,subject:`${submitSuccess.jobName} — Daily Report ${submitSuccess.todayDisplay}`,html_body:submitSuccess.emailHtml,pdf_base64:submitSuccess.pdfBase64,pdf_filename:submitSuccess.pdfFilename,sender_name:senderName})
       });
-      if(!r.ok){const errBody=await r.json().catch(()=>({}));throw new Error(errBody.error||`Email send failed (${r.status})`);}
+      if(!r.ok){const errBody=await r.json().catch(()=>({}));console.error("Email API response:",r.status,errBody);throw new Error(errBody.error||`Email send failed (${r.status})`);}
       showToast("Report emailed to "+recipients.length+" recipient"+(recipients.length>1?"s":"")+"!");
     }catch(e){
       console.error("Email error:",e);
@@ -3857,7 +3922,7 @@ function ReportEditor({job, user, onBack, reportDate}){
           <button onClick={()=>{setViewingReport(null);setViewDocxHtml(null);}} style={{flex:1,padding:"14px 0",background:C.card,border:`1px solid ${C.brd}`,borderRadius:10,color:C.txt,fontSize:15,fontWeight:700,cursor:"pointer"}}>
             Back to Editing
           </button>
-          <button onClick={()=>{setViewingReport(null);setViewDocxHtml(null);saveWorking();}} disabled={saving} style={{flex:1,padding:"14px 0",background:C.blu,border:"none",borderRadius:10,color:"#fff",fontSize:15,fontWeight:700,cursor:"pointer",opacity:saving?0.5:1}}>
+          <button onClick={async()=>{await saveWorking();}} disabled={saving} style={{flex:1,padding:"14px 0",background:C.blu,border:"none",borderRadius:10,color:"#fff",fontSize:15,fontWeight:700,cursor:"pointer",opacity:saving?0.5:1}}>
             {saving?"Saving...":"Save & Close"}
           </button>
         </div>
@@ -3923,6 +3988,15 @@ function ReportEditor({job, user, onBack, reportDate}){
 
   return(
     <div style={{minHeight:"100vh",background:C.bg,color:C.txt}}>
+      {/* Submitting overlay */}
+      {submitting&&(
+        <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.85)",zIndex:300,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:16}}>
+          <div style={{width:48,height:48,border:"3px solid "+C.brd,borderTopColor:C.org,borderRadius:"50%",animation:"spin 1s linear infinite"}}/>
+          <div style={{fontSize:16,fontWeight:700,color:C.txt}}>Generating Report...</div>
+          <div style={{fontSize:13,color:C.mut}}>Please don't close this screen</div>
+          <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
+        </div>
+      )}
       {/* Toast */}
       {toast&&<div style={{position:"fixed",top:60,left:"50%",transform:"translateX(-50%)",background:C.card,border:`1px solid ${C.ok}`,borderRadius:10,padding:"10px 20px",fontSize:14,fontWeight:600,color:C.ok,zIndex:9999}}>{toast}</div>}
       {/* Header */}
@@ -3993,8 +4067,8 @@ function ReportEditor({job, user, onBack, reportDate}){
                       {f.autoFill==="increment"&&<span style={{fontSize:10,fontWeight:700,color:C.blu,background:C.blu+"22",padding:"2px 8px",borderRadius:4}}>AUTO-#</span>}
                       {f.autoFill==="name"&&<span style={{fontSize:10,fontWeight:700,color:C.blu,background:C.blu+"22",padding:"2px 8px",borderRadius:4}}>AUTO-NAME</span>}
                       {f.voiceEnabled&&<span style={{fontSize:10,fontWeight:700,color:C.org,background:C.org+"22",padding:"2px 8px",borderRadius:4}}>VOICE</span>}
-                      {f.wasUnlocked&&(
-                        <button onClick={()=>relockField(f.name)} title="Re-lock this field" style={{padding:"2px 8px",fontSize:10,fontWeight:700,borderRadius:4,border:`1px solid ${C.brd}`,background:"transparent",color:C.mut,cursor:"pointer"}}>🔒 Lock</button>
+                      {vals[f.name]&&!isAuto&&(
+                        <button onClick={()=>relockField(f.name)} title="Save & lock this field" style={{padding:"2px 8px",fontSize:10,fontWeight:700,borderRadius:4,border:`1px solid ${C.brd}`,background:"transparent",color:C.mut,cursor:"pointer"}}>🔒 Lock</button>
                       )}
                     </div>
                   </div>
