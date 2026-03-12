@@ -84,6 +84,79 @@ async function extractPdfTextStructure(pdfData){
   return merged;
 }
 
+// ── Read AcroForm fields from fillable PDFs (client-side with pdf-lib) ──
+async function readAcroFormFields(pdfData){
+  if(!window.PDFLib)throw new Error("pdf-lib not loaded");
+  const bytes=pdfData instanceof ArrayBuffer?new Uint8Array(pdfData):pdfData;
+  const pdfDoc=await PDFLib.PDFDocument.load(bytes,{ignoreEncryption:true});
+  let form;
+  try{form=pdfDoc.getForm();}catch(e){return null;} // no form
+  const fields=form.getFields();
+  if(!fields||fields.length===0)return null;
+  const result=[];
+  for(const f of fields){
+    const name=f.getName();
+    const typeName=f.constructor.name; // PDFTextField, PDFCheckBox, PDFDropdown, PDFRadioGroup, PDFSignature
+    let type="text",value="";
+    if(typeName==="PDFTextField"||typeName.includes("Text")){
+      type="text";
+      try{value=f.getText()||"";}catch(e){value="";}
+    }else if(typeName==="PDFCheckBox"||typeName.includes("Check")){
+      type="checkbox";
+      try{value=f.isChecked()?"on":"off";}catch(e){value="off";}
+    }else if(typeName==="PDFDropdown"||typeName.includes("Dropdown")){
+      type="dropdown";
+      try{value=(f.getSelected()||[])[0]||"";}catch(e){value="";}
+    }else if(typeName==="PDFRadioGroup"||typeName.includes("Radio")){
+      type="radio";
+      try{value=f.getSelected()||"";}catch(e){value="";}
+    }else if(typeName==="PDFSignature"||typeName.includes("Signature")){
+      type="signature";
+      value="";
+    }
+    // Heuristic auto-fill categorization based on field name
+    const nl=name.toLowerCase();
+    let autoFill=null,multiline=false,category="editable";
+    if(/\bdate\b/.test(nl)&&!/re.?inspect/.test(nl))autoFill="date";
+    else if(/inspector|prepared.?by|ior\b/.test(nl))autoFill="inspector_name";
+    else if(/project.?name|job.?name|site.?name/.test(nl))autoFill="job_name";
+    else if(/address|location/.test(nl)&&!/item/.test(nl))autoFill="job_address";
+    else if(/general.?contractor/.test(nl))autoFill="general_contractor";
+    else if(/subcontractor/.test(nl))autoFill="subcontractor";
+    else if(/weather|temp/.test(nl))autoFill="weather";
+    else if(/\b(ir|number|no\.?|#)\b/.test(nl)&&!/phone/.test(nl))autoFill="ir_number";
+    else if(/duration/.test(nl))autoFill="duration";
+    if(/notes|observation|comment|item.*location|description/.test(nl))multiline=true;
+    if(type==="signature")category="signature";
+    else if(autoFill)category="auto";
+    // Clean display name: strip trailing numbers like "Date Recd-0" → "Date Recd"
+    let displayName=name.replace(/-\d+$/,"").replace(/^Textfield-?\d*$/i,"Notes/Description");
+    result.push({pdfFieldName:name,displayName,type,value,autoFill,multiline,category});
+  }
+  return result;
+}
+
+// ── Build auto-fill data from all available sources ──
+function buildAutoFillData(job,user,reportDate){
+  const tz=Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const now=reportDate?new Date(reportDate+"T12:00:00"):new Date();
+  const dateUS=now.toLocaleDateString("en-US",{timeZone:tz}); // 3/12/2026
+  const meta=user?.user_metadata||{};
+  const data={
+    date:dateUS,
+    inspector_name:meta.full_name||"",
+    job_name:job?.name||"",
+    job_address:job?.site_address||"",
+    general_contractor:"",
+    subcontractor:"",
+    weather:"",
+    ir_number:"",
+    duration:"",
+    company_name:meta.company_name||""
+  };
+  return data;
+}
+
 // Auth helper — check for existing session (refresh token in Supabase cookie/localStorage)
 async function authGetSession(){
   const stored=localStorage.getItem("mdr_session");
@@ -210,8 +283,11 @@ const db = {
     const err=await r.json().catch(()=>({}));
     throw new Error(err.message||"Template save failed");
   },
-  async getProfile(userId){const r=await fetch(`${SB_URL}/rest/v1/profiles?id=eq.${userId}&select=*`,{headers:this._h()});if(!r.ok)return null;const d=await r.json();return d[0]||null;},
+  _profileCache:{},
+  async getProfile(userId){if(this._profileCache[userId])return this._profileCache[userId];const r=await fetch(`${SB_URL}/rest/v1/profiles?id=eq.${userId}&select=*`,{headers:this._h()});if(!r.ok)return null;const d=await r.json();const p=d[0]||null;if(p)this._profileCache[userId]=p;return p;},
+  clearProfileCache(){this._profileCache={};},
   async upsertProfile(d){
+    this._profileCache={}; // clear cache on save
     // Try PATCH first (update existing), fall back to POST (insert new)
     const id=d.id;const payload={...d};delete payload.id;
     let r=await fetch(`${SB_URL}/rest/v1/profiles?id=eq.${id}`,{method:"PATCH",headers:this._h(),body:JSON.stringify(payload)});
@@ -1211,8 +1287,60 @@ function CreateJob({user, onBack, onCreated}){
     setParsing(true);setErr("");setFields([]);
     trackParseAttempt(fileName);
     try{
-      // Step 1: Extract real text positions client-side with pdf.js
-      console.log("[parseFields] Step 1: extracting text from PDF...");
+      // Step 0: Try AcroForm fields first (fillable PDFs)
+      console.log("[parseFields] Step 0: checking for AcroForm fields...");
+      const acroFields=await readAcroFormFields(new Uint8Array(buf));
+      if(acroFields&&acroFields.length>0){
+        console.log("[parseFields] Found",acroFields.length,"AcroForm fields — using direct field names");
+        // Group date segment fields (e.g., "Date Recd", "Date Recd-0", "Date Recd-1" → single date field)
+        const dateGroups={};const usedInGroup=new Set();
+        acroFields.forEach(f=>{
+          const m=f.pdfFieldName.match(/^(.+)-(\d+)$/);
+          if(m){
+            const base=m[1];const idx=parseInt(m[2]);
+            if(!dateGroups[base])dateGroups[base]={base,parts:[]};
+            dateGroups[base].parts.push({idx,pdfFieldName:f.pdfFieldName});
+            usedInGroup.add(f.pdfFieldName);
+          }
+        });
+        // Also check if the base name exists as its own field (the "0" part)
+        acroFields.forEach(f=>{
+          if(dateGroups[f.pdfFieldName]&&!usedInGroup.has(f.pdfFieldName)){
+            dateGroups[f.pdfFieldName].parts.push({idx:-1,pdfFieldName:f.pdfFieldName});
+            usedInGroup.add(f.pdfFieldName);
+          }
+        });
+        const all=[];const seenNames=new Set();
+        acroFields.forEach(f=>{
+          if(usedInGroup.has(f.pdfFieldName)){
+            // If this is the base name (no suffix), create a grouped date field
+            const group=dateGroups[f.pdfFieldName];
+            if(group&&!seenNames.has(f.pdfFieldName.toLowerCase())){
+              seenNames.add(f.pdfFieldName.toLowerCase());
+              const parts=[f.pdfFieldName,...group.parts.sort((a,b)=>a.idx-b.idx).map(p=>p.pdfFieldName)];
+              const uniqueParts=[...new Set(parts)];
+              let mode="edit";
+              if(f.autoFill==="date")mode="auto-date";
+              else if(f.autoFill)mode="lock";
+              all.push({name:f.displayName,pdfFieldName:f.pdfFieldName,pdfDateParts:uniqueParts,value:f.value||"",mode,type:f.type,autoFill:f.autoFill||"date",multiline:false,voiceEnabled:false,source:"acroform"});
+            }
+            return; // skip individual parts
+          }
+          const key=f.pdfFieldName.toLowerCase().trim();
+          if(seenNames.has(key))return;
+          seenNames.add(key);
+          let mode="edit";
+          if(f.category==="signature")mode="signature";
+          else if(f.autoFill==="date")mode="auto-date";
+          else if(f.autoFill==="ir_number")mode="auto-num";
+          else if(f.autoFill)mode="lock"; // auto-filled fields start locked
+          all.push({name:f.displayName,pdfFieldName:f.pdfFieldName,value:f.value||"",mode,type:f.type,autoFill:f.autoFill,multiline:f.multiline,voiceEnabled:f.multiline,source:"acroform"});
+        });
+        setFields(all);
+        return; // skip AI detection
+      }
+      // Step 1: Extract real text positions client-side with pdf.js (flat PDF fallback)
+      console.log("[parseFields] No AcroForm fields — falling back to text extraction + AI...");
       const textItems=await extractPdfTextStructure(new Uint8Array(buf));
       console.log("[parseFields] Extracted",textItems.length,"text items");
       // Step 2: Send text items (not base64 PDF) to edge function for semantic mapping
@@ -1451,12 +1579,15 @@ function CreateJob({user, onBack, onCreated}){
       const filePattern=reportTitle.trim()||(tf?tf.name.replace(/\.[^.]+$/,""):"");
       // Store the AI-detected convention (dateFormat, numberPadding) alongside the pattern
       const convention=fnConvention?{pattern:filePattern,dateFormat:fnConvention.dateFormat||"",numberPadding:fnConvention.numberPadding||0}:{pattern:filePattern,dateFormat:"",numberPadding:0};
+      const isAcroForm=fields.some(f=>f.source==="acroform");
       const coords=(f)=>({page:f.page,x:f.x,y:f.y,w:f.w,h:f.h,fontSize:f.fontSize,multiline:f.multiline});
+      const acroProps=(f)=>isAcroForm?{pdfFieldName:f.pdfFieldName,type:f.type,autoFill:f.autoFill}:{};
       // Fields marked lockAfterCreate (from saved template reuse) go back to locked with the user's new values
-      const editFields=fields.filter(f=>f.mode==="edit"&&!f.lockAfterCreate).map(f=>({name:f.name,value:"",originalValue:f.value||"",voiceEnabled:true,...coords(f)}));
-      const lockFields=[...fields.filter(f=>f.mode==="lock"),...fields.filter(f=>f.mode==="edit"&&f.lockAfterCreate)].map(f=>({name:f.name,value:f.value,...coords(f)}));
-      const autoFields=fields.filter(f=>f.mode==="auto-date"||f.mode==="auto-num").map(f=>({name:f.name,value:f.value,originalValue:f.value||"",autoFill:f.mode==="auto-date"?"date":"increment",...coords(f)}));
-      const fc={editable:[...editFields,...autoFields],locked:lockFields,filenameConvention:convention};
+      const editFields=fields.filter(f=>f.mode==="edit"&&!f.lockAfterCreate).map(f=>({name:f.name,value:"",originalValue:f.value||"",voiceEnabled:true,...coords(f),...acroProps(f)}));
+      const lockFields=[...fields.filter(f=>f.mode==="lock"),...fields.filter(f=>f.mode==="edit"&&f.lockAfterCreate)].map(f=>({name:f.name,value:f.value,...coords(f),...acroProps(f)}));
+      const autoFields=fields.filter(f=>f.mode==="auto-date"||f.mode==="auto-num").map(f=>({name:f.name,value:f.value,originalValue:f.value||"",autoFill:f.mode==="auto-date"?"date":"increment",...coords(f),...acroProps(f)}));
+      const sigFields=isAcroForm?fields.filter(f=>f.mode==="signature").map(f=>({name:f.name,value:"",pdfFieldName:f.pdfFieldName,type:"signature"})):[];
+      const fc={editable:[...editFields,...autoFields],locked:lockFields,signatures:sigFields,filenameConvention:convention,source:isAcroForm?"acroform":"ai_detected"};
       const job=await db.mkJob({user_id:user.id,name:jn.trim(),site_address:addr.trim()||null,company_id:jobSelectedCompany?.id||null,job_type:jobType,report_filename_pattern:filePattern,schedule:es,schedule_days:es==="custom"?days:[],reminder_enabled:remOn,reminder_time:remOn?remT:null,reminder_hours_before:remOn?remH:null,scheduling_enabled:schedOn,field_config:fc});
       if(tf&&job?.id){
         try{
@@ -1467,10 +1598,11 @@ function CreateJob({user, onBack, onCreated}){
           const fileBuf=u8.buffer;
           const fileBlob=new Blob([u8],{type:tf.type||"application/octet-stream"});
           const sp=await db.ulTpl(user.id,job.id,fileBlob,ext);
-          let pagePaths=[];
-          // Render PDF pages to images for preview cache (non-blocking)
+          const tplData={user_id:user.id,job_id:job.id,name:tf.name,original_filename:tf.name,file_type:ext,storage_path:sp,field_config:fields.length?fields:[]};
+          await db.mkTpl(tplData);
+          // Render PDF pages to images for preview cache — fire-and-forget (don't block job creation)
           if(ext==="pdf"&&window.pdfjsLib){
-            try{
+            (async()=>{try{
               const renderBuf=fileBuf.slice(0);
               const pjDoc=await window.pdfjsLib.getDocument({data:renderBuf}).promise;
               const imgs=[];
@@ -1482,12 +1614,13 @@ function CreateJob({user, onBack, onCreated}){
                 imgs.push(cvs.toDataURL("image/jpeg",0.85));
                 cvs.width=0;cvs.height=0;
               }
-              pagePaths=await db.saveTemplatePages(user.id,job.id,imgs);
-            }catch(pgErr){console.error("Template page render:",pgErr);}
+              const pagePaths=await db.saveTemplatePages(user.id,job.id,imgs);
+              if(pagePaths.length>0){
+                // Update template record with page images in background
+                try{await fetch(`${SB_URL}/rest/v1/templates?job_id=eq.${job.id}`,{method:"PATCH",headers:db._h(),body:JSON.stringify({structure_map:{page_images:pagePaths}})});}catch(e){}
+              }
+            }catch(pgErr){console.error("Template page render:",pgErr);}})();
           }
-          const tplData={user_id:user.id,job_id:job.id,name:tf.name,original_filename:tf.name,file_type:ext,storage_path:sp,field_config:fields.length?fields:[]};
-          if(pagePaths.length>0)tplData.structure_map={page_images:pagePaths};
-          await db.mkTpl(tplData);
         }catch(tplErr){
           // Template upload failed — clean up the orphan job so no ghost card appears
           try{await db.deleteJob(job.id);}catch(delErr){console.error("Cleanup failed:",delErr);}
@@ -1718,21 +1851,25 @@ function CreateJob({user, onBack, onCreated}){
           <div style={{marginBottom:20}}>
             <div style={{background:C.inp,border:`1px solid ${C.brd}`,borderRadius:12,overflow:"hidden"}}>
               <div style={{padding:"12px 16px",borderBottom:`1px solid ${C.brd}`,background:"rgba(232,116,42,0.06)"}}>
-                <div style={{fontWeight:700,fontSize:14,color:C.org}}>Template Fields ({fields.length})</div>
-                <div style={{fontSize:11,color:C.mut,marginTop:3}}>Set each field to Edit, Lock, or Auto-Date. Locked fields keep the same value every report.</div>
+                <div style={{fontWeight:700,fontSize:14,color:C.org}}>Template Fields ({fields.length}){fields.some(f=>f.source==="acroform")?" — Fillable PDF":""}</div>
+                <div style={{fontSize:11,color:C.mut,marginTop:3}}>{fields.some(f=>f.source==="acroform")?"Fields detected from fillable PDF form. Set each field to Edit, Lock, or Auto.":"Set each field to Edit, Lock, or Auto-Date. Locked fields keep the same value every report."}</div>
               </div>
               <div style={{padding:8}}>
                 {fields.map(f=>(
                   <div key={f.name} style={{padding:"10px 12px",background:f.mode==="lock"&&!f.lockAfterCreate?C.bg:C.card,border:`1px solid ${f.lockAfterCreate?C.org:C.brd}`,borderRadius:8,marginBottom:6,opacity:f.mode==="lock"&&!f.lockAfterCreate?0.7:1}}>
                     {/* Row 1: Field name + mode buttons */}
                     <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:8}}>
-                      <span style={{fontSize:13,fontWeight:700,color:C.txt,flex:1,marginRight:8}}>{f.name}</span>
+                      <span style={{fontSize:13,fontWeight:700,color:C.txt,flex:1,marginRight:8}}>{f.name}{f.type==="checkbox"?" ☑":""}</span>
+                      {f.mode==="signature"?(
+                        <span style={{fontSize:10,fontWeight:700,color:C.mut,background:C.inp,padding:"3px 8px",borderRadius:4}}>Signature</span>
+                      ):(
                       <div style={{display:"flex",gap:4,flexShrink:0}}>
                         {modeBtn(f.name,"edit","Edit",C.org)}
                         {modeBtn(f.name,"lock","Lock",C.mut)}
                         {modeBtn(f.name,"auto-date","Auto-Date",C.blu)}
                         {modeBtn(f.name,"auto-num","Auto-#",C.blu)}
                       </div>
+                      )}
                     </div>
                     {/* Row 2: Value input — always visible */}
                     {f.mode!=="auto-date"&&f.mode!=="auto-num"&&(
@@ -1753,6 +1890,9 @@ function CreateJob({user, onBack, onCreated}){
                     )}
                     {f.mode==="auto-num"&&(
                       <div style={{fontSize:11,color:C.blu,fontStyle:"italic",padding:"4px 0"}}>Will auto-increment (1, 2, 3...) on each report</div>
+                    )}
+                    {f.mode==="signature"&&(
+                      <div style={{fontSize:11,color:C.mut,fontStyle:"italic",padding:"4px 0"}}>Signature field — will be handled at submission</div>
                     )}
                   </div>
                 ))}
@@ -1998,7 +2138,7 @@ function WorkLogEditor({job, user, onBack, reportDate}){
 
   const addContractor=()=>{
     if(!newName.trim())return;
-    const c={id:Date.now().toString(),name:newName.trim(),description:"",hours:"",quantity:"1",photos:[],locked:false};
+    const c={id:Date.now().toString(),name:newName.trim(),description:"",hours:"",quantity:"1",photos:[],locked:false,active:true};
     setContractors(p=>[...p,c]);
     setActiveId(c.id);
     setNewName("");
@@ -2094,14 +2234,19 @@ function WorkLogEditor({job, user, onBack, reportDate}){
     // Light grey header bar with margins
     page.drawRectangle({x:M,y:H-headerH,width:CW,height:headerH,color:rgb(.85,.85,.85)});
 
-    // Embed logo — try company logo first, fall back to MDR logo
+    // Embed logo — try job company logo, then user's profile company logo, then MDR logo
     let logoImg=null;
     let logoDrawW=0,logoDrawH=0;
     try{
       let logoBytes=null;let isJpg=true;
-      if(job.company_id){
+      // 1. Try job's company logo
+      const companyIds=[job.company_id];
+      // 2. Also try user's profile company as fallback
+      try{const prof=await db.getProfile(user.id);if(prof?.company_id&&prof.company_id!==job.company_id)companyIds.push(prof.company_id);}catch(e){}
+      for(const cid of companyIds){
+        if(!cid||logoBytes)continue;
         try{
-          const co=await db.getCompany(job.company_id);
+          const co=await db.getCompany(cid);
           if(co?.logo_path){
             const logoUrl=db.getCompanyLogoUrl(co.logo_path);
             const clResp=await fetch(logoUrl);
@@ -2268,7 +2413,7 @@ function WorkLogEditor({job, user, onBack, reportDate}){
     const rowPadBot=16; // bottom padding inside row
     const attrGap=10; // gap between last desc line and attribution
 
-    contractors.forEach((c,ri)=>{
+    contractors.filter(c=>c.active!==false).forEach((c,ri)=>{
       const hrs=parseFloat(c.hours)||0;
       const qty=parseInt(c.quantity)||1;
       totalHrs+=hrs*qty;
@@ -2378,7 +2523,7 @@ function WorkLogEditor({job, user, onBack, reportDate}){
     };
 
     // ── Work Log Photos — right after work logs, before text sections ──
-    const contractorsWithPhotos=contractors.filter(c=>(c.photos||[]).length>0);
+    const contractorsWithPhotos=contractors.filter(c=>c.active!==false&&(c.photos||[]).length>0);
     if(contractorsWithPhotos.length>0){
       ensureSpace(50);
       page.drawRectangle({x:M,y:y-30,width:CW,height:30,color:rgb(.45,.45,.45)});
@@ -2528,7 +2673,8 @@ function WorkLogEditor({job, user, onBack, reportDate}){
 
   // ── View/Preview: generate PDF and render pages as images ──
   const viewWorkLog=async()=>{
-    if(contractors.length===0){showToast("Add at least one contractor first.");return;}
+    const activeContractors=contractors.filter(c=>c.active!==false);
+    if(activeContractors.length===0){showToast("No active contractors. Toggle at least one on.");return;}
     setViewLoading(true);
     try{
       const pdfBytes=await generateWorkLogPdf();
@@ -2571,9 +2717,9 @@ function WorkLogEditor({job, user, onBack, reportDate}){
         method:"PUT",headers:{apikey:SB_KEY,Authorization:`Bearer ${AUTH_TOKEN||SB_KEY}`,"Content-Type":"application/pdf"},body:pdfBlob
       });}
 
-      // Convert to base64 for email
-      const reader=new FileReader();
-      const pdfBase64=await new Promise((resolve)=>{reader.onload=()=>resolve(reader.result.split(",")[1]);reader.readAsDataURL(pdfBlob);});
+      // Convert to base64 for email (direct from bytes — no FileReader needed)
+      const u8=new Uint8Array(pdfBytes);const ch=[];for(let i=0;i<u8.length;i+=8192)ch.push(String.fromCharCode.apply(null,u8.subarray(i,i+8192)));
+      const pdfBase64=btoa(ch.join(""));
 
       // Save report data
       await db.saveReport({
@@ -2584,7 +2730,7 @@ function WorkLogEditor({job, user, onBack, reportDate}){
       // Build email
       const todayDisp=new Date(todayISO+"T12:00:00").toLocaleDateString("en-US",{weekday:"long",month:"long",day:"numeric",year:"numeric",timeZone:tz});
       const uName=window._mdrUserName||user?.user_metadata?.full_name||user.email?.split("@")[0]||"";
-      const contractorSummary=contractors.map(c=>`<tr><td style="padding:3px 12px 3px 0;color:#888;font-size:13px;">${c.name}</td><td style="padding:3px 0;color:#333;font-size:13px;">${c.hours||0} hrs × ${c.quantity||1}</td></tr>`).join("");
+      const contractorSummary=contractors.filter(c=>c.active!==false).map(c=>`<tr><td style="padding:3px 12px 3px 0;color:#888;font-size:13px;">${c.name}</td><td style="padding:3px 0;color:#333;font-size:13px;">${c.hours||0} hrs × ${c.quantity||1}</td></tr>`).join("");
       const emailHtml=`<div style="font-family:-apple-system,sans-serif;max-width:600px;margin:0 auto;"><div style="background:#e8742a;padding:20px 24px;border-radius:8px 8px 0 0;"><h1 style="color:#fff;margin:0;font-size:20px;">My Daily Reports</h1></div><div style="background:#f9f9f9;padding:24px;border:1px solid #e0e0e0;border-top:none;border-radius:0 0 8px 8px;"><p style="color:#333;font-size:16px;margin:0 0 8px;">Hi,</p><p style="color:#333;font-size:15px;line-height:1.6;margin:0 0 16px;">${uName} has submitted the daily work log for <strong>${job.name}</strong> on ${todayDisp}.</p><p style="color:#555;font-size:14px;margin:0 0 8px;"><strong>${contractors.length}</strong> contractor${contractors.length!==1?"s":""} — <strong>${totalHours}</strong> total hours</p>${contractorSummary?`<table style="margin:8px 0 16px;border-collapse:collapse;">${contractorSummary}</table>`:""}<p style="color:#555;font-size:14px;margin:16px 0 0;">The full PDF report is attached to this email.</p></div><p style="color:#999;font-size:11px;text-align:center;margin-top:16px;">Sent via My Daily Reports</p></div>`;
 
       const rawTeam=job.team_emails||[];
@@ -2644,14 +2790,20 @@ function WorkLogEditor({job, user, onBack, reportDate}){
     finally{setSaving(false);}
   };
 
-  // Auto-save every 30 seconds if there are contractors (skip after submit)
+  // Auto-save every 30 seconds if content changed (skip after submit)
+  const lastSaveHash=useRef("");
   useEffect(()=>{
-    if(contractors.length===0||submitSuccess)return;
-    const t=setInterval(()=>saveWorking(),30000);
+    if(contractors.filter(c=>c.active!==false).length===0||submitSuccess)return;
+    const t=setInterval(()=>{
+      const hash=JSON.stringify({contractors,generalNotes,safetyNotes,materials,equipment,qualityControl,customCategories,survey,weatherAM,weatherMid,weatherPM});
+      if(hash===lastSaveHash.current)return; // nothing changed
+      lastSaveHash.current=hash;
+      saveWorking();
+    },30000);
     return()=>clearInterval(t);
   },[contractors,generalNotes,safetyNotes,materials,equipment,qualityControl,customCategories,survey,weatherEnabled,weatherAM,weatherMid,weatherPM,submitSuccess]);
 
-  const totalHours=contractors.reduce((sum,c)=>{
+  const totalHours=contractors.filter(c=>c.active!==false).reduce((sum,c)=>{
     const h=parseFloat(c.hours)||0;
     const q=parseInt(c.quantity)||1;
     return sum+h*q;
@@ -2754,29 +2906,35 @@ function WorkLogEditor({job, user, onBack, reportDate}){
         <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:12}}>
           <div style={{display:"flex",alignItems:"center",gap:8}}>
             <span style={{fontWeight:700,fontSize:15}}>Contractors</span>
-            <span style={{fontSize:12,color:C.mut,fontWeight:600}}>({contractors.length})</span>
+            <span style={{fontSize:12,color:C.mut,fontWeight:600}}>({contractors.filter(c=>c.active!==false).length}{contractors.some(c=>c.active===false)?"/"+contractors.length:""})</span>
           </div>
           {totalHours>0&&(
             <span style={{fontSize:12,fontWeight:700,color:C.org}}>{totalHours} total hrs</span>
           )}
         </div>
 
-        {contractors.map(c=>(
-          <div key={c.id} style={{background:C.card,border:`1px solid ${activeId===c.id?C.org:C.brd}`,borderRadius:12,marginBottom:10,overflow:"hidden",transition:"border-color 0.2s"}}>
+        {contractors.map(c=>{
+          const isActive=c.active!==false;
+          return(
+          <div key={c.id} style={{background:C.card,border:`1px solid ${activeId===c.id?C.org:C.brd}`,borderRadius:12,marginBottom:10,overflow:"hidden",transition:"border-color 0.2s",opacity:isActive?1:0.45}}>
             {/* Contractor name bar — tap to expand/collapse */}
-            <button onClick={()=>setActiveId(activeId===c.id?null:c.id)} style={{width:"100%",display:"flex",alignItems:"center",gap:12,padding:"14px 16px",background:"none",border:"none",cursor:"pointer",textAlign:"left"}}>
-              <div style={{width:36,height:36,borderRadius:10,background:C.org+"22",display:"flex",alignItems:"center",justifyContent:"center",fontSize:12,fontWeight:700,color:C.org,flexShrink:0}}>C</div>
+            <button onClick={()=>isActive&&setActiveId(activeId===c.id?null:c.id)} style={{width:"100%",display:"flex",alignItems:"center",gap:12,padding:"14px 16px",background:"none",border:"none",cursor:isActive?"pointer":"default",textAlign:"left"}}>
+              {/* On/Off toggle */}
+              <div onClick={e=>{e.stopPropagation();updateContractor(c.id,"active",!isActive);if(!isActive)setActiveId(null);}} style={{width:40,height:22,borderRadius:11,background:isActive?C.ok:C.brd,position:"relative",cursor:"pointer",flexShrink:0,transition:"background 0.2s"}}>
+                <div style={{width:18,height:18,borderRadius:9,background:"#fff",position:"absolute",top:2,left:isActive?20:2,transition:"left 0.2s",boxShadow:"0 1px 3px rgba(0,0,0,0.3)"}}/>
+              </div>
               <div style={{flex:1,minWidth:0}}>
                 <div style={{display:"flex",alignItems:"center",gap:6}}>
-                  <div style={{fontSize:14,fontWeight:700,color:C.txt,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",flex:1}}>{c.name}</div>
-                  {c.locked&&<span style={{fontSize:10,fontWeight:700,color:C.org,background:C.org+"18",borderRadius:4,padding:"2px 6px"}}>Carries Over</span>}
+                  <div style={{fontSize:14,fontWeight:700,color:isActive?C.txt:C.mut,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",flex:1}}>{c.name}</div>
+                  {!isActive&&<span style={{fontSize:10,fontWeight:700,color:C.mut,background:C.inp,borderRadius:4,padding:"2px 6px"}}>Not on site</span>}
+                  {isActive&&c.locked&&<span style={{fontSize:10,fontWeight:700,color:C.org,background:C.org+"18",borderRadius:4,padding:"2px 6px"}}>Carries Over</span>}
                 </div>
                 <div style={{fontSize:11,color:C.mut}}>
-                  {c.hours?`${c.hours} hrs`:"No hours"} · {c.quantity||1} {parseInt(c.quantity||1)===1?"person":"people"}
-                  {(c.photos||[]).length>0&&` · ${c.photos.length} photo${c.photos.length>1?"s":""}`}
+                  {isActive?(c.hours?`${c.hours} hrs`:"No hours")+" · "+(c.quantity||1)+" "+(parseInt(c.quantity||1)===1?"person":"people"):"Toggled off — will not appear in report"}
+                  {isActive&&(c.photos||[]).length>0&&` · ${c.photos.length} photo${c.photos.length>1?"s":""}`}
                 </div>
               </div>
-              <span style={{color:activeId===c.id?C.org:C.mut,fontSize:18,transform:activeId===c.id?"rotate(180deg)":"none",transition:"transform 0.2s",padding:"4px 8px"}}>▼</span>
+              {isActive&&<span style={{color:activeId===c.id?C.org:C.mut,fontSize:18,transform:activeId===c.id?"rotate(180deg)":"none",transition:"transform 0.2s",padding:"4px 8px"}}>▼</span>}
             </button>
 
             {/* Expanded entry area */}
@@ -2836,7 +2994,7 @@ function WorkLogEditor({job, user, onBack, reportDate}){
               </div>
             )}
           </div>
-        ))}
+        );})}
 
         {/* Add Contractor */}
         {showAdd?(
@@ -2978,11 +3136,11 @@ function WorkLogEditor({job, user, onBack, reportDate}){
           <button disabled={saving} onClick={async()=>{if(saving)return;await saveWorking();onBack();}} style={{flex:1,padding:"12px 0",background:C.inp,border:`1px solid ${C.brd}`,borderRadius:10,color:C.txt,fontSize:14,fontWeight:700,cursor:saving?"default":"pointer",opacity:saving?0.7:1}}>
             {saving?"Saving…":"Save & Close"}
           </button>
-          <button onClick={viewWorkLog} disabled={viewLoading||submitting||contractors.length===0} style={{flex:1,padding:"12px 0",background:"transparent",border:`1px solid ${C.brd}`,borderRadius:10,color:C.lt,fontSize:14,fontWeight:700,cursor:viewLoading?"default":"pointer",opacity:viewLoading?0.6:1}}>
+          <button onClick={viewWorkLog} disabled={viewLoading||submitting||contractors.filter(c=>c.active!==false).length===0} style={{flex:1,padding:"12px 0",background:"transparent",border:`1px solid ${C.brd}`,borderRadius:10,color:C.lt,fontSize:14,fontWeight:700,cursor:viewLoading?"default":"pointer",opacity:viewLoading?0.6:1}}>
             {viewLoading?"Loading...":"View Report"}
           </button>
         </div>
-        <button onClick={submitWorkLog} disabled={submitting||contractors.length===0} style={{width:"100%",padding:"12px 0",background:contractors.length>0?C.org:C.brd,border:"none",borderRadius:10,color:"#fff",fontSize:15,fontWeight:700,cursor:contractors.length>0&&!submitting?"pointer":"default",opacity:submitting?0.7:1}}>
+        <button onClick={submitWorkLog} disabled={submitting||contractors.filter(c=>c.active!==false).length===0} style={{width:"100%",padding:"12px 0",background:contractors.filter(c=>c.active!==false).length>0?C.org:C.brd,border:"none",borderRadius:10,color:"#fff",fontSize:15,fontWeight:700,cursor:contractors.filter(c=>c.active!==false).length>0&&!submitting?"pointer":"default",opacity:submitting?0.7:1}}>
           {submitting?"Generating PDF...":"Submit Report"}
         </button>
       </div>
@@ -3038,14 +3196,23 @@ function ReportEditor({job, user, onBack, reportDate}){
   };
 
   // Editable field values
+  const isAcroForm=fc.source==="acroform";
+  const autoData=isAcroForm?buildAutoFillData(job,user,reportDate?reportDate:null):{};
   const [vals,setVals]=useState(()=>{
     const v={};
     initEdit.forEach(f=>{
       if(f.autoFill==="date")v[f.name]=formatAutoDate(f.originalValue||f.value);
       else if(f.autoFill==="increment")v[f.name]="";
       else if(f.autoFill==="name")v[f.name]=window._mdrUserName||f.value||"";
+      else if(isAcroForm&&f.autoFill&&autoData[f.autoFill])v[f.name]=autoData[f.autoFill];
       else v[f.name]=f.value||"";
     });
+    // Also set locked field vals from auto-fill data for AcroForm
+    if(isAcroForm){
+      initLock.forEach(f=>{
+        if(f.autoFill&&autoData[f.autoFill]&&!f.value)lockVals[f.name]=autoData[f.autoFill];
+      });
+    }
     return v;
   });
   const [saving,setSaving]=useState(false);
@@ -3201,7 +3368,8 @@ function ReportEditor({job, user, onBack, reportDate}){
   // Shared: build all field values — editable fields from vals, locked fields from lockVals
   const buildEditableFields=()=>[
     ...editFields.map(f=>({...f,val:vals[f.name]||""})),
-    ...lockFields.filter(f=>f.x!=null&&f.y!=null&&lockVals[f.name]).map(f=>({...f,val:lockVals[f.name]||""}))
+    // For AcroForm: include locked fields even without coords (filled by field name)
+    ...lockFields.filter(f=>(f.pdfFieldName||f.x!=null)&&(lockVals[f.name]||f.value)).map(f=>({...f,val:lockVals[f.name]||f.value||""}))
   ];
 
   // Shared: draw fields onto a canvas context (for View Report preview)
@@ -3453,7 +3621,7 @@ function ReportEditor({job, user, onBack, reportDate}){
         const docxBase64=btoa(chunks.join(""));
         // Build filename (same logic as PDF path)
         let rptNumber=1;
-        try{const cntR=await fetch(`${SB_URL}/rest/v1/reports?select=report_number&job_id=eq.${job.id}&order=report_number.desc&limit=1`,{headers:db._h()});const topR=cntR.ok?await cntR.json():[];if(topR[0]?.report_number){rptNumber=topR[0].report_number+1;}else{const countR=await fetch(`${SB_URL}/rest/v1/reports?select=id&job_id=eq.${job.id}&limit=0`,{headers:{...db._h(),Prefer:"count=exact"}});const total=parseInt(countR.headers.get("content-range")?.split("/")[1]||"0");rptNumber=total+1;}}catch(e){}
+        try{const cntR=await fetch(`${SB_URL}/rest/v1/reports?select=report_number&job_id=eq.${job.id}&order=report_number.desc&limit=1`,{headers:db._h()});const topR=cntR.ok?await cntR.json():[];if(topR[0]?.report_number)rptNumber=topR[0].report_number+1;}catch(e){}
         if(draftId){try{const exR=await fetch(`${SB_URL}/rest/v1/reports?select=report_number,report_date&id=eq.${draftId}`,{headers:db._h()});const exD=exR.ok?await exR.json():[];if(exD[0]?.report_number&&exD[0]?.report_date===submitDate)rptNumber=exD[0].report_number;}catch(e){}}
         const conv=job.field_config?.filenameConvention||{};
         const padding=conv.numberPadding||0;
@@ -3507,24 +3675,77 @@ function ReportEditor({job, user, onBack, reportDate}){
         return;
       }
 
-      // ── 2. Load template — use copyPages to preserve original visual content ──
+      // ── 2. Build field values ──
+      const allFields=buildEditableFields();
+      const fcSource=(job.field_config||{}).source;
+
+      // ── 2b. AcroForm fill-by-name path (for fillable PDFs uploaded via AcroForm detection) ──
       let pdfDoc;let srcDoc=null;
-      if(isPdfTemplate){
-        srcDoc=await PDFDocument.load(tplBytes,{ignoreEncryption:true});
-        pdfDoc=await PDFDocument.create();
-        const copiedPages=await pdfDoc.copyPages(srcDoc,srcDoc.getPageIndices());
-        copiedPages.forEach(p=>pdfDoc.addPage(p));
+      if(isPdfTemplate&&fcSource==="acroform"){
+        console.log("[submit] Using AcroForm fill-by-name path");
+        pdfDoc=await PDFDocument.load(tplBytes,{ignoreEncryption:true});
+        try{
+          const form=pdfDoc.getForm();
+          allFields.forEach(f=>{
+            if(!f.val)return;
+            const pfn=f.pdfFieldName;
+            if(!pfn)return;
+            try{
+              // Grouped date fields — split value across MM/DD/YYYY parts
+              if(f.pdfDateParts&&f.pdfDateParts.length>1){
+                const dateVal=String(f.val);
+                // Parse date into parts: try MM/DD/YYYY, MM-DD-YYYY, YYYY-MM-DD
+                let parts=[];
+                const slashMatch=dateVal.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})$/);
+                const isoMatch=dateVal.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+                if(slashMatch)parts=[slashMatch[1],slashMatch[2],slashMatch[3]];
+                else if(isoMatch)parts=[isoMatch[2],isoMatch[3],isoMatch[1]];
+                else parts=[dateVal]; // can't split — use whole value
+                f.pdfDateParts.forEach((partName,i)=>{
+                  try{
+                    const tf=form.getTextField(partName);
+                    tf.setText(parts[i]||"");
+                  }catch(e){console.warn("[submit] Date part fill '"+partName+"':",e.message);}
+                });
+                return;
+              }
+              if(f.type==="checkbox"){
+                const cb=form.getCheckBox(pfn);
+                if(f.val==="on"||f.val===true)cb.check();else cb.uncheck();
+              }else if(f.type==="dropdown"){
+                const dd=form.getDropdown(pfn);
+                dd.select(String(f.val));
+              }else{
+                // Text field (most common)
+                const tf=form.getTextField(pfn);
+                tf.setText(String(f.val));
+              }
+            }catch(fieldErr){
+              console.warn("[submit] Could not fill AcroForm field '"+pfn+"':",fieldErr.message);
+            }
+          });
+          form.flatten();
+        }catch(formErr){
+          console.error("[submit] AcroForm fill failed:",formErr);
+        }
+        srcDoc=null; // no source doc for the photo page logic — we loaded in-place
       }else{
-        pdfDoc=await PDFDocument.create();pdfDoc.addPage([612,792]);
+        // ── 2a. Standard path: copyPages to preserve original visual content ──
+        if(isPdfTemplate){
+          srcDoc=await PDFDocument.load(tplBytes,{ignoreEncryption:true});
+          pdfDoc=await PDFDocument.create();
+          const copiedPages=await pdfDoc.copyPages(srcDoc,srcDoc.getPageIndices());
+          copiedPages.forEach(p=>pdfDoc.addPage(p));
+        }else{
+          pdfDoc=await PDFDocument.create();pdfDoc.addPage([612,792]);
+        }
       }
       const font=await pdfDoc.embedFont(StandardFonts.Helvetica);
       const fontItalic=await pdfDoc.embedFont(StandardFonts.HelveticaOblique);
       const pages=pdfDoc.getPages();
 
-      // ── 3. Build field values ──
-      const allFields=buildEditableFields();
-
-      // ── 4. Fill field values using AcroForm fields then flatten ──
+      // ── 3. Fill fields by coordinates (standard path — skip for AcroForm fill-by-name) ──
+      if(fcSource!=="acroform"){
       // Create real PDF form fields, set values, then flatten for clean native text
       let acroFormWorked=false;
       try{
@@ -3619,6 +3840,7 @@ function ReportEditor({job, user, onBack, reportDate}){
           }
         });
       }
+      } // end if !acroform
 
       // ── 5. Remove empty trailing pages (no fields reference them) before adding photos ──
       if(photos.length>0&&srcDoc&&pdfDoc.getPageCount()>1){
@@ -3770,7 +3992,7 @@ function ReportEditor({job, user, onBack, reportDate}){
 
       // ── 7. Build filename using AI-detected convention ──
       let rptNumber=1;
-      try{const cntR=await fetch(`${SB_URL}/rest/v1/reports?select=report_number&job_id=eq.${job.id}&order=report_number.desc&limit=1`,{headers:db._h()});const topR=cntR.ok?await cntR.json():[];if(topR[0]?.report_number){rptNumber=topR[0].report_number+1;}else{const countR=await fetch(`${SB_URL}/rest/v1/reports?select=id&job_id=eq.${job.id}&limit=0`,{headers:{...db._h(),Prefer:"count=exact"}});const total=parseInt(countR.headers.get("content-range")?.split("/")[1]||"0");rptNumber=total+1;}}catch(e){}
+      try{const cntR=await fetch(`${SB_URL}/rest/v1/reports?select=report_number&job_id=eq.${job.id}&order=report_number.desc&limit=1`,{headers:db._h()});const topR=cntR.ok?await cntR.json():[];if(topR[0]?.report_number)rptNumber=topR[0].report_number+1;}catch(e){}
       if(draftId){try{const exR=await fetch(`${SB_URL}/rest/v1/reports?select=report_number,report_date&id=eq.${draftId}`,{headers:db._h()});const exD=exR.ok?await exR.json():[];if(exD[0]?.report_number&&exD[0]?.report_date===submitDate)rptNumber=exD[0].report_number;}catch(e){}}
       const conv=job.field_config?.filenameConvention||{};
       const padding=conv.numberPadding||0;
