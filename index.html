@@ -404,7 +404,7 @@ const db = {
   },
   // Download template file bytes with caching
   async downloadTemplateBytes(storagePath){
-    if(this._tplBytesCache[storagePath])return this._tplBytesCache[storagePath];
+    if(this._tplBytesCache[storagePath])return this._tplBytesCache[storagePath].slice(0);
     let r=await fetch(`${SB_URL}/storage/v1/object/report-source-docs/${storagePath}`,{
       headers:{apikey:SB_KEY,Authorization:`Bearer ${AUTH_TOKEN||SB_KEY}`}
     });
