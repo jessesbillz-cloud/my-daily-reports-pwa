@@ -3399,9 +3399,10 @@ function ReportEditor({job, user, onBack, reportDate}){
     setLockFields(newLock);
     setEditFields(newEdit);
     setVals(p=>({...p,[name]:lockVals[name]||f.value||""}));
-    // Persist field config change to Supabase
-    db.updateJobFieldConfig(job.id,{locked:newLock,editable:newEdit}).then(()=>{
-      job.field_config={locked:newLock,editable:newEdit};
+    // Persist — merge into existing field_config to preserve signatures, source, etc.
+    const merged={...fc,locked:newLock,editable:newEdit};
+    db.updateJobFieldConfig(job.id,merged).then(()=>{
+      job.field_config=merged;
     }).catch(e=>console.error("Field config update error:",e));
   };
 
@@ -3417,16 +3418,17 @@ function ReportEditor({job, user, onBack, reportDate}){
     if(!f)return;
     const val=vals[name]||f.value||"";
     const newEdit=editFields.filter(x=>x.name!==name);
-    const restored={name:f.name,value:val,x:f.x,y:f.y,w:f.w,h:f.h,page:f.page};
+    const restored={name:f.name,value:val,x:f.x,y:f.y,w:f.w,h:f.h,page:f.page,pdfFieldName:f.pdfFieldName,autoFill:f.autoFill};
     const newLock=[...lockFields,restored];
     setEditFields(newEdit);
     setLockFields(newLock);
     setLockVals(p=>({...p,[name]:val}));
     // Remove from editable vals
     setVals(p=>{const n={...p};delete n[name];return n;});
-    // Persist field config change to Supabase
-    db.updateJobFieldConfig(job.id,{locked:newLock,editable:newEdit}).then(()=>{
-      job.field_config={locked:newLock,editable:newEdit};
+    // Persist — merge into existing field_config to preserve signatures, source, etc.
+    const merged={...fc,locked:newLock,editable:newEdit};
+    db.updateJobFieldConfig(job.id,merged).then(()=>{
+      job.field_config=merged;
       showToast(`"${name}" locked`);
     }).catch(e=>{console.error("Field config update error:",e);showToast("Lock failed: "+e.message);});
   };
@@ -3436,10 +3438,10 @@ function ReportEditor({job, user, onBack, reportDate}){
     const updated=lockFields.map(f=>({...f,value:lockVals[f.name]||f.value}));
     setLockFields(updated);
     setLockEditing(false);
-    // Persist lock value changes to Supabase
-    const newConfig={locked:updated,editable:editFields};
-    db.updateJobFieldConfig(job.id,newConfig).then(()=>{
-      job.field_config=newConfig;
+    // Persist — merge into existing field_config to preserve signatures, source, etc.
+    const merged={...fc,locked:updated,editable:editFields};
+    db.updateJobFieldConfig(job.id,merged).then(()=>{
+      job.field_config=merged;
     }).catch(e=>console.error("Field config update error:",e));
   };
 
