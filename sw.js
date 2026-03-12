@@ -1,4 +1,4 @@
-const CACHE_NAME = 'mdr-v78';
+const CACHE_NAME = 'mdr-v79';
 const CACHE_URLS = [
   '/icon-192.png',
   '/icon-512.png',

@@ -460,7 +460,11 @@ const db = {
   // Saved templates — reusable parsed templates (avoids re-parsing)
   async getSavedTemplates(userId){
     const r=await fetch(`${SB_URL}/rest/v1/saved_templates?user_id=eq.${userId}&select=*&order=created_at.desc`,{headers:this._h()});
-    if(!r.ok)return[];return await r.json();
+    if(!r.ok)return[];
+    const all=await r.json();
+    // Dedup by storage_path — keep newest (first in desc order)
+    const seen=new Set();
+    return all.filter(t=>{if(!t.storage_path)return true;if(seen.has(t.storage_path))return false;seen.add(t.storage_path);return true;});
   },
   async saveParsedTemplate(d){
     const r=await fetch(`${SB_URL}/rest/v1/saved_templates`,{method:"POST",headers:this._h(),body:JSON.stringify(d)});
@@ -486,13 +490,22 @@ const db = {
   },
   // Get company templates
   async getCompanyTemplates(companyId){
-    const r=await fetch(`${SB_URL}/rest/v1/company_templates?company_id=eq.${companyId}&select=*`,{headers:this._h()});
-    if(!r.ok)return[];return await r.json();
+    const r=await fetch(`${SB_URL}/rest/v1/company_templates?company_id=eq.${companyId}&select=*&order=created_at.desc`,{headers:this._h()});
+    if(!r.ok)return[];
+    const all=await r.json();
+    // Dedup by storage_path — keep newest (first in desc order)
+    const seen=new Set();
+    return all.filter(t=>{const k=t.storage_path||t.id;if(seen.has(k))return false;seen.add(k);return true;});
   },
   // Copy company templates into user's saved_templates
   async copyCompanyTemplatesToUser(companyTemplates,userId){
+    // Get existing saved_templates to avoid duplicates
+    const existing=await this.getSavedTemplates(userId);
+    const existingPaths=new Set(existing.map(t=>t.storage_path).filter(Boolean));
     const results=[];
     for(const ct of companyTemplates){
+      // Skip if user already has a saved_template with this storage_path
+      if(ct.storage_path&&existingPaths.has(ct.storage_path)){console.log("Skip duplicate template:",ct.storage_path);continue;}
       const d={user_id:userId,template_name:ct.template_name,file_name:ct.file_name,file_type:ct.file_type,storage_path:ct.storage_path,field_config:ct.field_config,mode:ct.mode||"template"};
       try{const saved=await this.saveParsedTemplate(d);results.push(saved);}catch(e){console.error("Copy template failed:",e);}
     }
@@ -562,6 +575,7 @@ function AccountSettings({user, onBack, onLogout}){
   const [companyLogoUrl,setCompanyLogoUrl]=useState(null);
   const [uploadingLogo,setUploadingLogo]=useState(false);
   const logoInputRef=useRef(null);
+  const [companyRole,setCompanyRole]=useState("member");
 
   const TZ_OPTIONS = [
     "America/New_York","America/Chicago","America/Denver","America/Phoenix",
@@ -588,6 +602,7 @@ function AccountSettings({user, onBack, onLogout}){
           }
           if(p.timezone)setTimezone(p.timezone);
           if(p.slug)setSlug(p.slug);
+          if(p.company_role)setCompanyRole(p.company_role);
         }
       }catch(e){console.error(e);}
       finally{setLoading(false);}
@@ -748,6 +763,12 @@ function AccountSettings({user, onBack, onLogout}){
                   <div style={{fontSize:11,color:C.mut,marginTop:4}}>
                     {selectedCompany?"This company's templates will be available when creating jobs.":"Type to search for a registered company. This also sets your email sender name."}
                   </div>
+                  {selectedCompany&&(
+                    <div style={{fontSize:11,color:companyRole==="admin"?C.org:C.mut,marginTop:4}}>
+                      Role: <strong>{companyRole==="admin"?"Admin":"Member"}</strong>
+                      {companyRole==="member"&&" — Templates are managed by your company admin"}
+                    </div>
+                  )}
                   <div style={{fontSize:11,color:C.mut,marginTop:2}}>Emails appear as: <strong style={{color:C.txt}}>{companyName||selectedCompany?.name||"Your Company"} &lt;reports@mydailyreports.org&gt;</strong></div>
                 </div>
 
@@ -761,10 +782,14 @@ function AccountSettings({user, onBack, onLogout}){
                         <div style={{width:56,height:56,borderRadius:8,background:C.inp,border:`1px solid ${C.brd}`,display:"flex",alignItems:"center",justifyContent:"center",color:C.mut,fontSize:11}}>No logo</div>
                       )}
                       <div style={{flex:1}}>
-                        <input ref={logoInputRef} type="file" accept="image/*" onChange={handleLogoUpload} style={{display:"none"}}/>
-                        <button onClick={()=>logoInputRef.current?.click()} disabled={uploadingLogo} style={{padding:"8px 16px",background:C.inp,border:`1px solid ${C.brd}`,borderRadius:8,color:C.txt,fontSize:13,fontWeight:600,cursor:"pointer"}}>
-                          {uploadingLogo?"Uploading...":companyLogoUrl?"Change Logo":"Upload Logo"}
-                        </button>
+                        {companyRole==="admin"?(<>
+                          <input ref={logoInputRef} type="file" accept="image/*" onChange={handleLogoUpload} style={{display:"none"}}/>
+                          <button onClick={()=>logoInputRef.current?.click()} disabled={uploadingLogo} style={{padding:"8px 16px",background:C.inp,border:`1px solid ${C.brd}`,borderRadius:8,color:C.txt,fontSize:13,fontWeight:600,cursor:"pointer"}}>
+                            {uploadingLogo?"Uploading...":companyLogoUrl?"Change Logo":"Upload Logo"}
+                          </button>
+                        </>):(
+                          <div style={{fontSize:12,color:C.mut}}>Contact your company admin to change the logo</div>
+                        )}
                         <div style={{fontSize:11,color:C.mut,marginTop:4}}>Appears on work log report headers</div>
                       </div>
                     </div>
