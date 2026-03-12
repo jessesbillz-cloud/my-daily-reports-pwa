@@ -629,7 +629,7 @@ function AccountSettings({user, onBack, onLogout}){
         try{
           companyId=await db.assignCompany(user.id,selectedCompany.name);
           // Sync company templates
-          if(companyId){try{await db.copyCompanyTemplatesDB(user.id,companyId);}catch(e){console.error("Template sync:",e);}}
+          if(companyId){try{await db.copyCompanyTemplatesDB(user.id,companyId);}catch(e){console.error("Template sync RPC:",e);try{const cts=await db.getCompanyTemplates(companyId);if(cts.length)await db.copyCompanyTemplatesToUser(cts,user.id);}catch(e2){console.error("Template sync fallback:",e2);}}}
         }catch(e){console.error("Company assign:",e);companyId=selectedCompany.id;}
       }
       const data={
@@ -1730,7 +1730,7 @@ function CreateJob({user, onBack, onCreated}){
             </button>
           </div>
           <div style={{fontSize:11,color:C.mut,marginTop:6}}>
-            {jobType==="template"?"Upload a PDF/DOCX template — AI detects fields, you fill them daily.":"Track contractors, hours, and work descriptions. Generates a detailed report."}
+            {jobType==="template"?"Upload your PDF template — we copy it and detect all the fields. You fill them daily.":"Track contractors, hours, and work descriptions. Generates a detailed report."}
           </div>
         </div>
 
@@ -1800,9 +1800,9 @@ function CreateJob({user, onBack, onCreated}){
               style={{border:`2px dashed ${drag?C.org:C.brd}`,borderRadius:12,padding:"32px 20px",textAlign:"center",cursor:"pointer",background:drag?"#1f1a14":C.inp}}>
               <div style={{fontSize:32,marginBottom:8}}>—</div>
               <p style={{color:C.lt,fontSize:14,fontWeight:600,marginBottom:4}}>{usedSavedId?"Now upload the actual file (parsing will be skipped)":"Drop your template here"}</p>
-              <p style={{color:C.mut,fontSize:12}}>{usedSavedId?"Fields already loaded from saved template":"or tap to browse • PDF, DOCX, JPG, PNG"}</p>
+              <p style={{color:C.mut,fontSize:12}}>{usedSavedId?"Fields already loaded from saved template":"or tap to browse • PDF only"}</p>
               {!usedSavedId&&<p style={{color:C.mut,fontSize:11,marginTop:8,lineHeight:1.4,fontStyle:"italic"}}>Tip: Download the file to your phone first, then upload from your files. Uploading directly from email or cloud viewers may change the filename.</p>}
-              <input id="fi" type="file" accept=".pdf,.docx,.doc,.jpg,.jpeg,.png" style={{display:"none"}} onChange={e=>e.target.files[0]&&(usedSavedId?doFileWithSaved:doFile)(e.target.files[0])}/>
+              <input id="fi" type="file" accept=".pdf" style={{display:"none"}} onChange={e=>e.target.files[0]&&(usedSavedId?doFileWithSaved:doFile)(e.target.files[0])}/>
             </div>
           ):(
             <div style={{background:C.inp,border:`1px solid ${C.brd}`,borderRadius:12,padding:"14px 16px"}}>
@@ -3291,7 +3291,13 @@ function ReportEditor({job, user, onBack, reportDate}){
     }).catch(e=>console.error("Field config update error:",e));
   };
 
-  // Lock an editable field — saves value and moves to locked section
+  // Skip/unskip a field for today (ghost it out without removing it)
+  const [skippedFields,setSkippedFields]=useState({});
+  const toggleSkipField=(name)=>{
+    setSkippedFields(p=>({...p,[name]:!p[name]}));
+  };
+
+  // Lock an editable field — saves value and moves to locked section (admin use)
   const relockField=(name)=>{
     const f=editFields.find(x=>x.name===name);
     if(!f)return;
@@ -3367,7 +3373,7 @@ function ReportEditor({job, user, onBack, reportDate}){
 
   // Shared: build all field values — editable fields from vals, locked fields from lockVals
   const buildEditableFields=()=>[
-    ...editFields.map(f=>({...f,val:vals[f.name]||""})),
+    ...editFields.filter(f=>!skippedFields[f.name]).map(f=>({...f,val:vals[f.name]||""})),
     // For AcroForm: include locked fields even without coords (filled by field name)
     ...lockFields.filter(f=>(f.pdfFieldName||f.x!=null)&&(lockVals[f.name]||f.value)).map(f=>({...f,val:lockVals[f.name]||f.value||""}))
   ];
@@ -4280,25 +4286,26 @@ function ReportEditor({job, user, onBack, reportDate}){
             <div style={{fontSize:12,fontWeight:700,color:C.org,textTransform:"uppercase",letterSpacing:1,marginBottom:10}}>Fill In Today</div>
             {editFields.map(f=>{
               const isAuto=f.autoFill==="date"||f.autoFill==="increment"||f.autoFill==="name";
+              const isSkipped=skippedFields[f.name];
               return(
-                <div key={f.name} style={{marginBottom:14}}>
+                <div key={f.name} style={{marginBottom:14,opacity:isSkipped?0.4:1,transition:"opacity 0.2s"}}>
                   <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:6}}>
-                    <label style={{fontSize:13,fontWeight:600,color:C.lt}}>{f.name}</label>
+                    <label style={{fontSize:13,fontWeight:600,color:isSkipped?C.mut:C.lt}}>{f.name}{isSkipped?" — skipped":""}</label>
                     <div style={{display:"flex",gap:4,alignItems:"center"}}>
                       {f.autoFill==="date"&&<span style={{fontSize:10,fontWeight:700,color:C.blu,background:C.blu+"22",padding:"2px 8px",borderRadius:4}}>AUTO-DATE</span>}
                       {f.autoFill==="increment"&&<span style={{fontSize:10,fontWeight:700,color:C.blu,background:C.blu+"22",padding:"2px 8px",borderRadius:4}}>AUTO-#</span>}
                       {f.autoFill==="name"&&<span style={{fontSize:10,fontWeight:700,color:C.blu,background:C.blu+"22",padding:"2px 8px",borderRadius:4}}>AUTO-NAME</span>}
-                      {f.voiceEnabled&&<span style={{fontSize:10,fontWeight:700,color:C.org,background:C.org+"22",padding:"2px 8px",borderRadius:4}}>VOICE</span>}
-                      {vals[f.name]&&!isAuto&&(
-                        <button onClick={()=>relockField(f.name)} title="Save & lock this field" style={{padding:"2px 8px",fontSize:10,fontWeight:700,borderRadius:4,border:`1px solid ${C.brd}`,background:"transparent",color:C.mut,cursor:"pointer"}}>🔒 Lock</button>
+                      {f.voiceEnabled&&!isSkipped&&<span style={{fontSize:10,fontWeight:700,color:C.org,background:C.org+"22",padding:"2px 8px",borderRadius:4}}>VOICE</span>}
+                      {!isAuto&&(
+                        <button onClick={()=>toggleSkipField(f.name)} title={isSkipped?"Bring back this field":"Skip this field for today"} style={{padding:"2px 8px",fontSize:10,fontWeight:700,borderRadius:4,border:`1px solid ${isSkipped?C.ok:C.brd}`,background:isSkipped?C.ok+"22":"transparent",color:isSkipped?C.ok:C.mut,cursor:"pointer"}}>{isSkipped?"+ Use":"− Skip"}</button>
                       )}
                     </div>
                   </div>
-                  {f.voiceEnabled?(
+                  {!isSkipped&&(f.voiceEnabled?(
                     <textarea value={vals[f.name]||""} onChange={e=>setVal(f.name,e.target.value)} placeholder="Tap here and use your keyboard mic to dictate..." rows={4} style={{...fs,resize:"vertical",minHeight:80,lineHeight:1.5}}/>
                   ):(
                     <input type="text" value={vals[f.name]||""} onChange={e=>setVal(f.name,e.target.value)} readOnly={isAuto} placeholder={isAuto?"Auto-filled":"Enter value..."} style={{...fs,opacity:isAuto?0.6:1,cursor:isAuto?"default":"text"}}/>
-                  )}
+                  ))}
                 </div>
               );
             })}
@@ -4923,27 +4930,27 @@ const GUIDES=[
     {icon:"🔗",title:"Share Your Link",body:"Tap \"Share Calendar\" on the dashboard. Send the link to your team, subs, or anyone who needs to coordinate site visits.",tip:"Set your Scheduling Display Name in Account Settings so people recognize your calendar."},
     {icon:"—",title:"Requests",body:"Visitors pick a job and date from your calendar link. You see the request and can approve or reschedule it.",tip:null},
   ]},
-  {icon:"—",color:"#f59e0b",title:"Preparing Your Template",sub:"Visual guide to uploading a clean PDF",steps:[
-    {icon:"—",title:"Start With a Clean PDF",body:"Export your report as a PDF with blank value cells. Labels stay, values go. The AI reads the labels to detect fields — blank cells give it a clean surface to write on.",tip:null,
+  {icon:"—",color:"#f59e0b",title:"Preparing Your Template",sub:"How to upload your PDF for the best results",steps:[
+    {icon:"—",title:"We Copy Your PDF",body:"Upload your report as a PDF and we make a working copy. Fillable PDFs with form fields work best — we read the field names directly. For flat PDFs, our AI scans the layout to detect fields.",tip:"Fillable PDFs give the most accurate field detection.",
       illustration:{type:"form",rows:[
         {label:"Date:",value:"",good:true,note:"Leave blank — Auto-Date fills this"},
         {label:"Project Name:",value:"Woodland Park MS",good:true,note:"Pre-filled values become locked fields"},
         {label:"DR #:",value:"",good:true,note:"Leave blank — Auto-# fills this"},
       ]}},
-    {icon:"✗",title:"Remove Old Dates & Numbers",body:"If your template has a date like \"04 February 2026\" or a report number already filled in, delete those values before uploading. The app overwrites them but the old text can show through underneath.",tip:null,
+    {icon:"✗",title:"Clean Out Old Values",body:"Clear any old dates, report numbers, or sample text before uploading. The app fills these in fresh each day, but leftover text can show through underneath.",tip:null,
       illustration:{type:"compare",bad:{label:"Date:",value:"04 February 2026",caption:"Old date bleeds through"},good:{label:"Date:",value:"",caption:"Clean — auto-date fills it fresh"}}},
-    {icon:"—",title:"Notes Section",body:"If you have a standing note (like a general message), put it in its own separate text box on your PDF and lock it as a field. Then create a second, blank text box labeled \"Notes:\" for your daily entries. This keeps the standing note untouched and gives you a clean area to write in every day.",tip:null,
+    {icon:"—",title:"Notes Section",body:"Label your notes area clearly (\"Notes:\" or \"Observations:\") and leave it blank. Daily entries fill into the same spot on your template every time.",tip:null,
       illustration:{type:"form",rows:[
-        {label:"Standing Note:",value:"Available for daily communication...",good:true,note:"Separate box — lock this as a field"},
-        {label:"Notes:",value:"",good:true,note:"Blank — this is where you write daily notes"},
+        {label:"Standing Note:",value:"Available for daily communication...",good:true,note:"Lock this — stays the same every report"},
+        {label:"Notes:",value:"",good:true,note:"Blank — your daily notes go here"},
       ]}},
-    {icon:"✓",title:"Best Practices",body:"Use standard letter size (8.5\" x 11\"). Single page works best. Use real text labels with colons, not empty boxes. Delete any blank extra pages. Signature lines are automatically ignored.",tip:null,
+    {icon:"✓",title:"Best Practices & Help",body:"Single-page PDF, standard letter size (8.5\" x 11\"). Fillable PDFs with form fields give the best results. If detection doesn't look right, try uploading again or email your template to jessesbillz@gmail.com and we'll set it up for you.",tip:"One template per job — reused for every report.",
       illustration:{type:"checklist",items:[
-        {text:"Single page PDF",ok:true},
-        {text:"Clear labels with colons",ok:true},
-        {text:"Blank value cells for changing fields",ok:true},
-        {text:"No hidden text boxes or overlapping elements",ok:true},
+        {text:"PDF format (fillable PDFs work best)",ok:true},
+        {text:"Single page, letter size",ok:true},
+        {text:"Clear out old dates and numbers",ok:true},
         {text:"Signature lines — ignored automatically",ok:true},
+        {text:"Need help? Email jessesbillz@gmail.com",ok:true},
       ]}},
   ]},
   {icon:"⚙",color:C.mut,title:"Settings",sub:"Account, timezone, and preferences",steps:[
@@ -5262,7 +5269,7 @@ function Dashboard({user, onLogout}){
 
         <LegalSection icon="—" number={13} title="Contact Information">
           <LP>If you have questions about these Terms of Service, please contact us:</LP>
-          <LB items={["Email: support@mydailyreports.app","In-app: Profile → Help & Support"]}/>
+          <LB items={["Email: jessesbillz@gmail.com","In-app: Profile → Help & Support"]}/>
         </LegalSection>
 
         <div style={{textAlign:"center",padding:"16px 0 32px"}}>
@@ -5322,7 +5329,7 @@ function Dashboard({user, onLogout}){
         <LegalSection icon="→" number={6} title="Your Privacy Rights">
           <LP>Depending on your location, you may have the right to:</LP>
           <LB items={["Access: Request a copy of your personal data","Correction: Request correction of inaccurate data","Deletion: Request deletion of your personal data","Export: Download your data in a portable format","Opt-out: Unsubscribe from marketing communications"]} boldPrefixes={["Access:","Correction:","Deletion:","Export:","Opt-out:"]}/>
-          <LP>To exercise these rights, contact us at support@mydailyreports.app or use the in-app settings.</LP>
+          <LP>To exercise these rights, contact us at jessesbillz@gmail.com or use the in-app settings.</LP>
         </LegalSection>
 
         <LegalSection icon="—" number={7} title="International Data Transfers">
@@ -5342,7 +5349,7 @@ function Dashboard({user, onLogout}){
         <LegalSection icon="—" number={10} title="Contact Us">
           <LP>If you have questions about this Privacy Policy or our data practices, please contact us:</LP>
           <LB items={["Email: privacy@mydailyreports.app","In-app: Profile → Help & Support"]}/>
-          <LP>For data protection inquiries from the EU, you may also contact our Data Protection Officer at dpo@mydailyreports.app.</LP>
+          <LP>For data protection inquiries from the EU, you may also contact our Data Protection Officer at jessesbillz@gmail.com.</LP>
         </LegalSection>
 
         <div style={{textAlign:"center",padding:"16px 0 32px"}}>
@@ -5714,7 +5721,11 @@ function SetupWizard({user, inviteCompany, onComplete}){
           companyId=await db.assignCompany(user.id,companyName.trim());
           // Copy company templates to user's saved templates
           if(companyId){
-            try{await db.copyCompanyTemplatesDB(user.id,companyId);}catch(e){console.error("Template copy:",e);}
+            try{await db.copyCompanyTemplatesDB(user.id,companyId);}catch(e){
+              console.error("Template copy RPC:",e);
+              // Fallback: fetch company templates and copy manually
+              try{const cts=await db.getCompanyTemplates(companyId);if(cts.length)await db.copyCompanyTemplatesToUser(cts,user.id);}catch(e2){console.error("Template copy fallback:",e2);}
+            }
           }
         }catch(e){
           console.error("assign_company:",e);
@@ -5852,11 +5863,11 @@ function SetupWizard({user, inviteCompany, onComplete}){
           <div>
             <h2 style={{fontSize:20,fontWeight:700,marginBottom:16}}>How It Works</h2>
             <div style={cardS}>
-              <p style={{fontSize:14,color:C.lt,lineHeight:1.6,marginBottom:14}}>Upload your existing report template and our AI detects all the fields. You then mark each field as one of four types:</p>
+              <p style={{fontSize:14,color:C.lt,lineHeight:1.6,marginBottom:14}}>Upload your PDF template and we make a working copy of it. We detect all the fields and you tell us how each one should work:</p>
               <div style={{display:"flex",flexDirection:"column",gap:8,marginBottom:14}}>
                 {[
                   {icon:"✏️",name:"Edit",desc:"Fill in daily — notes, weather, hours"},
-                  {icon:"🔒",name:"Lock",desc:"Never changes — project name, contractor"},
+                  {icon:"🔒",name:"Lock",desc:"Same every day — project name, contractor"},
                   {icon:"📅",name:"Auto-Date",desc:"Today's date, auto-filled"},
                   {icon:"🔢",name:"Auto-Number",desc:"Sequential report number"},
                 ].map((f,i)=>(
@@ -5866,11 +5877,15 @@ function SetupWizard({user, inviteCompany, onComplete}){
                   </div>
                 ))}
               </div>
-              <p style={{fontSize:13,color:C.mut,lineHeight:1.5}}>Set up once per job, then every report auto-fills locked fields and gives you blank editable fields to complete.</p>
+              <p style={{fontSize:13,color:C.mut,lineHeight:1.5}}>Set up once per job. Every report auto-fills locked fields and gives you blank editable fields to complete.</p>
             </div>
             <div style={cardS}>
-              <div style={{fontSize:14,fontWeight:700,color:C.org,marginBottom:8}}>Report Generation</div>
-              <p style={{fontSize:13,color:C.lt,lineHeight:1.6}}>The submit button generates a PDF using your original template with your daily entries overlaid. Notes appear in your notes area. Photos get added on additional pages.</p>
+              <div style={{fontSize:14,fontWeight:700,color:C.org,marginBottom:8}}>Your Template, Your Format</div>
+              <p style={{fontSize:13,color:C.lt,lineHeight:1.6}}>We use your exact PDF — your company logo, layout, and branding stay intact. When you submit, we generate a filled copy with your daily entries. Photos get added on additional pages.</p>
+            </div>
+            <div style={cardS}>
+              <div style={{fontSize:14,fontWeight:700,color:C.blu,marginBottom:8}}>Not Looking Right?</div>
+              <p style={{fontSize:13,color:C.lt,lineHeight:1.6}}>If the fields don't look right after upload, try again or send your template to jessesbillz@gmail.com and we'll set it up for you.</p>
             </div>
             <div style={{fontSize:12,color:C.mut,textAlign:"center",marginTop:4}}>For detailed walkthroughs, visit the Training Center on the dashboard.</div>
           </div>
@@ -5883,30 +5898,30 @@ function SetupWizard({user, inviteCompany, onComplete}){
             <p style={{fontSize:13,color:C.mut,marginBottom:16}}>Tap each section to review. All 5 required before continuing.</p>
 
             {[
-              {key:"parsing",icon:"🔍",title:"How It Reads Your Template",bullets:[
-                "Our AI scans your document and finds each field automatically (Date, Project Name, Notes, etc.)",
-                "It figures out which fields change daily (like Date and Notes) and which stay the same (like Project Name)",
-                "Your fields will show up in a simple list where you can review and adjust them",
+              {key:"parsing",icon:"🔍",title:"What Happens When You Upload",bullets:[
+                "We make a copy of your PDF and scan it for fields (Date, Project Name, Notes, etc.)",
+                "Fields are detected automatically — fillable PDFs work best",
+                "You'll see a list of fields where you can review, adjust, and lock the ones that stay the same every day",
               ]},
-              {key:"cleanDoc",icon:"🧹",title:"Preparing Your Template",bullets:[
-                "Make sure each field has a clear label like \"Project Name:\" or \"Date:\"",
-                "Remove any extra text or overlapping boxes that might confuse the scanner",
-                "The cleaner your template, the better the results",
+              {key:"cleanDoc",icon:"🧹",title:"Preparing Your PDF",bullets:[
+                "Your template must be a PDF — fillable PDFs with form fields give the best results",
+                "Clear out any old dates, numbers, or sample text before uploading",
+                "The cleaner your template, the better the detection",
               ]},
-              {key:"notes",icon:"📝",title:"Notes Section Setup",bullets:[
+              {key:"notes",icon:"📝",title:"Notes & Observations",bullets:[
                 "Label your notes area clearly — \"Notes:\" or \"Observations:\"",
-                "Leave the notes area blank in your template so there's room to write",
-                "Your notes will appear as bullet points on the final report",
+                "Leave the notes area blank so there's room to write each day",
+                "Daily entries fill into the same spot on your template every time",
               ]},
-              {key:"photos",icon:"📸",title:"Photo System",bullets:[
+              {key:"photos",icon:"📸",title:"Photos",bullets:[
                 "Photos get added on new pages after your main report",
-                "Each photo page keeps your company header and footer",
+                "Your company header and formatting carry through",
                 "Upload a single-page template — remove any blank extra pages first",
               ]},
-              {key:"bestPractices",icon:"📐",title:"Best Practices",bullets:[
-                "Single-page PDF or Word document recommended",
-                "Standard letter size (8.5\" x 11\") works best",
-                "Use clear field labels, not just empty boxes",
+              {key:"bestPractices",icon:"📐",title:"Need Help?",bullets:[
+                "Single-page PDF works best, standard letter size (8.5\" x 11\")",
+                "Fillable PDFs with form fields give the most accurate results",
+                "If detection doesn't look right, try uploading again or email your template to jessesbillz@gmail.com and we'll get it set up for you",
                 "One template per job — reused for every report",
               ]},
             ].map(section=>{
@@ -6096,10 +6111,10 @@ function LoginScreen({onAuth}){
         <div style={{marginTop:28,padding:"18px 16px",background:"rgba(232,116,42,0.06)",border:"1px solid rgba(232,116,42,0.2)",borderRadius:12,textAlign:"center"}}>
           <div style={{fontSize:14,fontWeight:700,color:C.txt,marginBottom:6}}>New to digital daily reports?</div>
           <div style={{fontSize:13,color:C.lt,lineHeight:1.6,marginBottom:12}}>Send us your PDF or Word template and we'll set it up for you — configured, tested, and ready for your whole team.</div>
-          <a href="mailto:support@mydailyreports.org?subject=Template%20Setup%20Request&body=Hi%2C%20I'd%20like%20help%20setting%20up%20my%20report%20template.%20I've%20attached%20it%20to%20this%20email." style={{display:"inline-block",padding:"10px 20px",background:C.org,color:"#fff",borderRadius:8,fontSize:13,fontWeight:700,textDecoration:"none"}}>
+          <a href="mailto:jessesbillz@gmail.com?subject=Template%20Setup%20Request&body=Hi%2C%20I'd%20like%20help%20setting%20up%20my%20report%20template.%20I've%20attached%20it%20to%20this%20email." style={{display:"inline-block",padding:"10px 20px",background:C.org,color:"#fff",borderRadius:8,fontSize:13,fontWeight:700,textDecoration:"none"}}>
             Send Us Your Template
           </a>
-          <div style={{fontSize:11,color:C.mut,marginTop:8}}>support@mydailyreports.org</div>
+          <div style={{fontSize:11,color:C.mut,marginTop:8}}>jessesbillz@gmail.com</div>
         </div>
       </div>
     </div>
