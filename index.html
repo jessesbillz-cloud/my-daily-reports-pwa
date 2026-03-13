@@ -5168,6 +5168,13 @@ function JobDetail({job, user, onBack, onDeleted}){
             <button onClick={()=>{if(!fieldEditFields){const fc=job.field_config||{};const all=[...(fc.editable||[]).map(f=>({...f,mode:f.autoFill==="date"?"auto-date":f.autoFill==="increment"?"auto-num":"edit"})),...(fc.locked||[]).map(f=>({...f,mode:"lock"}))];setFieldEditFields(all);}setShowFieldEdit(!showFieldEdit);}} style={{width:"100%",display:"flex",alignItems:"center",gap:10,padding:"14px 18px",background:"none",border:"none",borderBottom:`1px solid ${C.brd}`,cursor:"pointer",textAlign:"left"}}>
               <span style={{fontSize:14,fontWeight:600,color:C.lt}}>Edit Template Fields</span>
             </button>
+            <button onClick={()=>reuploadRef.current?.click()} disabled={reuploading} style={{width:"100%",display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,padding:"14px 18px",background:"none",border:"none",borderBottom:`1px solid ${C.brd}`,cursor:"pointer",textAlign:"left"}}>
+              <div style={{display:"flex",alignItems:"center",gap:10}}>
+                <span style={{fontSize:16}}>📄</span><span style={{fontSize:14,fontWeight:600,color:C.lt}}>{reuploading?"Uploading...":"Replace Template File"}</span>
+              </div>
+              {tplFilename&&<span style={{fontSize:11,color:C.mut,maxWidth:140,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{tplFilename}</span>}
+            </button>
+            <input ref={reuploadRef} type="file" accept=".pdf,.docx,.doc,.jpg,.jpeg,.png" onChange={handleReuploadTemplate} style={{display:"none"}}/>
             <button onClick={async()=>{const cur=!!job.field_config?.aiPhotos;const fc={...(job.field_config||{}),aiPhotos:!cur};try{await db.updateJobFieldConfig(job.id,fc);job.field_config=fc;showToast("AI Photo Descriptions "+(fc.aiPhotos?"enabled":"disabled"));}catch(e){showToast("Save failed");}}} style={{width:"100%",display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,padding:"14px 18px",background:"none",border:"none",borderBottom:`1px solid ${C.brd}`,cursor:"pointer",textAlign:"left"}}>
               <div style={{display:"flex",alignItems:"center",gap:10}}>
                 <span style={{fontSize:16}}>🤖</span><span style={{fontSize:14,fontWeight:600,color:C.lt}}>AI Photo Descriptions</span>
