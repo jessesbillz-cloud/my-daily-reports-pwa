@@ -525,37 +525,12 @@ const db = {
     if(!r.ok){const e=await r.json().catch(()=>({}));throw new Error(e.message||"copy_company_templates failed");}
     return await r.json(); // returns count of templates copied
   },
-  // Upload company logo
-  async uploadCompanyLogo(companyId,blob){
-    const ext=blob.type.includes("png")?"png":"jpg";
-    const path=`${companyId}/logo.${ext}`;
-    const hdrs=()=>({apikey:SB_KEY,Authorization:`Bearer ${AUTH_TOKEN||SB_KEY}`,"Content-Type":blob.type});
-    let r=await fetch(`${SB_URL}/storage/v1/object/company-logos/${path}`,{method:"POST",headers:hdrs(),body:blob});
-    if(r.status===401||r.status===403){await refreshAuthToken();r=await fetch(`${SB_URL}/storage/v1/object/company-logos/${path}`,{method:"POST",headers:hdrs(),body:blob});}
-    if(!r.ok){r=await fetch(`${SB_URL}/storage/v1/object/company-logos/${path}`,{method:"PUT",headers:hdrs(),body:blob});}
-    if(r.status===401||r.status===403){await refreshAuthToken();r=await fetch(`${SB_URL}/storage/v1/object/company-logos/${path}`,{method:"PUT",headers:hdrs(),body:blob});}
-    if(!r.ok){const errBody=await r.text().catch(()=>"");console.error("Logo upload failed:",r.status,errBody);throw new Error("Logo upload failed ("+r.status+"): "+errBody.slice(0,200));}
-    // Update company record with logo_path — try RPC first (bypasses RLS), fall back to direct PATCH
-    let saved=false;
-    try{
-      const rpcR=await fetch(`${SB_URL}/rest/v1/rpc/update_company_logo`,{method:"POST",headers:this._h(),body:JSON.stringify({p_company_id:companyId,p_logo_path:path})});
-      if(rpcR.ok)saved=true;
-      else console.warn("[logo] RPC update_company_logo failed:",rpcR.status);
-    }catch(e){console.warn("[logo] RPC not available:",e.message);}
-    if(!saved){
-      const patchR=await fetch(`${SB_URL}/rest/v1/companies?id=eq.${companyId}`,{method:"PATCH",headers:this._h(),body:JSON.stringify({logo_path:path})});
-      const patchResult=patchR.ok?await patchR.json().catch(()=>[]):[];
-      console.log("[logo] direct PATCH result:",patchResult.length,"rows");
-      if(!patchResult||patchResult.length===0){
-        throw new Error("Logo uploaded to storage but could not save to company record. Run the SQL fix in Supabase.");
-      }
-    }
-    return path;
+  // Company logo — stored as base64 data URL in localStorage (simple, no bucket/RLS issues)
+  saveCompanyLogo(companyId,dataUrl){
+    try{localStorage.setItem("mdr_logo_"+companyId,dataUrl);}catch(e){console.warn("[logo] localStorage full:",e);}
   },
-  // Get company logo URL (public bucket)
-  getCompanyLogoUrl(logoPath){
-    if(!logoPath)return null;
-    return `${SB_URL}/storage/v1/object/public/company-logos/${logoPath}`;
+  getCompanyLogo(companyId){
+    try{return localStorage.getItem("mdr_logo_"+companyId)||null;}catch(e){return null;}
   },
   // Get company record by ID
   async getCompany(companyId){
@@ -610,7 +585,9 @@ function AccountSettings({user, onBack, onLogout}){
           if(p.company_name)setCompanyName(p.company_name);
           if(p.company_id){
             setSelectedCompany({id:p.company_id,name:p.company_name||""});
-            try{const co=await db.getCompany(p.company_id);console.log("[profile] company loaded:",co?.id,co?.name,"logo_path:",co?.logo_path);if(co?.logo_path)setCompanyLogoUrl(db.getCompanyLogoUrl(co.logo_path));}catch(e){console.error("[profile] getCompany error:",e);}
+            // Load logo from localStorage
+            const savedLogo=db.getCompanyLogo(p.company_id);
+            if(savedLogo)setCompanyLogoUrl(savedLogo);
           }
           if(p.timezone)setTimezone(p.timezone);
           if(p.slug)setSlug(p.slug);
@@ -648,14 +625,15 @@ function AccountSettings({user, onBack, onLogout}){
     if(!file)return;
     if(!selectedCompany){flash("Please select or create a company first","err");if(logoInputRef.current)logoInputRef.current.value="";return;}
     if(!file.type.startsWith("image/")){flash("Please select an image file","err");return;}
-    if(file.size>5*1024*1024){flash("Logo must be under 5MB","err");return;}
+    if(file.size>2*1024*1024){flash("Logo must be under 2MB","err");return;}
     setUploadingLogo(true);
     try{
-      await refreshAuthToken();
-      const path=await db.uploadCompanyLogo(selectedCompany.id,file);
-      setCompanyLogoUrl(db.getCompanyLogoUrl(path)+"?t="+Date.now());
-      flash("Company logo uploaded");
-    }catch(err){flash("Logo upload failed: "+err.message,"err");}
+      // Convert to data URL and store locally — no bucket/RLS needed
+      const dataUrl=await new Promise((res,rej)=>{const fr=new FileReader();fr.onload=()=>res(fr.result);fr.onerror=rej;fr.readAsDataURL(file);});
+      db.saveCompanyLogo(selectedCompany.id,dataUrl);
+      setCompanyLogoUrl(dataUrl);
+      flash("Company logo saved");
+    }catch(err){flash("Logo save failed: "+err.message,"err");}
     finally{setUploadingLogo(false);if(logoInputRef.current)logoInputRef.current.value="";}
   };
 
@@ -2343,30 +2321,27 @@ function WorkLogEditor({job, user, onBack, reportDate}){
     // Light grey header bar with margins
     page.drawRectangle({x:M,y:H-headerH,width:CW,height:headerH,color:rgb(.85,.85,.85)});
 
-    // Embed company logo — try job's company, then user's profile company (no MDR fallback)
+    // Embed company logo — check localStorage first, then fall back to company record
     let logoImg=null;
     let logoDrawW=0,logoDrawH=0;
     try{
       let logoBytes=null;let isJpg=true;
-      // 1. Try job's company logo
+      // 1. Try localStorage (always available, no auth needed)
       const companyIds=[job.company_id];
-      // 2. Also try user's profile company as fallback
       try{const prof=await db.getProfile(user.id);if(prof?.company_id&&prof.company_id!==job.company_id)companyIds.push(prof.company_id);}catch(e){}
       for(const cid of companyIds){
         if(!cid||logoBytes)continue;
-        try{
-          const co=await db.getCompany(cid);
-          if(co?.logo_path){
-            const logoUrl=db.getCompanyLogoUrl(co.logo_path);
-            const clResp=await fetch(logoUrl);
-            if(clResp.ok){
-              logoBytes=new Uint8Array(await clResp.arrayBuffer());
-              isJpg=!co.logo_path.toLowerCase().endsWith(".png");
-            }
-          }
-        }catch(e){console.error("Company logo fetch:",e);}
+        const localLogo=db.getCompanyLogo(cid);
+        if(localLogo&&localLogo.startsWith("data:image")){
+          try{
+            const b64=localLogo.split(",")[1];
+            const bin=atob(b64);
+            const arr=new Uint8Array(bin.length);for(let i=0;i<bin.length;i++)arr[i]=bin.charCodeAt(i);
+            logoBytes=arr;
+            isJpg=!localLogo.includes("image/png");
+          }catch(e){console.error("Logo decode:",e);}
+        }
       }
-      // No MDR fallback — only show company logo if found
       if(logoBytes){
         logoImg=isJpg?await doc.embedJpg(logoBytes):await doc.embedPng(logoBytes);
         const logoMaxH=headerH-2*hdrPad;
@@ -5350,7 +5325,7 @@ function Dashboard({user, onLogout}){
   };
   // Quick refresh — only update report statuses (used on back navigation to avoid full reload)
   const refreshStatuses=async()=>{try{const ids=jobs.filter(j=>!j.is_archived).map(j=>j.id);if(ids.length)setRpts(await db.todayRpts(ids));}catch(e){}};
-  const load=async()=>{setLoading(true);try{const a=await db.jobs(user.id);setJobs(a);const ids=a.filter(j=>!j.is_archived).map(j=>j.id);if(ids.length)setRpts(await db.todayRpts(ids));const p=await db.getProfile(user.id);if(p?.slug)setProfileSlug(p.slug);if(p?.company_id){try{const co=await db.getCompany(p.company_id);if(co?.logo_path)setDashLogoUrl(db.getCompanyLogoUrl(co.logo_path));}catch(e){}}await loadRequests();
+  const load=async()=>{setLoading(true);try{const a=await db.jobs(user.id);setJobs(a);const ids=a.filter(j=>!j.is_archived).map(j=>j.id);if(ids.length)setRpts(await db.todayRpts(ids));const p=await db.getProfile(user.id);if(p?.slug)setProfileSlug(p.slug);if(p?.company_id){const savedLogo=db.getCompanyLogo(p.company_id);if(savedLogo)setDashLogoUrl(savedLogo);}await loadRequests();
     // Restore navigation state — reopen the job user was on before closing the app
     if(!navRestored){setNavRestored(true);try{const raw=localStorage.getItem("mdr_nav");if(raw){const nav=JSON.parse(raw);if(nav.jobId&&(Date.now()-nav.ts)<24*60*60*1000){const match=a.find(j=>j.id===nav.jobId);if(match)setSelJob(match);}}}catch(e){}}
   }catch(e){console.error(e);}finally{setLoading(false);}};
