@@ -12,9 +12,12 @@ serve(async (req) => {
   }
 
   try {
+    console.log("[send-report] Starting — parsing request body");
     const { to, subject, body, html_body, pdf_base64, pdf_filename, sender_name } = await req.json();
+    console.log("[send-report] Recipients:", JSON.stringify(to), "Subject:", subject?.slice(0, 60), "Has PDF:", !!pdf_base64, "PDF size:", pdf_base64?.length || 0);
 
     if (!to || !to.length) {
+      console.error("[send-report] No recipients provided");
       return new Response(JSON.stringify({ error: "No recipients" }), {
         status: 400,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -23,14 +26,16 @@ serve(async (req) => {
 
     const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY");
     if (!RESEND_API_KEY) {
+      console.error("[send-report] RESEND_API_KEY not found in env");
       return new Response(
-        JSON.stringify({ error: "RESEND_API_KEY not configured" }),
+        JSON.stringify({ error: "RESEND_API_KEY not configured. Set it in Edge Function secrets." }),
         {
           status: 500,
           headers: { ...corsHeaders, "Content-Type": "application/json" },
         }
       );
     }
+    console.log("[send-report] RESEND_API_KEY found, length:", RESEND_API_KEY.length, "prefix:", RESEND_API_KEY.slice(0, 6));
 
     const SUPABASE_URL = Deno.env.get("SUPABASE_URL");
     const SUPABASE_SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
@@ -53,18 +58,17 @@ serve(async (req) => {
           const suppressedSet = new Set(suppressed.map((s: { email: string }) => s.email));
           validRecipients = to.filter((e: string) => !suppressedSet.has(e.toLowerCase().trim()));
           skippedEmails = to.filter((e: string) => suppressedSet.has(e.toLowerCase().trim()));
-
           if (skippedEmails.length > 0) {
-            console.warn("Skipped suppressed emails:", skippedEmails);
+            console.warn("[send-report] Skipped suppressed:", skippedEmails);
           }
         }
       } catch (suppErr) {
-        // If suppression check fails, send to all — don't block the report
-        console.error("Suppression check failed (sending anyway):", suppErr);
+        console.error("[send-report] Suppression check failed (sending anyway):", suppErr);
       }
     }
 
     if (validRecipients.length === 0) {
+      console.error("[send-report] All recipients suppressed");
       return new Response(
         JSON.stringify({
           error: "All recipients are suppressed due to previous bounces or complaints.",
@@ -78,8 +82,8 @@ serve(async (req) => {
     }
 
     const FROM_EMAIL = Deno.env.get("FROM_EMAIL") || "reports@mydailyreports.org";
+    console.log("[send-report] Sending from:", FROM_EMAIL, "to:", validRecipients, "sender_name:", sender_name);
 
-    // Use custom HTML body if provided, fallback to plain body text
     const emailHtml = html_body || `
       <div style="font-family: -apple-system, sans-serif; max-width: 600px; margin: 0 auto;">
         <div style="background: #e8742a; padding: 20px 24px; border-radius: 8px 8px 0 0;">
@@ -95,32 +99,30 @@ serve(async (req) => {
       </div>
     `;
 
+    console.log("[send-report] Calling Resend API...");
+    const resendPayload = {
+      from: `${sender_name || "My Daily Reports"} <${FROM_EMAIL}>`,
+      to: validRecipients,
+      subject: subject,
+      html: emailHtml,
+      attachments: pdf_base64
+        ? [{ filename: pdf_filename || "report.pdf", content: pdf_base64 }]
+        : [],
+    };
+
     const response = await fetch("https://api.resend.com/emails", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${RESEND_API_KEY}`,
       },
-      body: JSON.stringify({
-        from: `${sender_name || "My Daily Reports"} <${FROM_EMAIL}>`,
-        to: validRecipients,
-        subject: subject,
-        html: emailHtml,
-        attachments: pdf_base64
-          ? [
-              {
-                filename: pdf_filename || "report.pdf",
-                content: pdf_base64,
-              },
-            ]
-          : [],
-      }),
+      body: JSON.stringify(resendPayload),
     });
 
     const result = await response.json();
+    console.log("[send-report] Resend response:", response.status, JSON.stringify(result));
 
     if (!response.ok) {
-      console.error("Resend API error:", response.status, JSON.stringify(result));
       return new Response(
         JSON.stringify({ error: result.message || result.name || "Email send failed", details: result }),
         {
@@ -130,6 +132,7 @@ serve(async (req) => {
       );
     }
 
+    console.log("[send-report] Success! Email ID:", result.id);
     return new Response(
       JSON.stringify({
         success: true,
@@ -142,6 +145,7 @@ serve(async (req) => {
       }
     );
   } catch (error) {
+    console.error("[send-report] Uncaught error:", error.message, error.stack);
     return new Response(JSON.stringify({ error: error.message }), {
       status: 500,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
