@@ -534,10 +534,22 @@ const db = {
     if(r.status===401||r.status===403){await refreshAuthToken();r=await fetch(`${SB_URL}/storage/v1/object/company-logos/${path}`,{method:"POST",headers:hdrs(),body:blob});}
     if(!r.ok){r=await fetch(`${SB_URL}/storage/v1/object/company-logos/${path}`,{method:"PUT",headers:hdrs(),body:blob});}
     if(r.status===401||r.status===403){await refreshAuthToken();r=await fetch(`${SB_URL}/storage/v1/object/company-logos/${path}`,{method:"PUT",headers:hdrs(),body:blob});}
-    if(!r.ok){const errBody=await r.text().catch(()=>"");console.error("Logo upload failed:",r.status,errBody);throw new Error("Logo upload failed: "+r.status);}
-    // Update company record with logo_path
-    const patchR=await fetch(`${SB_URL}/rest/v1/companies?id=eq.${companyId}`,{method:"PATCH",headers:this._h(),body:JSON.stringify({logo_path:path})});
-    if(!patchR.ok)console.error("Logo path save to company failed:",patchR.status);
+    if(!r.ok){const errBody=await r.text().catch(()=>"");console.error("Logo upload failed:",r.status,errBody);throw new Error("Logo upload failed ("+r.status+"): "+errBody.slice(0,200));}
+    // Update company record with logo_path — try RPC first (bypasses RLS), fall back to direct PATCH
+    let saved=false;
+    try{
+      const rpcR=await fetch(`${SB_URL}/rest/v1/rpc/update_company_logo`,{method:"POST",headers:this._h(),body:JSON.stringify({p_company_id:companyId,p_logo_path:path})});
+      if(rpcR.ok)saved=true;
+      else console.warn("[logo] RPC update_company_logo failed:",rpcR.status);
+    }catch(e){console.warn("[logo] RPC not available:",e.message);}
+    if(!saved){
+      const patchR=await fetch(`${SB_URL}/rest/v1/companies?id=eq.${companyId}`,{method:"PATCH",headers:this._h(),body:JSON.stringify({logo_path:path})});
+      const patchResult=patchR.ok?await patchR.json().catch(()=>[]):[];
+      console.log("[logo] direct PATCH result:",patchResult.length,"rows");
+      if(!patchResult||patchResult.length===0){
+        throw new Error("Logo uploaded to storage but could not save to company record. Run the SQL fix in Supabase.");
+      }
+    }
     return path;
   },
   // Get company logo URL (public bucket)
@@ -598,7 +610,7 @@ function AccountSettings({user, onBack, onLogout}){
           if(p.company_name)setCompanyName(p.company_name);
           if(p.company_id){
             setSelectedCompany({id:p.company_id,name:p.company_name||""});
-            try{const co=await db.getCompany(p.company_id);if(co?.logo_path)setCompanyLogoUrl(db.getCompanyLogoUrl(co.logo_path));}catch(e){}
+            try{const co=await db.getCompany(p.company_id);console.log("[profile] company loaded:",co?.id,co?.name,"logo_path:",co?.logo_path);if(co?.logo_path)setCompanyLogoUrl(db.getCompanyLogoUrl(co.logo_path));}catch(e){console.error("[profile] getCompany error:",e);}
           }
           if(p.timezone)setTimezone(p.timezone);
           if(p.slug)setSlug(p.slug);
