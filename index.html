@@ -533,9 +533,11 @@ const db = {
     let r=await fetch(`${SB_URL}/storage/v1/object/company-logos/${path}`,{method:"POST",headers:hdrs(),body:blob});
     if(r.status===401||r.status===403){await refreshAuthToken();r=await fetch(`${SB_URL}/storage/v1/object/company-logos/${path}`,{method:"POST",headers:hdrs(),body:blob});}
     if(!r.ok){r=await fetch(`${SB_URL}/storage/v1/object/company-logos/${path}`,{method:"PUT",headers:hdrs(),body:blob});}
-    if(!r.ok)throw new Error("Logo upload failed: "+r.status);
-    // Update company record
-    await fetch(`${SB_URL}/rest/v1/companies?id=eq.${companyId}`,{method:"PATCH",headers:this._h(),body:JSON.stringify({logo_path:path})});
+    if(r.status===401||r.status===403){await refreshAuthToken();r=await fetch(`${SB_URL}/storage/v1/object/company-logos/${path}`,{method:"PUT",headers:hdrs(),body:blob});}
+    if(!r.ok){const errBody=await r.text().catch(()=>"");console.error("Logo upload failed:",r.status,errBody);throw new Error("Logo upload failed: "+r.status);}
+    // Update company record with logo_path
+    const patchR=await fetch(`${SB_URL}/rest/v1/companies?id=eq.${companyId}`,{method:"PATCH",headers:this._h(),body:JSON.stringify({logo_path:path})});
+    if(!patchR.ok)console.error("Logo path save to company failed:",patchR.status);
     return path;
   },
   // Get company logo URL (public bucket)
@@ -2064,6 +2066,7 @@ function WorkLogEditor({job, user, onBack, reportDate}){
   const [photoTarget,setPhotoTarget]=useState(null); // contractor id for photo upload
   const [photoMode,setPhotoMode]=useState(null); // "camera" or "library"
   const [sectionPhotos,setSectionPhotos]=useState({}); // {materials:[{data,name,ts}], ...}
+  const [sectionCarry,setSectionCarry]=useState({}); // {materials:true, equipment:false, ...} — carry over toggle per section
   const sectionPhotoRef=useRef(null);
   const sectionLibraryRef=useRef(null);
   const [sectionPhotoTarget,setSectionPhotoTarget]=useState(null); // section key
@@ -2182,6 +2185,7 @@ function WorkLogEditor({job, user, onBack, reportDate}){
             if(c.weatherMid)setWeatherMid(c.weatherMid);
             if(c.weatherPM)setWeatherPM(c.weatherPM);
             if(c.sectionPhotos)setSectionPhotos(c.sectionPhotos);
+            if(c.sectionCarry)setSectionCarry(c.sectionCarry);
           }
         } else {
           // No report for today — carry over from most recent previous report
@@ -2206,11 +2210,13 @@ function WorkLogEditor({job, user, onBack, reportDate}){
                   setContractors(carried);
                 }
               }
-              // Carry over section values (clear photos, keep text)
-              if(pc.materials)setMaterials(pc.materials);
-              if(pc.equipment)setEquipment(pc.equipment);
-              if(pc.qualityControl)setQualityControl(pc.qualityControl);
+              // Carry over section values only if carry-over toggled on (clear photos, keep text)
+              const sc=pc.sectionCarry||{};
+              if(pc.materials&&sc.materials)setMaterials(pc.materials);
+              if(pc.equipment&&sc.equipment)setEquipment(pc.equipment);
+              if(pc.qualityControl&&sc.qualityControl)setQualityControl(pc.qualityControl);
               if(pc.customCategories)setCustomCategories(pc.customCategories);
+              if(sc)setSectionCarry(sc);
             }
           }catch(pe){console.error("Carry-over:",pe);}
         }
@@ -2288,7 +2294,7 @@ function WorkLogEditor({job, user, onBack, reportDate}){
 
   const buildContent=()=>({
     contractors,generalNotes,safetyNotes,materials,equipment,qualityControl,customCategories,survey,
-    weatherEnabled,weatherAM,weatherMid,weatherPM,sectionPhotos,
+    weatherEnabled,weatherAM,weatherMid,weatherPM,sectionPhotos,sectionCarry,
     reportType:"worklog"
   });
 
@@ -2894,7 +2900,11 @@ function WorkLogEditor({job, user, onBack, reportDate}){
       showToast("Report emailed to "+recipients.length+" recipient"+(recipients.length>1?"s":"")+"!");
     }catch(e){
       console.error("Email error:",e);
-      showToast("Email failed: "+e.message);
+      const msg=e.message||"Unknown error";
+      if(msg.includes("RESEND_API_KEY"))showToast("Email not configured: Set RESEND_API_KEY in Supabase Edge Function secrets.");
+      else if(msg.includes("404")||msg.includes("FunctionNotFound"))showToast("Email function not deployed. Run: npx supabase functions deploy send-report");
+      else if(msg.includes("validation_error")||msg.includes("not verified"))showToast("Email domain not verified in Resend. Verify your sending domain at resend.com.");
+      else showToast("Email failed: "+msg);
     }finally{setEmailing(false);}
   };
 
@@ -3173,6 +3183,13 @@ function WorkLogEditor({job, user, onBack, reportDate}){
                     ))}
                   </div>
                 )}
+                {/* Carry-over toggle — matches contractor pattern */}
+                <div style={{marginTop:12,padding:"10px 12px",background:C.org+"0A",border:`1px solid ${C.org}22`,borderRadius:8,display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+                  <span style={{fontSize:12,fontWeight:600,color:C.lt}}>Carry over to tomorrow</span>
+                  <button onClick={()=>setSectionCarry(p=>({...p,[sec.key]:!p[sec.key]}))} style={{width:44,height:24,borderRadius:12,background:sectionCarry[sec.key]?C.org:C.inp,border:`1px solid ${sectionCarry[sec.key]?C.org:C.brd}`,cursor:"pointer",position:"relative",transition:"background 0.2s",padding:0}}>
+                    <div style={{width:18,height:18,borderRadius:"50%",background:"#fff",position:"absolute",top:2,left:sectionCarry[sec.key]?22:3,transition:"left 0.2s",boxShadow:"0 1px 3px rgba(0,0,0,0.3)"}}/>
+                  </button>
+                </div>
               </div>
             )}
           </div>
@@ -5273,6 +5290,7 @@ function Dashboard({user, onLogout}){
   const [showSubDash,setShowSubDash]=useState(false);
   const [shareCopied,setShareCopied]=useState(false);
   const [navRestored,setNavRestored]=useState(false);
+  const [dashLogoUrl,setDashLogoUrl]=useState(null);
 
   // Persist navigation state — saves selected job ID so user returns to where they were
   const saveNav=(jobId)=>{try{localStorage.setItem("mdr_nav",JSON.stringify({jobId:jobId||null,ts:Date.now()}));}catch(e){}};
@@ -5290,7 +5308,7 @@ function Dashboard({user, onLogout}){
       setCalRequests(reqs);
     }catch(e){console.error(e);}
   };
-  const load=async()=>{setLoading(true);try{const a=await db.jobs(user.id);setJobs(a);const ids=a.filter(j=>!j.is_archived).map(j=>j.id);if(ids.length)setRpts(await db.todayRpts(ids));const p=await db.getProfile(user.id);if(p?.slug)setProfileSlug(p.slug);await loadRequests();
+  const load=async()=>{setLoading(true);try{const a=await db.jobs(user.id);setJobs(a);const ids=a.filter(j=>!j.is_archived).map(j=>j.id);if(ids.length)setRpts(await db.todayRpts(ids));const p=await db.getProfile(user.id);if(p?.slug)setProfileSlug(p.slug);if(p?.company_id){try{const co=await db.getCompany(p.company_id);if(co?.logo_path)setDashLogoUrl(db.getCompanyLogoUrl(co.logo_path));}catch(e){}}await loadRequests();
     // Restore navigation state — reopen the job user was on before closing the app
     if(!navRestored){setNavRestored(true);try{const raw=localStorage.getItem("mdr_nav");if(raw){const nav=JSON.parse(raw);if(nav.jobId&&(Date.now()-nav.ts)<24*60*60*1000){const match=a.find(j=>j.id===nav.jobId);if(match)setSelJob(match);}}}catch(e){}}
   }catch(e){console.error(e);}finally{setLoading(false);}};
@@ -5558,6 +5576,7 @@ function Dashboard({user, onLogout}){
         </div>
 
         <div style={{justifySelf:"end",display:"flex",alignItems:"center",gap:8}}>
+          {dashLogoUrl&&<img src={dashLogoUrl} alt="" style={{width:34,height:34,borderRadius:8,objectFit:"contain",background:"#fff",border:`1px solid ${C.brd}`}}/>}
           <button onClick={doShare} style={{width:34,height:34,borderRadius:8,background:C.inp,border:`1px solid ${C.brd}`,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",fontSize:14,color:C.mut}}>↗</button>
           <button onClick={()=>setShowSet(!showSet)} style={{width:34,height:34,borderRadius:8,background:C.inp,border:`1px solid ${C.brd}`,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",fontSize:14,color:C.mut}}>⚙️</button>
         </div>
