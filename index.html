@@ -379,6 +379,13 @@ const db = {
     const d=await r.json();
     return d[0]||null;
   },
+  // Delete a report by ID (for restarting working copies)
+  async deleteReport(reportId,jobId,reportDate){
+    const r=await fetch(`${SB_URL}/rest/v1/reports?id=eq.${reportId}`,{method:"DELETE",headers:this._h()});
+    if(!r.ok){const e=await r.json().catch(()=>({}));throw new Error(e.message||"Delete failed");}
+    // Clear cache so next save creates a fresh report
+    if(jobId&&reportDate)delete this._reportIdCache[jobId+"_"+reportDate];
+  },
   // Update job field_config
   async updateJobFieldConfig(jobId,fieldConfig){
     const r=await fetch(`${SB_URL}/rest/v1/jobs?id=eq.${jobId}`,{method:"PATCH",headers:this._h(),body:JSON.stringify({field_config:fieldConfig})});
@@ -613,6 +620,9 @@ function AccountSettings({user, onBack, onLogout}){
     setSelectedCompany(company);
     setCompanyName(company.name);
     setCompanyMatches([]);
+    // Load logo from localStorage for this company
+    const savedLogo=db.getCompanyLogo(company.id);
+    setCompanyLogoUrl(savedLogo);
   };
   const clearCompany=()=>{
     setSelectedCompany(null);
@@ -3130,7 +3140,7 @@ function WorkLogEditor({job, user, onBack, reportDate}){
                         <div key={i} style={{width:72,height:72,borderRadius:8,overflow:"hidden",position:"relative",border:`1px solid ${C.brd}`}}>
                           <img src={ph.data} style={{width:"100%",height:"100%",objectFit:"cover"}}/>
                           <button onClick={()=>removePhoto(c.id,i)} style={{position:"absolute",top:2,right:2,width:20,height:20,borderRadius:"50%",background:"rgba(0,0,0,0.6)",border:"none",color:"#fff",fontSize:12,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}>✕</button>
-                          <button disabled={aiDescribing[aiKey]} onClick={async()=>{const desc=await describePhoto(ph.data,`Contractor: ${c.name}, Job: ${job?.name||""}`,aiKey);if(desc)updateContractor(c.id,"description",(c.description?c.description+"\n":"")+desc);}} style={{position:"absolute",bottom:2,left:2,padding:"2px 5px",borderRadius:4,background:aiDescribing[aiKey]?C.blu:C.org,border:"none",color:"#fff",fontSize:9,fontWeight:700,cursor:aiDescribing[aiKey]?"wait":"pointer",opacity:aiDescribing[aiKey]?0.7:0.9}}>{aiDescribing[aiKey]?"···":"AI"}</button>
+                          {job.field_config?.aiPhotos&&<button disabled={aiDescribing[aiKey]} onClick={async()=>{const desc=await describePhoto(ph.data,`Contractor: ${c.name}, Job: ${job?.name||""}`,aiKey);if(desc)updateContractor(c.id,"description",(c.description?c.description+"\n":"")+desc);}} style={{position:"absolute",bottom:2,left:2,padding:"2px 5px",borderRadius:4,background:aiDescribing[aiKey]?C.blu:C.org,border:"none",color:"#fff",fontSize:9,fontWeight:700,cursor:aiDescribing[aiKey]?"wait":"pointer",opacity:aiDescribing[aiKey]?0.7:0.9}}>{aiDescribing[aiKey]?"···":"AI"}</button>}
                         </div>
                       );})}
                     </div>
@@ -3201,7 +3211,7 @@ function WorkLogEditor({job, user, onBack, reportDate}){
                       <div key={pi} style={{position:"relative",width:60,height:60,borderRadius:6,overflow:"hidden",border:`1px solid ${C.brd}`}}>
                         <img src={ph.data} alt="" style={{width:"100%",height:"100%",objectFit:"cover"}}/>
                         <button onClick={()=>removeSectionPhoto(sec.key,pi)} style={{position:"absolute",top:1,right:1,background:"rgba(0,0,0,0.6)",border:"none",color:"#fff",fontSize:10,width:16,height:16,borderRadius:"50%",cursor:"pointer",lineHeight:1,padding:0}}>✕</button>
-                        <button disabled={aiDescribing[aiKey]} onClick={async()=>{const desc=await describePhoto(ph.data,`Section: ${sec.title}, Job: ${job?.name||""}`,aiKey);if(desc)sec.set((sec.val?sec.val+"\n":"")+desc);}} style={{position:"absolute",bottom:1,left:1,padding:"1px 4px",borderRadius:3,background:aiDescribing[aiKey]?C.blu:C.org,border:"none",color:"#fff",fontSize:8,fontWeight:700,cursor:aiDescribing[aiKey]?"wait":"pointer",opacity:aiDescribing[aiKey]?0.7:0.9}}>{aiDescribing[aiKey]?"···":"AI"}</button>
+                        {job.field_config?.aiPhotos&&<button disabled={aiDescribing[aiKey]} onClick={async()=>{const desc=await describePhoto(ph.data,`Section: ${sec.title}, Job: ${job?.name||""}`,aiKey);if(desc)sec.set((sec.val?sec.val+"\n":"")+desc);}} style={{position:"absolute",bottom:1,left:1,padding:"1px 4px",borderRadius:3,background:aiDescribing[aiKey]?C.blu:C.org,border:"none",color:"#fff",fontSize:8,fontWeight:700,cursor:aiDescribing[aiKey]?"wait":"pointer",opacity:aiDescribing[aiKey]?0.7:0.9}}>{aiDescribing[aiKey]?"···":"AI"}</button>}
                       </div>
                     );})}
                   </div>
@@ -3886,7 +3896,11 @@ function ReportEditor({job, user, onBack, reportDate}){
         baseName=baseName.replace(/\{year\}/g,fmtYYYY);
         baseName=baseName.replace(/\{project\}/g,(job.name||"").replace(/\s+/g,"_"));
         if(!hasDateToken)baseName+="_"+fmtMon+" "+fmtDay+"_"+fmtYYYY;
-        if(!hasNumToken)baseName=baseName.replace(/_(\d+)(?=_)/,(m,n)=>"_"+rptNum)||baseName;
+        if(!hasNumToken){
+          const replaced=baseName.replace(/_(\d+)(?=_)/,()=>"_"+rptNum);
+          if(replaced===baseName)baseName=rptNum+"_"+baseName;
+          else baseName=replaced;
+        }
         const docxFilename=baseName+".docx";
         // Upload file first, THEN save report record (ensures file exists before marking submitted)
         setSubmitStep("Uploading report...");
@@ -4305,7 +4319,12 @@ function ReportEditor({job, user, onBack, reportDate}){
       baseName=baseName.replace(/\{project\}/g,(job.name||"").replace(/\s+/g,"_"));
       // If pattern had no date/number tokens (raw filename), force-append to ensure uniqueness
       if(!hasDateToken)baseName+="_"+fmtMon+" "+fmtDay+"_"+fmtYYYY;
-      if(!hasNumToken)baseName=baseName.replace(/_(\d+)(?=_)/,(m,n)=>"_"+rptNum)||baseName;
+      if(!hasNumToken){
+        // Try to replace existing number between underscores, otherwise prepend number after first segment
+        const replaced=baseName.replace(/_(\d+)(?=_)/,()=>"_"+rptNum);
+        if(replaced===baseName)baseName=rptNum+"_"+baseName; // no match found — prepend
+        else baseName=replaced;
+      }
       const pdfFilename=baseName+".pdf";
 
       // ── 8. Upload PDF first, THEN save report record (ensures file exists before marking submitted) ──
@@ -4614,7 +4633,7 @@ function ReportEditor({job, user, onBack, reportDate}){
                   <div style={{position:"relative",aspectRatio:photoLayout==="1"?"auto":"1"}}>
                     <img src={p.src} alt={p.name} style={{width:"100%",height:"100%",objectFit:"cover",display:"block"}}/>
                     <button onClick={()=>setPhotos(prev=>prev.filter(x=>x.id!==p.id))} style={{position:"absolute",top:4,right:4,width:22,height:22,borderRadius:"50%",background:"rgba(0,0,0,0.7)",border:"none",color:"#fff",fontSize:12,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}>✕</button>
-                    <button disabled={aiDescribing[aiKey]} onClick={async()=>{const desc=await describePhoto(p.src,`Job: ${job?.name||""}`,aiKey);if(desc)setPhotos(prev=>prev.map(x=>x.id===p.id?{...x,caption:desc}:x));}} style={{position:"absolute",bottom:4,left:4,padding:"3px 7px",borderRadius:5,background:aiDescribing[aiKey]?C.blu:C.org,border:"none",color:"#fff",fontSize:10,fontWeight:700,cursor:aiDescribing[aiKey]?"wait":"pointer",opacity:aiDescribing[aiKey]?0.7:0.9}}>{aiDescribing[aiKey]?"···":"AI"}</button>
+                    {job.field_config?.aiPhotos&&<button disabled={aiDescribing[aiKey]} onClick={async()=>{const desc=await describePhoto(p.src,`Job: ${job?.name||""}`,aiKey);if(desc)setPhotos(prev=>prev.map(x=>x.id===p.id?{...x,caption:desc}:x));}} style={{position:"absolute",bottom:4,left:4,padding:"3px 7px",borderRadius:5,background:aiDescribing[aiKey]?C.blu:C.org,border:"none",color:"#fff",fontSize:10,fontWeight:700,cursor:aiDescribing[aiKey]?"wait":"pointer",opacity:aiDescribing[aiKey]?0.7:0.9}}>{aiDescribing[aiKey]?"···":"AI"}</button>}
                   </div>
                   <input type="text" value={p.caption||""} onChange={e=>setPhotos(prev=>prev.map(x=>x.id===p.id?{...x,caption:e.target.value}:x))} placeholder="Photo caption..." style={{width:"100%",padding:"6px 8px",background:C.inp,border:"none",borderTop:`1px solid ${C.brd}`,color:C.txt,fontSize:11,boxSizing:"border-box"}}/>
                 </div>
@@ -4776,6 +4795,8 @@ function JobDetail({job, user, onBack, onDeleted}){
     const padNum=padding>0?String(num).padStart(padding,"0"):String(num);
     const pattern=conv.pattern||job.report_filename_pattern||job.name||"Report";
     let n=pattern.replace(/\.[^.]+$/,"");
+    const hasDateToken=n.includes("{date}")||n.includes("{year}");
+    const hasNumToken=n.includes("{report_number}");
     // Swap tokens
     n=n.replace(/\{report_number\}/g,padNum);
     // Parse the date for this report
@@ -4806,6 +4827,14 @@ function JobDetail({job, user, onBack, onDeleted}){
     n=n.replace(/\{date\}/g,dateStr);
     n=n.replace(/\{year\}/g,yyyy);
     n=n.replace(/\{project\}/g,(job.name||"").replace(/\s+/g,"_"));
+    // Force-append date/number if pattern had no tokens (raw filename)
+    const fmtDay=String(parseInt(dd));
+    if(!hasDateToken)n+="_"+monNames[monthIdx]+" "+fmtDay+"_"+yyyy;
+    if(!hasNumToken){
+      const replaced=n.replace(/_(\d+)(?=_)/,()=>"_"+padNum);
+      if(replaced===n)n=padNum+"_"+n;
+      else n=replaced;
+    }
     return n;
   };
 
@@ -4937,14 +4966,17 @@ function JobDetail({job, user, onBack, onDeleted}){
             <div style={{textAlign:"center",padding:"16px 0",color:C.mut,fontSize:13}}>No drafts in progress</div>
           ):(
             working.map((r,i)=>{const rptName=buildReportName(r.report_number||1,r.report_date);return(
-              <button key={r.id} onClick={()=>openReport(r.report_date)} style={{width:"100%",display:"flex",alignItems:"center",gap:12,padding:"14px 16px",background:"transparent",border:"none",borderBottom:i<working.length-1?`1px solid ${C.brd}`:"none",cursor:"pointer",textAlign:"left"}}>
-                <div style={{width:10,height:10,borderRadius:"50%",background:C.org,flexShrink:0}}/>
-                <div style={{flex:1,minWidth:0}}>
-                  <div style={{fontSize:14,fontWeight:600,color:C.lt,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{rptName} — {new Date(r.report_date+"T12:00:00").toLocaleDateString("en-US",{weekday:"short",month:"short",day:"numeric",timeZone:tz})}</div>
-                  <div style={{fontSize:11,color:C.mut}}>Last edited {r.updated_at?new Date(r.updated_at).toLocaleTimeString("en-US",{hour:"numeric",minute:"2-digit",timeZone:tz}):""}</div>
-                </div>
-                <div style={{color:C.org,fontSize:20,flexShrink:0}}>›</div>
-              </button>);})
+              <div key={r.id} style={{display:"flex",alignItems:"center",borderBottom:i<working.length-1?`1px solid ${C.brd}`:"none"}}>
+                <button onClick={()=>openReport(r.report_date)} style={{flex:1,display:"flex",alignItems:"center",gap:12,padding:"14px 16px",background:"transparent",border:"none",cursor:"pointer",textAlign:"left"}}>
+                  <div style={{width:10,height:10,borderRadius:"50%",background:C.org,flexShrink:0}}/>
+                  <div style={{flex:1,minWidth:0}}>
+                    <div style={{fontSize:14,fontWeight:600,color:C.lt,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{rptName} — {new Date(r.report_date+"T12:00:00").toLocaleDateString("en-US",{weekday:"short",month:"short",day:"numeric",timeZone:tz})}</div>
+                    <div style={{fontSize:11,color:C.mut}}>Last edited {r.updated_at?new Date(r.updated_at).toLocaleTimeString("en-US",{hour:"numeric",minute:"2-digit",timeZone:tz}):""}</div>
+                  </div>
+                  <div style={{color:C.org,fontSize:20,flexShrink:0}}>›</div>
+                </button>
+                <button onClick={async(e)=>{e.stopPropagation();if(!confirm("Delete this draft and start over?"))return;try{await db.deleteReport(r.id,job.id,r.report_date);showToast("Draft deleted");loadReports();}catch(err){alert("Delete failed: "+err.message);}}} style={{padding:"10px 14px",background:"none",border:"none",color:C.err,fontSize:16,cursor:"pointer",flexShrink:0}} title="Delete draft">🗑</button>
+              </div>);})
 
           )}
         </Folder>
@@ -5135,6 +5167,12 @@ function JobDetail({job, user, onBack, onDeleted}){
             </button>
             <button onClick={()=>{if(!fieldEditFields){const fc=job.field_config||{};const all=[...(fc.editable||[]).map(f=>({...f,mode:f.autoFill==="date"?"auto-date":f.autoFill==="increment"?"auto-num":"edit"})),...(fc.locked||[]).map(f=>({...f,mode:"lock"}))];setFieldEditFields(all);}setShowFieldEdit(!showFieldEdit);}} style={{width:"100%",display:"flex",alignItems:"center",gap:10,padding:"14px 18px",background:"none",border:"none",borderBottom:`1px solid ${C.brd}`,cursor:"pointer",textAlign:"left"}}>
               <span style={{fontSize:14,fontWeight:600,color:C.lt}}>Edit Template Fields</span>
+            </button>
+            <button onClick={async()=>{const cur=!!job.field_config?.aiPhotos;const fc={...(job.field_config||{}),aiPhotos:!cur};try{await db.updateJobFieldConfig(job.id,fc);job.field_config=fc;showToast("AI Photo Descriptions "+(fc.aiPhotos?"enabled":"disabled"));}catch(e){showToast("Save failed");}}} style={{width:"100%",display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,padding:"14px 18px",background:"none",border:"none",borderBottom:`1px solid ${C.brd}`,cursor:"pointer",textAlign:"left"}}>
+              <div style={{display:"flex",alignItems:"center",gap:10}}>
+                <span style={{fontSize:16}}>🤖</span><span style={{fontSize:14,fontWeight:600,color:C.lt}}>AI Photo Descriptions</span>
+              </div>
+              <span style={{fontSize:11,color:job.field_config?.aiPhotos?C.ok:C.mut,fontWeight:600}}>{job.field_config?.aiPhotos?"ON":"OFF"}</span>
             </button>
             <button onClick={()=>{setShowSchedSet(!showSchedSet);setShowTeam(false);}} style={{width:"100%",display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,padding:"14px 18px",background:"none",border:"none",borderBottom:`1px solid ${C.brd}`,cursor:"pointer",textAlign:"left"}}>
               <div style={{display:"flex",alignItems:"center",gap:10}}>
