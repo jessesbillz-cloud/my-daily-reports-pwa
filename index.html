@@ -404,7 +404,10 @@ const db = {
   },
   // Download template file bytes with caching
   async downloadTemplateBytes(storagePath){
-    if(this._tplBytesCache[storagePath])return this._tplBytesCache[storagePath].slice(0);
+    if(this._tplBytesCache[storagePath]){
+      try{return this._tplBytesCache[storagePath].slice(0).buffer;}
+      catch(e){delete this._tplBytesCache[storagePath];} // detached — re-download
+    }
     let r=await fetch(`${SB_URL}/storage/v1/object/report-source-docs/${storagePath}`,{
       headers:{apikey:SB_KEY,Authorization:`Bearer ${AUTH_TOKEN||SB_KEY}`}
     });
@@ -414,7 +417,7 @@ const db = {
     }
     if(!r.ok)throw new Error("Could not download template ("+r.status+"). Try signing out and back in.");
     const buf=await r.arrayBuffer();
-    this._tplBytesCache[storagePath]=buf;
+    this._tplBytesCache[storagePath]=new Uint8Array(buf);
     return buf;
   },
   // Save template page images (rendered from PDF during job creation)
@@ -2035,6 +2038,7 @@ function WorkLogEditor({job, user, onBack, reportDate}){
   const [viewingPreview,setViewingPreview]=useState(null); // array of page data URLs for preview
   const [viewLoading,setViewLoading]=useState(false);
   const [draftId,setDraftId]=useState(null);
+  const [wlReportStatus,setWlReportStatus]=useState(null);
   const [generalNotes,setGeneralNotes]=useState("");
   const [safetyNotes,setSafetyNotes]=useState("");
   const [materials,setMaterials]=useState("");
@@ -2153,6 +2157,7 @@ function WorkLogEditor({job, user, onBack, reportDate}){
         const rpt=await db.getReport(job.id,todayISO);
         if(rpt){
           setDraftId(rpt.id);
+          setWlReportStatus(rpt.status);
           if(rpt.content){
             let c;try{c=typeof rpt.content==="string"?JSON.parse(rpt.content):rpt.content;}catch(pe){console.error("Corrupt report content:",pe);c={};}
             if(c.contractors)setContractors(c.contractors);
@@ -2881,7 +2886,7 @@ function WorkLogEditor({job, user, onBack, reportDate}){
     try{
       const saveDate=reportDate||new Date().toLocaleDateString("en-CA",{timeZone:tz});
       await db.saveReport({
-        job_id:job.id,user_id:user.id,report_date:saveDate,status:"working_copy",
+        job_id:job.id,user_id:user.id,report_date:saveDate,status:wlReportStatus||"working_copy",
         content:buildContent()
       });
     }catch(e){console.error("Save failed:",e);}
@@ -3474,7 +3479,7 @@ function ReportEditor({job, user, onBack, reportDate}){
         job_id:job.id,
         user_id:user.id,
         report_date:saveDate,
-        status:"working_copy",
+        status:reportStatus||"working_copy",
         content:JSON.stringify(content),
         updated_at:new Date().toISOString()
       });
