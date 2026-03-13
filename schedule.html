@@ -174,7 +174,7 @@ details[open] .collapsible-summary::after { content: '−'; }
 <label class="field-label">Type *</label>
 <div class="type-btns">
 <div class="type-btn" id="btnSpecial" onclick="setType('Special')">Special</div>
-<div class="type-btn" id="btnRegular" onclick="setType('IOR')">IOR</div>
+<div class="type-btn" id="btnRegular" onclick="setType('Regular')">Regular</div>
 </div>
 <div class="special-sub" id="specialSub">
 <label class="field-label">Special Visit Type *</label>
@@ -442,7 +442,7 @@ function loadMD(){
     var base=SB+'/rest/v1/inspection_requests?status=neq.deleted';
     var hdrs={headers:{'apikey':AK,'Authorization':'Bearer '+AK}};
     Promise.all([
-        fetch(base+'&inspection_types=cs.%7BIOR%7D',hdrs).then(function(r){return r.json();}),
+        fetch(base+'&inspection_types=cs.%7BRegular%7D',hdrs).then(function(r){return r.json();}),
         fetch(base+'&project=eq.'+encodeURIComponent(PROJ)+'&inspection_types=cs.%7BSpecial%7D',hdrs).then(function(r){return r.json();}),
         fetch(base+'&inspection_types=cs.%7BConcrete%7D',hdrs).then(function(r){return r.json();}),
         fetch(base+'&inspection_types=cs.%7BGrout%7D',hdrs).then(function(r){return r.json();})
@@ -479,7 +479,7 @@ function renderCal(){
         g.appendChild(c);
     }
 }
-function setType(t){inspType=t;document.getElementById('btnSpecial').classList.toggle('active',t==='Special');document.getElementById('btnRegular').classList.toggle('active',t==='IOR');document.getElementById('specialSub').classList.toggle('show',t==='Special');if(t!=='Special')document.getElementById('specialType').selectedIndex=0;}
+function setType(t){inspType=t;document.getElementById('btnSpecial').classList.toggle('active',t==='Special');document.getElementById('btnRegular').classList.toggle('active',t==='Regular');document.getElementById('specialSub').classList.toggle('show',t==='Special');if(t!=='Special')document.getElementById('specialType').selectedIndex=0;}
 function setDur(d){inspDur=d;document.querySelectorAll('.dur-btn').forEach(function(b){b.classList.remove('active');});event.target.classList.add('active');}
 function scheduleInsp(id){
 fetch(SB+'/functions/v1/update-inspection',{method:'POST',headers:{'Authorization':'Bearer '+AK,'apikey':AK,'Content-Type':'application/json'},body:JSON.stringify({request_id:id,action:'schedule'})})
@@ -574,9 +574,9 @@ function checkSchedulingConflicts(date,time,types,dur){
         if(isBlocking || eIsBlocking){
             warnings.push((eTypes.join('/')||'Inspection')+' at '+eTime+(e.project!==PROJ?' ('+e.project+')':'')+' — blocking type conflict');
         }
-        // Rule 2: IOR cannot overlap IOR across different jobs
-        else if(types.indexOf('IOR')>=0 && eTypes.indexOf('IOR')>=0 && e.project!==PROJ){
-            warnings.push('IOR at '+eTime+' ('+e.project+') — cannot overlap IOR across jobs');
+        // Rule 2: Regular cannot overlap Regular across different jobs
+        else if(types.indexOf('Regular')>=0 && eTypes.indexOf('Regular')>=0 && e.project!==PROJ){
+            warnings.push('Regular at '+eTime+' ('+e.project+') — cannot overlap Regular across jobs');
         }
     });
     return warnings.length>0?warnings:null;
