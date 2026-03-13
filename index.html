@@ -2256,6 +2256,30 @@ function WorkLogEditor({job, user, onBack, reportDate}){
     img.src=dataUrl;
   });
 
+  // AI photo description — calls describe-photo edge function
+  const [aiDescribing,setAiDescribing]=useState({}); // keyed by uniqueId e.g. "contractor-{cid}-{photoIdx}"
+  const describePhoto=async(imageDataUrl,context,uniqueId)=>{
+    setAiDescribing(p=>({...p,[uniqueId]:true}));
+    try{
+      // Strip data:image/...;base64, prefix
+      const b64=imageDataUrl.includes(",")?imageDataUrl.split(",")[1]:imageDataUrl;
+      const r=await fetch(`${SB_URL}/functions/v1/describe-photo`,{
+        method:"POST",
+        headers:{"Content-Type":"application/json",apikey:SB_KEY},
+        body:JSON.stringify({image_base64:b64,context})
+      });
+      const data=await r.json();
+      if(!r.ok)throw new Error(data.error||"AI request failed");
+      return data.description||"";
+    }catch(e){
+      console.error("[AI describe]",e);
+      alert("AI describe failed: "+e.message);
+      return null;
+    }finally{
+      setAiDescribing(p=>({...p,[uniqueId]:false}));
+    }
+  };
+
   const handlePhotoUpload=(e)=>{
     const files=Array.from(e.target.files||[]);
     if(!files.length||!photoTarget)return;
@@ -3102,12 +3126,13 @@ function WorkLogEditor({job, user, onBack, reportDate}){
                   </div>
                   {(c.photos||[]).length>0&&(
                     <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:10}}>
-                      {c.photos.map((ph,i)=>(
+                      {c.photos.map((ph,i)=>{const aiKey="c-"+c.id+"-"+i;return(
                         <div key={i} style={{width:72,height:72,borderRadius:8,overflow:"hidden",position:"relative",border:`1px solid ${C.brd}`}}>
                           <img src={ph.data} style={{width:"100%",height:"100%",objectFit:"cover"}}/>
                           <button onClick={()=>removePhoto(c.id,i)} style={{position:"absolute",top:2,right:2,width:20,height:20,borderRadius:"50%",background:"rgba(0,0,0,0.6)",border:"none",color:"#fff",fontSize:12,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}>✕</button>
+                          <button disabled={aiDescribing[aiKey]} onClick={async()=>{const desc=await describePhoto(ph.data,`Contractor: ${c.name}, Job: ${job?.name||""}`,aiKey);if(desc)updateContractor(c.id,"description",(c.description?c.description+"\n":"")+desc);}} style={{position:"absolute",bottom:2,left:2,padding:"2px 5px",borderRadius:4,background:aiDescribing[aiKey]?C.blu:C.org,border:"none",color:"#fff",fontSize:9,fontWeight:700,cursor:aiDescribing[aiKey]?"wait":"pointer",opacity:aiDescribing[aiKey]?0.7:0.9}}>{aiDescribing[aiKey]?"···":"AI"}</button>
                         </div>
-                      ))}
+                      );})}
                     </div>
                   )}
                   {/* Photo + Library buttons */}
@@ -3172,12 +3197,13 @@ function WorkLogEditor({job, user, onBack, reportDate}){
                 </div>
                 {(sectionPhotos[sec.key]||[]).length>0&&(
                   <div style={{display:"flex",gap:8,marginTop:8,flexWrap:"wrap"}}>
-                    {(sectionPhotos[sec.key]||[]).map((ph,pi)=>(
+                    {(sectionPhotos[sec.key]||[]).map((ph,pi)=>{const aiKey="s-"+sec.key+"-"+pi;return(
                       <div key={pi} style={{position:"relative",width:60,height:60,borderRadius:6,overflow:"hidden",border:`1px solid ${C.brd}`}}>
                         <img src={ph.data} alt="" style={{width:"100%",height:"100%",objectFit:"cover"}}/>
                         <button onClick={()=>removeSectionPhoto(sec.key,pi)} style={{position:"absolute",top:1,right:1,background:"rgba(0,0,0,0.6)",border:"none",color:"#fff",fontSize:10,width:16,height:16,borderRadius:"50%",cursor:"pointer",lineHeight:1,padding:0}}>✕</button>
+                        <button disabled={aiDescribing[aiKey]} onClick={async()=>{const desc=await describePhoto(ph.data,`Section: ${sec.title}, Job: ${job?.name||""}`,aiKey);if(desc)sec.set((sec.val?sec.val+"\n":"")+desc);}} style={{position:"absolute",bottom:1,left:1,padding:"1px 4px",borderRadius:3,background:aiDescribing[aiKey]?C.blu:C.org,border:"none",color:"#fff",fontSize:8,fontWeight:700,cursor:aiDescribing[aiKey]?"wait":"pointer",opacity:aiDescribing[aiKey]?0.7:0.9}}>{aiDescribing[aiKey]?"···":"AI"}</button>
                       </div>
-                    ))}
+                    );})}
                   </div>
                 )}
                 {/* Carry-over toggle — matches contractor pattern */}
@@ -3380,6 +3406,29 @@ function ReportEditor({job, user, onBack, reportDate}){
   const [photos,setPhotos]=useState([]);
   const [photoLayout,setPhotoLayout]=useState("2"); // "1","2","4"
   const photoRef=useRef(null);
+
+  // AI photo description
+  const [aiDescribing,setAiDescribing]=useState({});
+  const describePhoto=async(imageDataUrl,context,uniqueId)=>{
+    setAiDescribing(p=>({...p,[uniqueId]:true}));
+    try{
+      const b64=imageDataUrl.includes(",")?imageDataUrl.split(",")[1]:imageDataUrl;
+      const r=await fetch(`${SB_URL}/functions/v1/describe-photo`,{
+        method:"POST",
+        headers:{"Content-Type":"application/json",apikey:SB_KEY},
+        body:JSON.stringify({image_base64:b64,context})
+      });
+      const data=await r.json();
+      if(!r.ok)throw new Error(data.error||"AI request failed");
+      return data.description||"";
+    }catch(e){
+      console.error("[AI describe]",e);
+      alert("AI describe failed: "+e.message);
+      return null;
+    }finally{
+      setAiDescribing(p=>({...p,[uniqueId]:false}));
+    }
+  };
 
   const [reportStatus,setReportStatus]=useState(null);
   // Load existing report on mount (works for both working_copy and submitted)
@@ -4082,6 +4131,10 @@ function ReportEditor({job, user, onBack, reportDate}){
         const photoAreaBottom=footerTopPDF+5;
         const usableH=photoAreaTop-photoAreaBottom;
 
+        // Font for photo captions
+        const captionFont=await pdfDoc.embedFont(StandardFonts.Helvetica);
+        const captionSize=8;
+
         // Embed all photos first so we know their dimensions
         const embeddedPhotos=[];
         for(let i=0;i<photos.length;i++){
@@ -4090,7 +4143,7 @@ function ReportEditor({job, user, onBack, reportDate}){
             let img;
             if(typeof imgData==="string"&&imgData.startsWith("data:image/png"))img=await pdfDoc.embedPng(imgData);
             else if(typeof imgData==="string")img=await pdfDoc.embedJpg(imgData);
-            if(img)embeddedPhotos.push({img,ratio:img.width/img.height,isLandscape:img.width>=img.height});
+            if(img)embeddedPhotos.push({img,ratio:img.width/img.height,isLandscape:img.width>=img.height,caption:photos[i].caption||""});
           }catch(imgErr){console.error("Photo embed error:",imgErr);}
         }
 
@@ -4104,16 +4157,31 @@ function ReportEditor({job, user, onBack, reportDate}){
           return np;
         };
 
+        // Helper: draw caption text centered below an image
+        const drawCaption=(pg,caption,imgX,imgY,imgW)=>{
+          if(!caption)return;
+          const maxCaptionW=imgW+40;
+          // Truncate if too long
+          let txt=caption.length>120?caption.slice(0,117)+"...":caption;
+          const tw=captionFont.widthOfTextAtSize(txt,captionSize);
+          const cx=imgX+(imgW-Math.min(tw,maxCaptionW))/2;
+          pg.drawText(txt,{x:Math.max(36,cx),y:imgY-captionSize-4,size:captionSize,font:captionFont,color:rgb(0.3,0.3,0.3),maxWidth:maxCaptionW});
+        };
+
         for(let i=0;i<embeddedPhotos.length;){
           if(photoLayout==="1"){
             // 1 per page — centered
             const pg=addPhotoPage();
-            const {img,ratio}=embeddedPhotos[i];
-            const maxW=Math.min(bodyW,380);const maxH=usableH-20;
+            const {img,ratio,caption}=embeddedPhotos[i];
+            const capH=caption?captionSize+8:0;
+            const maxW=Math.min(bodyW,380);const maxH=usableH-20-capH;
             let imgW,imgH;
             if(ratio>=1){imgW=Math.min(maxW,maxH*ratio);imgH=imgW/ratio;}
             else{imgH=Math.min(maxH,maxW/ratio);imgW=imgH*ratio;}
-            pg.drawImage(img,{x:(pageW-imgW)/2,y:photoAreaTop-10-imgH+(usableH-20-imgH)/2,width:imgW,height:imgH});
+            const imgX=(pageW-imgW)/2;
+            const imgY=photoAreaTop-10-imgH+(usableH-20-capH-imgH)/2+capH;
+            pg.drawImage(img,{x:imgX,y:imgY,width:imgW,height:imgH});
+            drawCaption(pg,caption,imgX,imgY,imgW);
             i++;
           }else if(photoLayout==="2"){
             // Smart 2-per-page: detect orientation for layout
@@ -4541,12 +4609,16 @@ function ReportEditor({job, user, onBack, reportDate}){
           {/* Photo grid */}
           {photos.length>0&&(
             <div style={{display:"grid",gridTemplateColumns:photoLayout==="1"?"1fr":photoLayout==="2"?"1fr 1fr":"1fr 1fr",gap:8,marginBottom:12}}>
-              {photos.map(p=>(
-                <div key={p.id} style={{position:"relative",borderRadius:8,overflow:"hidden",border:`1px solid ${C.brd}`,aspectRatio:photoLayout==="1"?"auto":"1"}}>
-                  <img src={p.src} alt={p.name} style={{width:"100%",height:"100%",objectFit:"cover",display:"block"}}/>
-                  <button onClick={()=>setPhotos(prev=>prev.filter(x=>x.id!==p.id))} style={{position:"absolute",top:4,right:4,width:22,height:22,borderRadius:"50%",background:"rgba(0,0,0,0.7)",border:"none",color:"#fff",fontSize:12,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}>✕</button>
+              {photos.map(p=>{const aiKey="fr-"+p.id;return(
+                <div key={p.id} style={{borderRadius:8,overflow:"hidden",border:`1px solid ${C.brd}`}}>
+                  <div style={{position:"relative",aspectRatio:photoLayout==="1"?"auto":"1"}}>
+                    <img src={p.src} alt={p.name} style={{width:"100%",height:"100%",objectFit:"cover",display:"block"}}/>
+                    <button onClick={()=>setPhotos(prev=>prev.filter(x=>x.id!==p.id))} style={{position:"absolute",top:4,right:4,width:22,height:22,borderRadius:"50%",background:"rgba(0,0,0,0.7)",border:"none",color:"#fff",fontSize:12,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}>✕</button>
+                    <button disabled={aiDescribing[aiKey]} onClick={async()=>{const desc=await describePhoto(p.src,`Job: ${job?.name||""}`,aiKey);if(desc)setPhotos(prev=>prev.map(x=>x.id===p.id?{...x,caption:desc}:x));}} style={{position:"absolute",bottom:4,left:4,padding:"3px 7px",borderRadius:5,background:aiDescribing[aiKey]?C.blu:C.org,border:"none",color:"#fff",fontSize:10,fontWeight:700,cursor:aiDescribing[aiKey]?"wait":"pointer",opacity:aiDescribing[aiKey]?0.7:0.9}}>{aiDescribing[aiKey]?"···":"AI"}</button>
+                  </div>
+                  <input type="text" value={p.caption||""} onChange={e=>setPhotos(prev=>prev.map(x=>x.id===p.id?{...x,caption:e.target.value}:x))} placeholder="Photo caption..." style={{width:"100%",padding:"6px 8px",background:C.inp,border:"none",borderTop:`1px solid ${C.brd}`,color:C.txt,fontSize:11,boxSizing:"border-box"}}/>
                 </div>
-              ))}
+              );})}
             </div>
           )}
 
