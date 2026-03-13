@@ -2035,6 +2035,7 @@ function WorkLogEditor({job, user, onBack, reportDate}){
   const [newName,setNewName]=useState("");
   const [saving,setSaving]=useState(false);
   const [submitting,setSubmitting]=useState(false);
+  const [wlSubmitStep,setWlSubmitStep]=useState("");
   const [viewingPreview,setViewingPreview]=useState(null); // array of page data URLs for preview
   const [viewLoading,setViewLoading]=useState(false);
   const [draftId,setDraftId]=useState(null);
@@ -2811,15 +2812,15 @@ function WorkLogEditor({job, user, onBack, reportDate}){
 
   // ── Submit: generate PDF, upload, save ──
   const submitWorkLog=async()=>{
-    setSubmitting(true);
+    setSubmitting(true);setWlSubmitStep("Generating PDF...");
     try{
       const submitDate=reportDate||new Date().toLocaleDateString("en-CA",{timeZone:tz});
-      showToast("Generating PDF...");
       const pdfBytes=await generateWorkLogPdf();
       const pdfBlob=new Blob([pdfBytes],{type:"application/pdf"});
       const pdfFilename=`${(job.name||"WorkLog").replace(/[^a-zA-Z0-9_ -]/g,"")}_${submitDate}.pdf`;
 
       // Upload PDF to storage
+      setWlSubmitStep("Uploading report...");
       const storagePath=`${user.id}/${job.id}/submitted/${submitDate}_worklog.pdf`;
       let upR=await fetch(`${SB_URL}/storage/v1/object/report-source-docs/${storagePath}`,{
         method:"POST",headers:{apikey:SB_KEY,Authorization:`Bearer ${AUTH_TOKEN||SB_KEY}`,"Content-Type":"application/pdf"},body:pdfBlob
@@ -2833,6 +2834,7 @@ function WorkLogEditor({job, user, onBack, reportDate}){
       const pdfBase64=btoa(ch.join(""));
 
       // Save report data
+      setWlSubmitStep("Saving report...");
       await db.saveReport({
         job_id:job.id,user_id:user.id,report_date:submitDate,status:"submitted",
         content:buildContent()
@@ -2958,6 +2960,14 @@ function WorkLogEditor({job, user, onBack, reportDate}){
 
   return(
     <div style={{minHeight:"100vh",background:C.bg,color:C.txt}}>
+      {submitting&&(
+        <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.85)",zIndex:300,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:16}}>
+          <div style={{width:48,height:48,border:"3px solid "+C.brd,borderTopColor:C.org,borderRadius:"50%",animation:"spin 1s linear infinite"}}/>
+          <div style={{fontSize:16,fontWeight:700,color:C.txt}}>{wlSubmitStep||"Submitting..."}</div>
+          <div style={{fontSize:13,color:C.mut}}>Please don't close this screen</div>
+          <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
+        </div>
+      )}
       {/* Header */}
       <div style={{display:"flex",alignItems:"center",gap:12,padding:"16px 20px",borderBottom:`1px solid ${C.brd}`,background:C.card}}>
         <button onClick={async()=>{await saveWorking();onBack();}} style={{background:"none",border:"none",color:C.blu,fontSize:28,cursor:"pointer",padding:"8px 12px",lineHeight:1,borderRadius:8,minWidth:48,minHeight:48,display:"flex",alignItems:"center",justifyContent:"center"}}>←</button>
@@ -3503,6 +3513,7 @@ function ReportEditor({job, user, onBack, reportDate}){
   };
 
   const [submitting,setSubmitting]=useState(false);
+  const [submitStep,setSubmitStep]=useState("");
   const [viewLoading,setViewLoading]=useState(false);
   const [viewingReport,setViewingReport]=useState(null); // array of page image data URLs
   const [viewDocxHtml,setViewDocxHtml]=useState(null); // HTML string for DOCX preview
@@ -3730,7 +3741,7 @@ function ReportEditor({job, user, onBack, reportDate}){
 
   // Submit Report — generates filled PDF with pdf-lib, uploads, emails, all in one step
   const submitReport=async()=>{
-    setSubmitting(true);
+    setSubmitting(true);setSubmitStep("Loading template...");
     // Always use fresh current date at submit time (not stale closure value)
     const submitDate=reportDate||new Date().toLocaleDateString("en-CA",{timeZone:tz});
     try{
@@ -3745,6 +3756,7 @@ function ReportEditor({job, user, onBack, reportDate}){
       const isDocxTemplate=tplRecord.file_type==="docx"||tplRecord.file_type==="doc";
 
       // ── DOCX path: send to edge function for XML editing ──
+      setSubmitStep("Generating report...");
       if(isDocxTemplate){
         const allFields=buildEditableFields();
         const fieldValues={};
@@ -3803,6 +3815,7 @@ function ReportEditor({job, user, onBack, reportDate}){
         baseName=baseName.replace(/\{project\}/g,(job.name||"").replace(/\s+/g,"_"));
         const docxFilename=baseName+".docx";
         // Upload file first, THEN save report record (ensures file exists before marking submitted)
+        setSubmitStep("Uploading report...");
         const vals={};const lockVals={};
         allFields.forEach(f=>{if(f.autoFill||f.mode==="edit")vals[f.name]=f.val;else lockVals[f.name]=f.val;});
         const storagePath=`${user.id}/${job.id}/reports/${docxFilename}`;
@@ -4193,6 +4206,7 @@ function ReportEditor({job, user, onBack, reportDate}){
       const pdfFilename=baseName+".pdf";
 
       // ── 8. Upload PDF first, THEN save report record (ensures file exists before marking submitted) ──
+      setSubmitStep("Uploading report...");
       const storagePath=`${user.id}/${job.id}/reports/${pdfFilename}`;
       let upR=await fetch(`${SB_URL}/storage/v1/object/report-source-docs/${storagePath}`,{
         method:"POST",headers:{apikey:SB_KEY,Authorization:`Bearer ${AUTH_TOKEN||SB_KEY}`,"Content-Type":"application/pdf"},body:pdfBlob
@@ -4202,6 +4216,7 @@ function ReportEditor({job, user, onBack, reportDate}){
       });}
       if(!upR.ok)throw new Error("File upload failed ("+upR.status+"). Report was NOT submitted.");
 
+      setSubmitStep("Saving report...");
       const reportContent={vals,lockVals,photos,photoLayout,lockFields,editFields};
       await db.saveReport({
         job_id:job.id,user_id:user.id,report_date:submitDate,status:"submitted",
@@ -4374,7 +4389,7 @@ function ReportEditor({job, user, onBack, reportDate}){
       {submitting&&(
         <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.85)",zIndex:300,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:16}}>
           <div style={{width:48,height:48,border:"3px solid "+C.brd,borderTopColor:C.org,borderRadius:"50%",animation:"spin 1s linear infinite"}}/>
-          <div style={{fontSize:16,fontWeight:700,color:C.txt}}>Generating Report...</div>
+          <div style={{fontSize:16,fontWeight:700,color:C.txt}}>{submitStep||"Generating Report..."}</div>
           <div style={{fontSize:13,color:C.mut}}>Please don't close this screen</div>
           <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
         </div>
