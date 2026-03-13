@@ -2895,7 +2895,8 @@ function WorkLogEditor({job, user, onBack, reportDate}){
       let r=await fetch(`${SB_URL}/functions/v1/send-report`,{
         method:"POST",headers:{"Content-Type":"application/json",Authorization:`Bearer ${AUTH_TOKEN}`,apikey:SB_KEY},body:emailBody
       });
-      if(r.status===401){await refreshAuthToken();if(!AUTH_TOKEN)throw new Error("Session expired. Please sign out and back in.");r=await fetch(`${SB_URL}/functions/v1/send-report`,{method:"POST",headers:{"Content-Type":"application/json",Authorization:`Bearer ${AUTH_TOKEN}`,apikey:SB_KEY},body:emailBody});}
+      // Only retry on 401 if the response is NOT from our function (Supabase gateway auth failure)
+      if(r.status===401){const peek=await r.clone().text().catch(()=>"");const isGateway=!peek.includes("Resend");if(isGateway){await refreshAuthToken();if(!AUTH_TOKEN)throw new Error("Session expired. Please sign out and back in.");r=await fetch(`${SB_URL}/functions/v1/send-report`,{method:"POST",headers:{"Content-Type":"application/json",Authorization:`Bearer ${AUTH_TOKEN}`,apikey:SB_KEY},body:emailBody});}}
       if(!r.ok){const errText=await r.text().catch(()=>"");let errMsg=`Email send failed (${r.status})`;try{const errBody=JSON.parse(errText);errMsg=errBody.error||errMsg;console.error("Email API:",r.status,errBody);}catch(pe){console.error("Email API (raw):",r.status,errText);if(errText)errMsg=errText.slice(0,200);}throw new Error(errMsg);}
       showToast("Report emailed to "+recipients.length+" recipient"+(recipients.length>1?"s":"")+"!");
     }catch(e){
@@ -2904,6 +2905,7 @@ function WorkLogEditor({job, user, onBack, reportDate}){
       if(msg.includes("RESEND_API_KEY"))showToast("Email not configured: Set RESEND_API_KEY in Supabase secrets.");
       else if(msg.includes("404")||msg.includes("FunctionNotFound"))showToast("Email function not deployed. Deploy with: npx supabase functions deploy send-report");
       else if(msg.includes("validation_error")||msg.includes("not verified"))showToast("Email domain not verified in Resend.");
+      else if(msg.includes("Resend API error"))showToast("Email service error: "+msg.replace("Resend API error ","").slice(0,150));
       else showToast("Email failed: "+msg);
     }finally{setEmailing(false);}
   };
@@ -4312,7 +4314,8 @@ function ReportEditor({job, user, onBack, reportDate}){
       let r=await fetch(`${SB_URL}/functions/v1/send-report`,{
         method:"POST",headers:{"Content-Type":"application/json",Authorization:`Bearer ${AUTH_TOKEN}`,apikey:SB_KEY},body:emailBody
       });
-      if(r.status===401){await refreshAuthToken();if(!AUTH_TOKEN)throw new Error("Session expired. Please sign out and back in.");r=await fetch(`${SB_URL}/functions/v1/send-report`,{method:"POST",headers:{"Content-Type":"application/json",Authorization:`Bearer ${AUTH_TOKEN}`,apikey:SB_KEY},body:emailBody});}
+      // Only retry on 401 if the response is NOT from our function (Supabase gateway auth failure)
+      if(r.status===401){const peek=await r.clone().text().catch(()=>"");const isGateway=!peek.includes("Resend");if(isGateway){await refreshAuthToken();if(!AUTH_TOKEN)throw new Error("Session expired. Please sign out and back in.");r=await fetch(`${SB_URL}/functions/v1/send-report`,{method:"POST",headers:{"Content-Type":"application/json",Authorization:`Bearer ${AUTH_TOKEN}`,apikey:SB_KEY},body:emailBody});}}
       if(!r.ok){const errText=await r.text().catch(()=>"");let errMsg=`Email send failed (${r.status})`;try{const errBody=JSON.parse(errText);errMsg=errBody.error||errMsg;console.error("Email API:",r.status,errBody);}catch(pe){console.error("Email API (raw):",r.status,errText);if(errText)errMsg=errText.slice(0,200);}throw new Error(errMsg);}
       showToast("Report emailed to "+recipients.length+" recipient"+(recipients.length>1?"s":"")+"!");
     }catch(e){
@@ -4321,6 +4324,7 @@ function ReportEditor({job, user, onBack, reportDate}){
       if(msg.includes("RESEND_API_KEY"))showToast("Email not configured: Set RESEND_API_KEY in Supabase secrets.");
       else if(msg.includes("404")||msg.includes("FunctionNotFound"))showToast("Email function not deployed. Deploy with: npx supabase functions deploy send-report");
       else if(msg.includes("validation_error")||msg.includes("not verified"))showToast("Email domain not verified in Resend.");
+      else if(msg.includes("Resend API error"))showToast("Email service error: "+msg.replace("Resend API error ","").slice(0,150));
       else showToast("Email failed: "+msg);
     }finally{setEmailing(false);}
   };

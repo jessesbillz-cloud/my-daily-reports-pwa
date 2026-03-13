@@ -123,10 +123,14 @@ serve(async (req) => {
     console.log("[send-report] Resend response:", response.status, JSON.stringify(result));
 
     if (!response.ok) {
+      // IMPORTANT: return 502 (not Resend's status) so the client doesn't confuse
+      // a Resend 401 (bad API key) with a Supabase 401 (expired JWT)
+      const resendError = result.message || result.name || "Email send failed";
+      console.error("[send-report] Resend error:", response.status, resendError, JSON.stringify(result));
       return new Response(
-        JSON.stringify({ error: result.message || result.name || "Email send failed", details: result }),
+        JSON.stringify({ error: `Resend API error (${response.status}): ${resendError}`, resend_status: response.status, details: result }),
         {
-          status: response.status,
+          status: 502,
           headers: { ...corsHeaders, "Content-Type": "application/json" },
         }
       );
