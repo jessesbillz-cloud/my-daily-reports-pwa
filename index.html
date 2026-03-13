@@ -2180,13 +2180,13 @@ function WorkLogEditor({job, user, onBack, reportDate}){
             if(c.sectionPhotos)setSectionPhotos(c.sectionPhotos);
           }
         } else {
-          // No report for today — carry over contractors from most recent previous report
+          // No report for today — carry over from most recent previous report
           try{
             const prev=await db.getLatestReport(job.id,todayISO);
             if(prev&&prev.content){
               const pc=typeof prev.content==="string"?JSON.parse(prev.content):prev.content;
+              // Carry over locked contractors — clear daily data (photos, hours)
               if(pc.contractors&&pc.contractors.length>0){
-                // Only carry over LOCKED contractors — clear daily data (photos, hours)
                 const locked=pc.contractors.filter(ct=>ct.locked);
                 if(locked.length>0){
                   const carried=locked.map(ct=>({
@@ -2202,8 +2202,13 @@ function WorkLogEditor({job, user, onBack, reportDate}){
                   setContractors(carried);
                 }
               }
+              // Carry over section values (clear photos, keep text)
+              if(pc.materials)setMaterials(pc.materials);
+              if(pc.equipment)setEquipment(pc.equipment);
+              if(pc.qualityControl)setQualityControl(pc.qualityControl);
+              if(pc.customCategories)setCustomCategories(pc.customCategories);
             }
-          }catch(pe){console.error("Contractor carry-over:",pe);}
+          }catch(pe){console.error("Carry-over:",pe);}
         }
       }catch(e){console.error(e);}
     })();
