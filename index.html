@@ -2167,12 +2167,14 @@ function WorkLogEditor({job, user, onBack, reportDate}){
     (async()=>{
       try{
         const rpt=await db.getReport(job.id,todayISO);
+        let needsCarryOver=false;
         if(rpt){
           setDraftId(rpt.id);
           setWlReportStatus(rpt.status);
           if(rpt.content){
             let c;try{c=typeof rpt.content==="string"?JSON.parse(rpt.content):rpt.content;}catch(pe){console.error("Corrupt report content:",pe);c={};}
-            if(c.contractors)setContractors(c.contractors);
+            if(c.contractors&&c.contractors.length>0)setContractors(c.contractors);
+            else needsCarryOver=true; // today's report exists but has no contractors — try carry-over
             if(c.generalNotes)setGeneralNotes(c.generalNotes);
             if(c.safetyNotes)setSafetyNotes(c.safetyNotes);
             if(c.materials)setMaterials(c.materials);
@@ -2186,13 +2188,18 @@ function WorkLogEditor({job, user, onBack, reportDate}){
             if(c.weatherPM)setWeatherPM(c.weatherPM);
             if(c.sectionPhotos)setSectionPhotos(c.sectionPhotos);
             if(c.sectionCarry)setSectionCarry(c.sectionCarry);
-          }
+          }else{needsCarryOver=true;} // today's report has no content yet
         } else {
-          // No report for today — carry over from most recent previous report
+          needsCarryOver=true;
+        }
+        // Carry over from most recent previous report (when today has no contractors)
+        if(needsCarryOver){
           try{
             const prev=await db.getLatestReport(job.id,todayISO);
+            console.log("[carry-over] prev report:",prev?.report_date,prev?.status,"has content:",!!prev?.content);
             if(prev&&prev.content){
               const pc=typeof prev.content==="string"?JSON.parse(prev.content):prev.content;
+              console.log("[carry-over] prev contractors:",pc.contractors?.length,"locked:",pc.contractors?.filter(ct=>ct.locked)?.length);
               // Carry over locked contractors — clear daily data (photos, hours)
               if(pc.contractors&&pc.contractors.length>0){
                 const locked=pc.contractors.filter(ct=>ct.locked);
@@ -2208,6 +2215,7 @@ function WorkLogEditor({job, user, onBack, reportDate}){
                     carryDesc:ct.carryDesc!==undefined?ct.carryDesc:true
                   }));
                   setContractors(carried);
+                  console.log("[carry-over] carried",carried.length,"contractors");
                 }
               }
               // Carry over section values only if carry-over toggled on (clear photos, keep text)
@@ -3959,7 +3967,7 @@ function ReportEditor({job, user, onBack, reportDate}){
           if(pageIdx<0||pageIdx>=pages.length)return;
           const page=pages[pageIdx];const pageH=page.getHeight();
           const sz=f.fontSize||10;
-          const fieldH=f.h||sz+4;
+          const fieldH=f.h||(sz*1.6); // give enough room so text sits inside cell, not on the border
           const pdfY=pageH-f.y-fieldH;
           const fieldW=f.w||120;
           const isSig=(f.name||"").toLowerCase().includes("signature")||(f.autoFill==="name"&&(f.name||"").toLowerCase().includes("inspector"));
@@ -4010,7 +4018,7 @@ function ReportEditor({job, user, onBack, reportDate}){
           if(pageIdx<0||pageIdx>=pages.length)return;
           const page=pages[pageIdx];const pageH=page.getHeight();
           const sz=f.fontSize||10;
-          const fieldH=f.h||sz+4;
+          const fieldH=f.h||(sz*1.6);
           const isSig=(f.name||"").toLowerCase().includes("signature")||(f.autoFill==="name"&&(f.name||"").toLowerCase().includes("inspector"));
           if(isSig){
             // Signature: place ABOVE the signature line (line is at bottom of field area)
