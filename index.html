@@ -783,14 +783,10 @@ function AccountSettings({user, onBack, onLogout}){
                         <div style={{width:56,height:56,borderRadius:8,background:C.inp,border:`1px solid ${C.brd}`,display:"flex",alignItems:"center",justifyContent:"center",color:C.mut,fontSize:11}}>No logo</div>
                       )}
                       <div style={{flex:1}}>
-                        {companyRole==="admin"?(<>
-                          <input ref={logoInputRef} type="file" accept="image/*" onChange={handleLogoUpload} style={{display:"none"}}/>
-                          <button onClick={()=>logoInputRef.current?.click()} disabled={uploadingLogo} style={{padding:"8px 16px",background:C.inp,border:`1px solid ${C.brd}`,borderRadius:8,color:C.txt,fontSize:13,fontWeight:600,cursor:"pointer"}}>
-                            {uploadingLogo?"Uploading...":companyLogoUrl?"Change Logo":"Upload Logo"}
-                          </button>
-                        </>):(
-                          <div style={{fontSize:12,color:C.mut}}>Contact your company admin to change the logo</div>
-                        )}
+                        <input ref={logoInputRef} type="file" accept="image/*" onChange={handleLogoUpload} style={{display:"none"}}/>
+                        <button onClick={()=>logoInputRef.current?.click()} disabled={uploadingLogo} style={{padding:"8px 16px",background:C.inp,border:`1px solid ${C.brd}`,borderRadius:8,color:C.txt,fontSize:13,fontWeight:600,cursor:"pointer"}}>
+                          {uploadingLogo?"Uploading...":companyLogoUrl?"Change Logo":"Upload Logo"}
+                        </button>
                         <div style={{fontSize:11,color:C.mut,marginTop:4}}>Appears on work log report headers</div>
                       </div>
                     </div>
@@ -1782,12 +1778,12 @@ function CreateJob({user, onBack, onCreated}){
             <label style={ls}>Report Template (Optional)</label>
             <div style={{fontSize:11,color:C.mut,marginBottom:8,lineHeight:1.4}}>Upload a branded PDF to use as the background for your work log reports. The first page will be used as a header with your logo and styling.</div>
             {!tf?(
-              <div onClick={()=>document.getElementById("fi").click()}
+              <div onClick={()=>document.getElementById("fi_wl").click()}
                 style={{border:`2px dashed ${C.brd}`,borderRadius:12,padding:"24px 20px",textAlign:"center",cursor:"pointer",background:C.inp}}>
                 <div style={{fontSize:28,marginBottom:6}}>—</div>
                 <p style={{color:C.lt,fontSize:13,fontWeight:600,marginBottom:4}}>Tap to upload a branded template</p>
                 <p style={{color:C.mut,fontSize:11}}>PDF only • Used as report background</p>
-                <input id="fi" type="file" accept=".pdf" style={{display:"none"}} onChange={e=>{if(!e.target.files[0])return;const f=e.target.files[0];setTf(f);const r=new FileReader();r.onload=()=>setTfB64(r.result.split(",")[1]);r.readAsDataURL(f);}}/>
+                <input id="fi_wl" type="file" accept=".pdf" style={{display:"none"}} onChange={e=>{if(!e.target.files[0])return;const f=e.target.files[0];setTf(f);const r=new FileReader();r.onload=()=>setTfB64(r.result.split(",")[1]);r.readAsDataURL(f);}}/>
               </div>
             ):(
               <div style={{background:C.inp,border:`1px solid ${C.brd}`,borderRadius:12,padding:"14px 16px"}}>
@@ -2153,7 +2149,7 @@ function WorkLogEditor({job, user, onBack, reportDate}){
         if(rpt){
           setDraftId(rpt.id);
           if(rpt.content){
-            const c=typeof rpt.content==="string"?JSON.parse(rpt.content):rpt.content;
+            let c;try{c=typeof rpt.content==="string"?JSON.parse(rpt.content):rpt.content;}catch(pe){console.error("Corrupt report content:",pe);c={};}
             if(c.contractors)setContractors(c.contractors);
             if(c.generalNotes)setGeneralNotes(c.generalNotes);
             if(c.safetyNotes)setSafetyNotes(c.safetyNotes);
@@ -2943,7 +2939,7 @@ function WorkLogEditor({job, user, onBack, reportDate}){
     <div style={{minHeight:"100vh",background:C.bg,color:C.txt}}>
       {/* Header */}
       <div style={{display:"flex",alignItems:"center",gap:12,padding:"16px 20px",borderBottom:`1px solid ${C.brd}`,background:C.card}}>
-        <button onClick={()=>{saveWorking();onBack();}} style={{background:"none",border:"none",color:C.blu,fontSize:28,cursor:"pointer",padding:"8px 12px",lineHeight:1,borderRadius:8,minWidth:48,minHeight:48,display:"flex",alignItems:"center",justifyContent:"center"}}>←</button>
+        <button onClick={async()=>{await saveWorking();onBack();}} style={{background:"none",border:"none",color:C.blu,fontSize:28,cursor:"pointer",padding:"8px 12px",lineHeight:1,borderRadius:8,minWidth:48,minHeight:48,display:"flex",alignItems:"center",justifyContent:"center"}}>←</button>
         <MDRLogo size={28}/>
         <div style={{flex:1}}>
           <div style={{fontWeight:700,fontSize:16}}>{job.name}</div>
@@ -3363,7 +3359,7 @@ function ReportEditor({job, user, onBack, reportDate}){
           setReportStatus(rpt.status);
           setDraftId(rpt.id);
           if(rpt.content){
-            const c=typeof rpt.content==="string"?JSON.parse(rpt.content):rpt.content;
+            let c;try{c=typeof rpt.content==="string"?JSON.parse(rpt.content):rpt.content;}catch(pe){console.error("Corrupt report content:",pe);c={};}
             if(c.vals){
               // Merge saved values but re-apply today's date and auto-# for auto fields (matching original format)
               const merged={...c.vals};
@@ -3395,7 +3391,7 @@ function ReportEditor({job, user, onBack, reportDate}){
     const f=lockFields.find(x=>x.name===name);
     if(!f)return;
     const newLock=lockFields.filter(x=>x.name!==name);
-    const newEdit=[...editFields,{name:f.name,value:lockVals[name]||f.value||"",voiceEnabled:false,wasUnlocked:true}];
+    const newEdit=[...editFields,{...f,value:lockVals[name]||f.value||"",voiceEnabled:false,wasUnlocked:true}];
     setLockFields(newLock);
     setEditFields(newEdit);
     setVals(p=>({...p,[name]:lockVals[name]||f.value||""}));
@@ -3418,7 +3414,7 @@ function ReportEditor({job, user, onBack, reportDate}){
     if(!f)return;
     const val=vals[name]||f.value||"";
     const newEdit=editFields.filter(x=>x.name!==name);
-    const restored={name:f.name,value:val,x:f.x,y:f.y,w:f.w,h:f.h,page:f.page,pdfFieldName:f.pdfFieldName,autoFill:f.autoFill};
+    const restored={...f,value:val};
     const newLock=[...lockFields,restored];
     setEditFields(newEdit);
     setLockFields(newLock);
@@ -4771,7 +4767,7 @@ function JobDetail({job, user, onBack, onDeleted}){
             <div style={{fontSize:36,marginBottom:8}}>📷</div>
             <p style={{fontSize:14,fontWeight:600,color:C.lt,marginBottom:4}}>Job Photo Gallery</p>
             <p style={{fontSize:12,color:C.mut,marginBottom:14}}>Store photos for this job to use in future reports</p>
-            <button className="btn-o" style={{padding:"10px 24px",background:C.org,border:"none",borderRadius:8,color:"#fff",fontSize:14,fontWeight:600,cursor:"pointer"}}>Take or Upload Photo</button>
+            <button onClick={()=>showToast("Photo gallery coming soon!")} className="btn-o" style={{padding:"10px 24px",background:C.org,border:"none",borderRadius:8,color:"#fff",fontSize:14,fontWeight:600,cursor:"pointer"}}>Take or Upload Photo</button>
           </div>
         </Folder>
 
@@ -6392,6 +6388,9 @@ function App(){
 
   const handleLogout=()=>{
     authLogout();
+    db._tplBytesCache={};
+    db._profileCache={};
+    db._reportIdCache={};
     setUser(null);
     setSetupDone(null);
   };
