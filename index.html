@@ -1831,7 +1831,7 @@ function CreateJob({user, onBack, onCreated}){
                         </div>
                         <span style={{color:C.blu,fontSize:12,fontWeight:600}}>Use</span>
                       </div>
-                      <button onClick={async(e)=>{e.stopPropagation();if(!confirm("Delete this saved template?"))return;try{await db.deleteSavedTemplate(t.id);setSavedTpls(p=>p.filter(x=>x.id!==t.id));}catch(err){alert("Delete failed: "+err.message);}}} style={{background:"none",border:"none",color:C.err,fontSize:14,cursor:"pointer",padding:"4px 6px",flexShrink:0}}>🗑️</button>
+                      <button onClick={async(e)=>{e.stopPropagation();const btn=e.currentTarget;if(btn.disabled)return;btn.disabled=true;if(!confirm("Delete this saved template?")){btn.disabled=false;return;}try{await db.deleteSavedTemplate(t.id);setSavedTpls(p=>p.filter(x=>x.id!==t.id));}catch(err){alert("Delete failed: "+err.message);btn.disabled=false;}}} style={{background:"none",border:"none",color:C.err,fontSize:14,cursor:"pointer",padding:"4px 6px",flexShrink:0}}>🗑️</button>
                     </div>
                   ))}
                 </div>
@@ -1842,7 +1842,7 @@ function CreateJob({user, onBack, onCreated}){
 
           {/* Upload area */}
           {!tf?(
-            <div onDragOver={e=>{e.preventDefault();setDrag(true);}} onDragLeave={()=>setDrag(false)} onDrop={e=>{e.preventDefault();setDrag(false);if(e.dataTransfer.files.length)(usedSavedId?doFileWithSaved:doFile)(e.dataTransfer.files[0]);}} onClick={()=>document.getElementById("fi").click()}
+            <div onDragOver={e=>{e.preventDefault();setDrag(true);}} onDragLeave={()=>setDrag(false)} onDrop={e=>{e.preventDefault();setDrag(false);const f=e.dataTransfer.files[0];if(!f)return;if(!f.name.toLowerCase().endsWith(".pdf")){setErr("Only PDF files are supported.");return;}(usedSavedId?doFileWithSaved:doFile)(f);}} onClick={()=>document.getElementById("fi").click()}
               style={{border:`2px dashed ${drag?C.org:C.brd}`,borderRadius:12,padding:"32px 20px",textAlign:"center",cursor:"pointer",background:drag?"#1f1a14":C.inp}}>
               <div style={{fontSize:32,marginBottom:8}}>—</div>
               <p style={{color:C.lt,fontSize:14,fontWeight:600,marginBottom:4}}>{usedSavedId?"Now upload the actual file (parsing will be skipped)":"Drop your template here"}</p>
@@ -2061,9 +2061,13 @@ function WorkLogEditor({job, user, onBack, reportDate}){
   const [weatherPM,setWeatherPM]=useState("");
   const photoRef=useRef(null);
   const [photoTarget,setPhotoTarget]=useState(null); // contractor id for photo upload
+  const [photoMode,setPhotoMode]=useState(null); // "camera" or "library"
   const [sectionPhotos,setSectionPhotos]=useState({}); // {materials:[{data,name,ts}], ...}
   const sectionPhotoRef=useRef(null);
   const [sectionPhotoTarget,setSectionPhotoTarget]=useState(null); // section key
+  // Trigger file input after state updates (replaces fragile setTimeout)
+  useEffect(()=>{if(photoTarget&&photoMode==="camera")cameraRef.current?.click();if(photoTarget&&photoMode==="library")libraryRef.current?.click();},[photoTarget,photoMode]);
+  useEffect(()=>{if(sectionPhotoTarget)sectionPhotoRef.current?.click();},[sectionPhotoTarget]);
   const handleSectionPhoto=(e)=>{
     const files=Array.from(e.target.files||[]);
     if(!files.length||!sectionPhotoTarget)return;
@@ -2076,6 +2080,7 @@ function WorkLogEditor({job, user, onBack, reportDate}){
       reader.readAsDataURL(file);
     });
     e.target.value="";
+    setSectionPhotoTarget(null);
   };
   const removeSectionPhoto=(secKey,idx)=>{
     setSectionPhotos(p=>{const arr=[...(p[secKey]||[])];arr.splice(idx,1);return{...p,[secKey]:arr};});
@@ -2253,6 +2258,7 @@ function WorkLogEditor({job, user, onBack, reportDate}){
       reader.readAsDataURL(file);
     });
     e.target.value="";
+    setPhotoTarget(null);setPhotoMode(null);
   };
   const cameraRef=useRef(null);
   const libraryRef=useRef(null);
@@ -2937,8 +2943,8 @@ function WorkLogEditor({job, user, onBack, reportDate}){
           <button onClick={()=>setViewingPreview(null)} style={{flex:1,padding:"14px 0",background:C.card,border:`1px solid ${C.brd}`,borderRadius:10,color:C.txt,fontSize:15,fontWeight:700,cursor:"pointer"}}>
             Back to Editing
           </button>
-          <button onClick={()=>{setViewingPreview(null);submitWorkLog();}} disabled={submitting} style={{flex:1,padding:"14px 0",background:C.org,border:"none",borderRadius:10,color:"#fff",fontSize:15,fontWeight:700,cursor:submitting?"default":"pointer",opacity:submitting?0.7:1}}>
-            Submit Report
+          <button onClick={async()=>{setViewingPreview(null);await submitWorkLog();}} disabled={submitting} style={{flex:1,padding:"14px 0",background:C.org,border:"none",borderRadius:10,color:"#fff",fontSize:15,fontWeight:700,cursor:submitting?"default":"pointer",opacity:submitting?0.7:1}}>
+            {submitting?"Submitting...":"Submit Report"}
           </button>
         </div>
       </div>
@@ -3080,8 +3086,8 @@ function WorkLogEditor({job, user, onBack, reportDate}){
                   )}
                   {/* Photo + Library buttons */}
                   <div style={{display:"flex",gap:8}}>
-                    <button onClick={()=>{setPhotoTarget(c.id);setTimeout(()=>cameraRef.current?.click(),100);}} style={{flex:1,padding:"10px 0",background:C.org,border:"none",borderRadius:8,color:"#fff",fontSize:13,fontWeight:600,cursor:"pointer"}}>Photo</button>
-                    <button onClick={()=>{setPhotoTarget(c.id);setTimeout(()=>libraryRef.current?.click(),100);}} style={{flex:1,padding:"10px 0",background:C.card,border:`1px solid ${C.brd}`,borderRadius:8,color:C.lt,fontSize:13,fontWeight:600,cursor:"pointer"}}>Library</button>
+                    <button onClick={()=>{setPhotoTarget(c.id);setPhotoMode("camera");}} style={{flex:1,padding:"10px 0",background:C.org,border:"none",borderRadius:8,color:"#fff",fontSize:13,fontWeight:600,cursor:"pointer"}}>Photo</button>
+                    <button onClick={()=>{setPhotoTarget(c.id);setPhotoMode("library");}} style={{flex:1,padding:"10px 0",background:C.card,border:`1px solid ${C.brd}`,borderRadius:8,color:C.lt,fontSize:13,fontWeight:600,cursor:"pointer"}}>Library</button>
                   </div>
                 </div>
 
@@ -3134,7 +3140,7 @@ function WorkLogEditor({job, user, onBack, reportDate}){
               <div style={{padding:"0 16px 16px"}}>
                 <textarea value={sec.val} onChange={e=>sec.set(e.target.value)} placeholder={sec.placeholder} rows={3} style={{...fs,resize:"vertical",minHeight:70,lineHeight:1.5}}/>
                 <div style={{display:"flex",alignItems:"center",gap:8,marginTop:8}}>
-                  <button onClick={()=>{setSectionPhotoTarget(sec.key);setTimeout(()=>sectionPhotoRef.current?.click(),50);}} style={{display:"flex",alignItems:"center",gap:4,padding:"6px 12px",background:C.inp,border:`1px solid ${C.brd}`,borderRadius:8,color:C.lt,fontSize:12,fontWeight:600,cursor:"pointer"}}>
+                  <button onClick={()=>setSectionPhotoTarget(sec.key)} style={{display:"flex",alignItems:"center",gap:4,padding:"6px 12px",background:C.inp,border:`1px solid ${C.brd}`,borderRadius:8,color:C.lt,fontSize:12,fontWeight:600,cursor:"pointer"}}>
                     📷 Add Photo
                   </button>
                   {(sectionPhotos[sec.key]||[]).length>0&&<span style={{fontSize:11,color:C.mut}}>{(sectionPhotos[sec.key]||[]).length} photo{(sectionPhotos[sec.key]||[]).length!==1?"s":""}</span>}
