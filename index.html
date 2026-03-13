@@ -3565,6 +3565,7 @@ function ReportEditor({job, user, onBack, reportDate}){
         ctx.fillRect(drawX-1,f.y*scale-1,(f.w||120)*scale+2,(f.h||sz)*scale+2);
       }
       // Signature stamp — "Signed by Name on Day, Date at Time — powered by My Daily Reports"
+      // Positioned ABOVE the signature line (line is at bottom of field)
       const isSig=(f.name||"").toLowerCase().includes("signature")||(f.autoFill==="name"&&(f.name||"").toLowerCase().includes("inspector"));
       if(isSig){
         const sigSz=sz*0.85;
@@ -3572,15 +3573,17 @@ function ReportEditor({job, user, onBack, reportDate}){
         const dayName=sigTime.toLocaleDateString("en-US",{weekday:"long"});
         const datePart=sigTime.toLocaleDateString("en-US",{month:"long",day:"numeric",year:"numeric"});
         const timePart=sigTime.toLocaleTimeString("en-US",{hour:"numeric",minute:"2-digit",hour12:true});
+        // Shift up: drawY normally is at bottom of field, move up so sig block sits above the line
+        const sigDrawY=f.y*scale-sigSz*0.5;
         ctx.font="italic "+sigSz+"px Helvetica, Arial, sans-serif";
         ctx.fillStyle="#1a1a1a";
-        ctx.fillText("Signed by "+f.val,drawX,drawY);
+        ctx.fillText("Signed by "+f.val,drawX,sigDrawY);
         ctx.font=(sigSz*0.65)+"px Helvetica, Arial, sans-serif";
         ctx.fillStyle="#666666";
-        ctx.fillText(dayName+", "+datePart+" at "+timePart,drawX,drawY+sigSz*1.15);
+        ctx.fillText(dayName+", "+datePart+" at "+timePart,drawX,sigDrawY+sigSz*1.15);
         ctx.font="italic "+(sigSz*0.55)+"px Helvetica, Arial, sans-serif";
         ctx.fillStyle="#999999";
-        ctx.fillText("powered by My Daily Reports",drawX,drawY+sigSz*2.1);
+        ctx.fillText("powered by My Daily Reports",drawX,sigDrawY+sigSz*2.1);
         return;
       }
       ctx.fillStyle="#000000";
@@ -3830,10 +3833,14 @@ function ReportEditor({job, user, onBack, reportDate}){
         };
         const fnPattern=conv.pattern||job.report_filename_pattern||job.name||"Report";
         let baseName=fnPattern.replace(/\.[^.]+$/,"");
+        const hasDateToken=baseName.includes("{date}")||baseName.includes("{year}");
+        const hasNumToken=baseName.includes("{report_number}");
         baseName=baseName.replace(/\{report_number\}/g,rptNum);
         baseName=baseName.replace(/\{date\}/g,formatDate(conv.dateFormat));
         baseName=baseName.replace(/\{year\}/g,fmtYYYY);
         baseName=baseName.replace(/\{project\}/g,(job.name||"").replace(/\s+/g,"_"));
+        if(!hasDateToken)baseName+="_"+fmtMon+" "+fmtDay+"_"+fmtYYYY;
+        if(!hasNumToken)baseName=baseName.replace(/_(\d+)(?=_)/,(m,n)=>"_"+rptNum)||baseName;
         const docxFilename=baseName+".docx";
         // Upload file first, THEN save report record (ensures file exists before marking submitted)
         setSubmitStep("Uploading report...");
@@ -3962,6 +3969,9 @@ function ReportEditor({job, user, onBack, reportDate}){
           }
           const fieldName="mdr_"+(fieldIdx++)+"_"+(f.name||"field").replace(/[^a-zA-Z0-9]/g,"_");
           const tf=form.createTextField(fieldName);
+          // For signature fields, shift field UP so text appears above the signature line
+          let sigYOffset=0;
+          if(isSig){sigYOffset=fieldH*0.6;} // push up above the line
           // For multiline fields, auto-shrink font if text won't fit
           let useSz=isSig?sz*0.85:sz;
           if(f.multiline&&fieldH>sz*3){
@@ -3980,7 +3990,7 @@ function ReportEditor({job, user, onBack, reportDate}){
           tf.setText(fieldVal);
           tf.setFontSize(useSz);
           if(f.multiline||isSig)tf.enableMultiline();
-          tf.addToPage(page,{x:f.x,y:pdfY,width:fieldW,height:fieldH,
+          tf.addToPage(page,{x:f.x,y:pdfY+sigYOffset,width:fieldW,height:isSig?fieldH*1.5:fieldH,
             borderWidth:0});
         });
         form.flatten();
@@ -4001,9 +4011,10 @@ function ReportEditor({job, user, onBack, reportDate}){
           const fieldH=f.h||sz+4;
           const isSig=(f.name||"").toLowerCase().includes("signature")||(f.autoFill==="name"&&(f.name||"").toLowerCase().includes("inspector"));
           if(isSig){
-            // Signature: place near bottom of field area
-            const pdfY=pageH-f.y-fieldH+sz*0.75;
+            // Signature: place ABOVE the signature line (line is at bottom of field area)
             const sigSz=sz*0.85;
+            const sigBlockH=sigSz*2.8; // total height of 3-line signature block
+            const pdfY=pageH-f.y-fieldH+sigBlockH+sigSz*0.3; // position so sig block sits above the line
             const sigTime=sigTimestamps[f.name]?new Date(sigTimestamps[f.name]):new Date();
             const dayName=sigTime.toLocaleDateString("en-US",{weekday:"long"});
             const datePart=sigTime.toLocaleDateString("en-US",{month:"long",day:"numeric",year:"numeric"});
@@ -4220,11 +4231,16 @@ function ReportEditor({job, user, onBack, reportDate}){
       // Build filename from the stored pattern (which the user may have edited)
       const pattern=conv.pattern||job.report_filename_pattern||job.name||"Report";
       let baseName=pattern.replace(/\.[^.]+$/,"");
+      const hasDateToken=baseName.includes("{date}")||baseName.includes("{year}");
+      const hasNumToken=baseName.includes("{report_number}");
       baseName=baseName.replace(/\{report_number\}/g,rptNum);
       const dateStr=formatDate(conv.dateFormat);
       baseName=baseName.replace(/\{date\}/g,dateStr);
       baseName=baseName.replace(/\{year\}/g,fmtYYYY);
       baseName=baseName.replace(/\{project\}/g,(job.name||"").replace(/\s+/g,"_"));
+      // If pattern had no date/number tokens (raw filename), force-append to ensure uniqueness
+      if(!hasDateToken)baseName+="_"+fmtMon+" "+fmtDay+"_"+fmtYYYY;
+      if(!hasNumToken)baseName=baseName.replace(/_(\d+)(?=_)/,(m,n)=>"_"+rptNum)||baseName;
       const pdfFilename=baseName+".pdf";
 
       // ── 8. Upload PDF first, THEN save report record (ensures file exists before marking submitted) ──
@@ -5308,6 +5324,8 @@ function Dashboard({user, onLogout}){
       setCalRequests(reqs);
     }catch(e){console.error(e);}
   };
+  // Quick refresh — only update report statuses (used on back navigation to avoid full reload)
+  const refreshStatuses=async()=>{try{const ids=jobs.filter(j=>!j.is_archived).map(j=>j.id);if(ids.length)setRpts(await db.todayRpts(ids));}catch(e){}};
   const load=async()=>{setLoading(true);try{const a=await db.jobs(user.id);setJobs(a);const ids=a.filter(j=>!j.is_archived).map(j=>j.id);if(ids.length)setRpts(await db.todayRpts(ids));const p=await db.getProfile(user.id);if(p?.slug)setProfileSlug(p.slug);if(p?.company_id){try{const co=await db.getCompany(p.company_id);if(co?.logo_path)setDashLogoUrl(db.getCompanyLogoUrl(co.logo_path));}catch(e){}}await loadRequests();
     // Restore navigation state — reopen the job user was on before closing the app
     if(!navRestored){setNavRestored(true);try{const raw=localStorage.getItem("mdr_nav");if(raw){const nav=JSON.parse(raw);if(nav.jobId&&(Date.now()-nav.ts)<24*60*60*1000){const match=a.find(j=>j.id===nav.jobId);if(match)setSelJob(match);}}}catch(e){}}
@@ -5556,7 +5574,7 @@ function Dashboard({user, onLogout}){
 
   const selectJob=(j)=>{if(j)trackJobVisit(j.id);setSelJob(j);};
   if(selJob)return(
-    <JobDetail job={selJob} user={user} onBack={()=>{setSelJob(null);saveNav(null);load();}} onDeleted={()=>{setSelJob(null);saveNav(null);load();}}/>
+    <JobDetail job={selJob} user={user} onBack={()=>{setSelJob(null);saveNav(null);refreshStatuses();}} onDeleted={()=>{setSelJob(null);saveNav(null);load();}}/>
   );
 
   return(
