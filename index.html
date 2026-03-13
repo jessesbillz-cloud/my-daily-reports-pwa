@@ -529,12 +529,10 @@ const db = {
   async uploadCompanyLogo(companyId,blob){
     const ext=blob.type.includes("png")?"png":"jpg";
     const path=`${companyId}/logo.${ext}`;
-    let r=await fetch(`${SB_URL}/storage/v1/object/company-logos/${path}`,{
-      method:"POST",headers:{apikey:SB_KEY,Authorization:`Bearer ${AUTH_TOKEN||SB_KEY}`,"Content-Type":blob.type},body:blob
-    });
-    if(!r.ok){r=await fetch(`${SB_URL}/storage/v1/object/company-logos/${path}`,{
-      method:"PUT",headers:{apikey:SB_KEY,Authorization:`Bearer ${AUTH_TOKEN||SB_KEY}`,"Content-Type":blob.type},body:blob
-    });}
+    const hdrs=()=>({apikey:SB_KEY,Authorization:`Bearer ${AUTH_TOKEN||SB_KEY}`,"Content-Type":blob.type});
+    let r=await fetch(`${SB_URL}/storage/v1/object/company-logos/${path}`,{method:"POST",headers:hdrs(),body:blob});
+    if(r.status===401||r.status===403){await refreshAuthToken();r=await fetch(`${SB_URL}/storage/v1/object/company-logos/${path}`,{method:"POST",headers:hdrs(),body:blob});}
+    if(!r.ok){r=await fetch(`${SB_URL}/storage/v1/object/company-logos/${path}`,{method:"PUT",headers:hdrs(),body:blob});}
     if(!r.ok)throw new Error("Logo upload failed: "+r.status);
     // Update company record
     await fetch(`${SB_URL}/rest/v1/companies?id=eq.${companyId}`,{method:"PATCH",headers:this._h(),body:JSON.stringify({logo_path:path})});
@@ -633,13 +631,15 @@ function AccountSettings({user, onBack, onLogout}){
   };
   const handleLogoUpload=async(e)=>{
     const file=e.target.files?.[0];
-    if(!file||!selectedCompany)return;
+    if(!file)return;
+    if(!selectedCompany){flash("Please select or create a company first","err");if(logoInputRef.current)logoInputRef.current.value="";return;}
     if(!file.type.startsWith("image/")){flash("Please select an image file","err");return;}
     if(file.size>5*1024*1024){flash("Logo must be under 5MB","err");return;}
     setUploadingLogo(true);
     try{
+      await refreshAuthToken();
       const path=await db.uploadCompanyLogo(selectedCompany.id,file);
-      setCompanyLogoUrl(db.getCompanyLogoUrl(path));
+      setCompanyLogoUrl(db.getCompanyLogoUrl(path)+"?t="+Date.now());
       flash("Company logo uploaded");
     }catch(err){flash("Logo upload failed: "+err.message,"err");}
     finally{setUploadingLogo(false);if(logoInputRef.current)logoInputRef.current.value="";}
@@ -2065,10 +2065,12 @@ function WorkLogEditor({job, user, onBack, reportDate}){
   const [photoMode,setPhotoMode]=useState(null); // "camera" or "library"
   const [sectionPhotos,setSectionPhotos]=useState({}); // {materials:[{data,name,ts}], ...}
   const sectionPhotoRef=useRef(null);
+  const sectionLibraryRef=useRef(null);
   const [sectionPhotoTarget,setSectionPhotoTarget]=useState(null); // section key
+  const [sectionPhotoMode,setSectionPhotoMode]=useState(null); // "camera" or "library"
   // Trigger file input after state updates (replaces fragile setTimeout)
   useEffect(()=>{if(photoTarget&&photoMode==="camera")cameraRef.current?.click();if(photoTarget&&photoMode==="library")libraryRef.current?.click();},[photoTarget,photoMode]);
-  useEffect(()=>{if(sectionPhotoTarget)sectionPhotoRef.current?.click();},[sectionPhotoTarget]);
+  useEffect(()=>{if(sectionPhotoTarget&&sectionPhotoMode==="camera")sectionPhotoRef.current?.click();if(sectionPhotoTarget&&sectionPhotoMode==="library")sectionLibraryRef.current?.click();},[sectionPhotoTarget,sectionPhotoMode]);
   const handleSectionPhoto=(e)=>{
     const files=Array.from(e.target.files||[]);
     if(!files.length||!sectionPhotoTarget)return;
@@ -2082,6 +2084,7 @@ function WorkLogEditor({job, user, onBack, reportDate}){
     });
     e.target.value="";
     setSectionPhotoTarget(null);
+    setSectionPhotoMode(null);
   };
   const removeSectionPhoto=(secKey,idx)=>{
     setSectionPhotos(p=>{const arr=[...(p[secKey]||[])];arr.splice(idx,1);return{...p,[secKey]:arr};});
@@ -2879,13 +2882,14 @@ function WorkLogEditor({job, user, onBack, reportDate}){
       if(recipients.length===0){showToast("No team emails configured. Add them in Job Settings.");setEmailing(false);return;}
       let senderName="My Daily Reports";
       try{const prof=await db.getProfile(user.id);if(prof?.company_name)senderName=prof.company_name;}catch(e){}
-      // Refresh token before sending to avoid 401
-      if(!AUTH_TOKEN)await refreshAuthToken();
+      // Always refresh token before sending — user may have waited on the post-submit screen
+      await refreshAuthToken();
+      if(!AUTH_TOKEN)throw new Error("Session expired. Please sign out and back in.");
+      const emailBody=JSON.stringify({to:recipients,subject:`${submitSuccess.jobName} — Daily Work Log ${submitSuccess.todayDisplay}`,html_body:submitSuccess.emailHtml,pdf_base64:submitSuccess.pdfBase64,pdf_filename:submitSuccess.pdfFilename,sender_name:senderName});
       let r=await fetch(`${SB_URL}/functions/v1/send-report`,{
-        method:"POST",headers:{"Content-Type":"application/json",Authorization:`Bearer ${AUTH_TOKEN||SB_KEY}`,apikey:SB_KEY},
-        body:JSON.stringify({to:recipients,subject:`${submitSuccess.jobName} — Daily Work Log ${submitSuccess.todayDisplay}`,html_body:submitSuccess.emailHtml,pdf_base64:submitSuccess.pdfBase64,pdf_filename:submitSuccess.pdfFilename,sender_name:senderName})
+        method:"POST",headers:{"Content-Type":"application/json",Authorization:`Bearer ${AUTH_TOKEN}`,apikey:SB_KEY},body:emailBody
       });
-      if(r.status===401){await refreshAuthToken();r=await fetch(`${SB_URL}/functions/v1/send-report`,{method:"POST",headers:{"Content-Type":"application/json",Authorization:`Bearer ${AUTH_TOKEN||SB_KEY}`,apikey:SB_KEY},body:JSON.stringify({to:recipients,subject:`${submitSuccess.jobName} — Daily Work Log ${submitSuccess.todayDisplay}`,html_body:submitSuccess.emailHtml,pdf_base64:submitSuccess.pdfBase64,pdf_filename:submitSuccess.pdfFilename,sender_name:senderName})});}
+      if(r.status===401){await refreshAuthToken();if(!AUTH_TOKEN)throw new Error("Session expired. Please sign out and back in.");r=await fetch(`${SB_URL}/functions/v1/send-report`,{method:"POST",headers:{"Content-Type":"application/json",Authorization:`Bearer ${AUTH_TOKEN}`,apikey:SB_KEY},body:emailBody});}
       if(!r.ok){const errBody=await r.json().catch(()=>({}));console.error("Email API response:",r.status,errBody);throw new Error(errBody.error||`Email send failed (${r.status})`);}
       showToast("Report emailed to "+recipients.length+" recipient"+(recipients.length>1?"s":"")+"!");
     }catch(e){
@@ -3154,11 +3158,10 @@ function WorkLogEditor({job, user, onBack, reportDate}){
             {expandedSections[sec.key]&&(
               <div style={{padding:"0 16px 16px"}}>
                 <textarea value={sec.val} onChange={e=>sec.set(e.target.value)} placeholder={sec.placeholder} rows={3} style={{...fs,resize:"vertical",minHeight:70,lineHeight:1.5}}/>
-                <div style={{display:"flex",alignItems:"center",gap:8,marginTop:8}}>
-                  <button onClick={()=>setSectionPhotoTarget(sec.key)} style={{display:"flex",alignItems:"center",gap:4,padding:"6px 12px",background:C.inp,border:`1px solid ${C.brd}`,borderRadius:8,color:C.lt,fontSize:12,fontWeight:600,cursor:"pointer"}}>
-                    📷 Add Photo
-                  </button>
-                  {(sectionPhotos[sec.key]||[]).length>0&&<span style={{fontSize:11,color:C.mut}}>{(sectionPhotos[sec.key]||[]).length} photo{(sectionPhotos[sec.key]||[]).length!==1?"s":""}</span>}
+                {(sectionPhotos[sec.key]||[]).length>0&&<div style={{fontSize:11,color:C.mut,marginTop:8}}>{(sectionPhotos[sec.key]||[]).length} photo{(sectionPhotos[sec.key]||[]).length!==1?"s":""}</div>}
+                <div style={{display:"flex",gap:8,marginTop:8}}>
+                  <button onClick={()=>{setSectionPhotoTarget(sec.key);setSectionPhotoMode("camera");}} style={{flex:1,padding:"10px 0",background:C.org,border:"none",borderRadius:8,color:"#fff",fontSize:13,fontWeight:600,cursor:"pointer"}}>Photo</button>
+                  <button onClick={()=>{setSectionPhotoTarget(sec.key);setSectionPhotoMode("library");}} style={{flex:1,padding:"10px 0",background:C.card,border:`1px solid ${C.brd}`,borderRadius:8,color:C.lt,fontSize:13,fontWeight:600,cursor:"pointer"}}>Library</button>
                 </div>
                 {(sectionPhotos[sec.key]||[]).length>0&&(
                   <div style={{display:"flex",gap:8,marginTop:8,flexWrap:"wrap"}}>
@@ -3245,6 +3248,7 @@ function WorkLogEditor({job, user, onBack, reportDate}){
       <input ref={cameraRef} type="file" accept="image/*" capture="environment" style={{display:"none"}} onChange={handlePhotoUpload}/>
       <input ref={libraryRef} type="file" accept="image/*" multiple style={{display:"none"}} onChange={handlePhotoUpload}/>
       <input ref={sectionPhotoRef} type="file" accept="image/*" capture="environment" multiple style={{display:"none"}} onChange={handleSectionPhoto}/>
+      <input ref={sectionLibraryRef} type="file" accept="image/*" multiple style={{display:"none"}} onChange={handleSectionPhoto}/>
 
       {/* Toast */}
       {toast&&<div style={{position:"fixed",top:60,left:"50%",transform:"translateX(-50%)",background:C.card,border:`1px solid ${C.ok}`,borderRadius:10,padding:"10px 20px",fontSize:14,fontWeight:600,color:C.ok,zIndex:9999}}>{toast}</div>}
@@ -3897,7 +3901,8 @@ function ReportEditor({job, user, onBack, reportDate}){
         }catch(formErr){
           console.error("[submit] AcroForm fill failed:",formErr);
         }
-        srcDoc=null; // no source doc for the photo page logic — we loaded in-place
+        // Load a separate copy for photo page header/footer embedding
+        try{srcDoc=await PDFDocument.load(tplBytes,{ignoreEncryption:true});}catch(e){srcDoc=null;}
       }else{
         // ── 2a. Standard path: copyPages to preserve original visual content ──
         if(isPdfTemplate){
@@ -4013,7 +4018,7 @@ function ReportEditor({job, user, onBack, reportDate}){
       } // end if !acroform
 
       // ── 5. Remove empty trailing pages (no fields reference them) before adding photos ──
-      if(photos.length>0&&srcDoc&&pdfDoc.getPageCount()>1){
+      if(pdfDoc.getPageCount()>1){
         const maxFieldPage=Math.max(...allFields.map(f=>f.page||1),1);
         for(let p=pdfDoc.getPageCount();p>maxFieldPage;p--){pdfDoc.removePage(p-1);}
       }
@@ -4268,12 +4273,13 @@ function ReportEditor({job, user, onBack, reportDate}){
       // Get company name for dynamic sender
       let senderName="My Daily Reports";
       try{const prof=await db.getProfile(user.id);if(prof?.company_name)senderName=prof.company_name;}catch(e){}
-      if(!AUTH_TOKEN)await refreshAuthToken();
+      await refreshAuthToken();
+      if(!AUTH_TOKEN)throw new Error("Session expired. Please sign out and back in.");
+      const emailBody=JSON.stringify({to:recipients,subject:`${submitSuccess.jobName} — Daily Report ${submitSuccess.todayDisplay}`,html_body:submitSuccess.emailHtml,pdf_base64:submitSuccess.pdfBase64,pdf_filename:submitSuccess.pdfFilename,sender_name:senderName});
       let r=await fetch(`${SB_URL}/functions/v1/send-report`,{
-        method:"POST",headers:{"Content-Type":"application/json",Authorization:`Bearer ${AUTH_TOKEN||SB_KEY}`,apikey:SB_KEY},
-        body:JSON.stringify({to:recipients,subject:`${submitSuccess.jobName} — Daily Report ${submitSuccess.todayDisplay}`,html_body:submitSuccess.emailHtml,pdf_base64:submitSuccess.pdfBase64,pdf_filename:submitSuccess.pdfFilename,sender_name:senderName})
+        method:"POST",headers:{"Content-Type":"application/json",Authorization:`Bearer ${AUTH_TOKEN}`,apikey:SB_KEY},body:emailBody
       });
-      if(r.status===401){await refreshAuthToken();r=await fetch(`${SB_URL}/functions/v1/send-report`,{method:"POST",headers:{"Content-Type":"application/json",Authorization:`Bearer ${AUTH_TOKEN||SB_KEY}`,apikey:SB_KEY},body:JSON.stringify({to:recipients,subject:`${submitSuccess.jobName} — Daily Report ${submitSuccess.todayDisplay}`,html_body:submitSuccess.emailHtml,pdf_base64:submitSuccess.pdfBase64,pdf_filename:submitSuccess.pdfFilename,sender_name:senderName})});}
+      if(r.status===401){await refreshAuthToken();if(!AUTH_TOKEN)throw new Error("Session expired. Please sign out and back in.");r=await fetch(`${SB_URL}/functions/v1/send-report`,{method:"POST",headers:{"Content-Type":"application/json",Authorization:`Bearer ${AUTH_TOKEN}`,apikey:SB_KEY},body:emailBody});}
       if(!r.ok){const errBody=await r.json().catch(()=>({}));console.error("Email API response:",r.status,errBody);throw new Error(errBody.error||`Email send failed (${r.status})`);}
       showToast("Report emailed to "+recipients.length+" recipient"+(recipients.length>1?"s":"")+"!");
     }catch(e){
@@ -5290,6 +5296,12 @@ function Dashboard({user, onLogout}){
   }catch(e){console.error(e);}finally{setLoading(false);}};
   const act=jobs.filter(j=>!j.is_archived);
   const arch=jobs.filter(j=>j.is_archived);
+  // Sort active jobs by recent visit (tracked in localStorage)
+  const getRecentJobIds=()=>{try{return JSON.parse(localStorage.getItem("mdr_recent_jobs")||"[]");}catch(e){return[];}};
+  const trackJobVisit=(jobId)=>{try{let recent=getRecentJobIds().filter(id=>id!==jobId);recent.unshift(jobId);localStorage.setItem("mdr_recent_jobs",JSON.stringify(recent.slice(0,20)));}catch(e){}};
+  const recentIds=getRecentJobIds();
+  const sortedAct=[...act].sort((a,b)=>{const ai=recentIds.indexOf(a.id);const bi=recentIds.indexOf(b.id);if(ai===-1&&bi===-1)return 0;if(ai===-1)return 1;if(bi===-1)return -1;return ai-bi;});
+  const visibleJobs=sortedAct.slice(0,4);
   const top3=act.slice(0,3);
   const stat=(id,sc)=>{if(sc==="as_needed")return"none";const r=rpts.find(r=>r.job_id===id);if(!r)return"due";return r.status==="submitted"?"submitted":"working";};
   const dot=(s)=>{if(s==="none")return null;const c=s==="submitted"?C.ok:s==="working"?C.org:"#ef4444";return<div style={{width:10,height:10,borderRadius:"50%",background:c,flexShrink:0}}/>;};
@@ -5298,7 +5310,7 @@ function Dashboard({user, onLogout}){
 
   if(showAcct)return<AccountSettings user={user} onBack={()=>setShowAcct(false)} onLogout={onLogout}/>;
   if(showNew)return<CreateJob user={user} onBack={()=>setShowNew(false)} onCreated={()=>{setShowNew(false);load();}}/>;
-  if(showArch)return<ArchivedJobs jobs={arch} onBack={()=>setShowArch(false)} onSelect={(j)=>{setSelJob(j);setShowArch(false);}}/>;
+  if(showArch)return<ArchivedJobs jobs={arch} onBack={()=>setShowArch(false)} onSelect={(j)=>{selectJob(j);setShowArch(false);}}/>;
   if(showTrain)return<TrainingCenter onBack={()=>setShowTrain(false)}/>;
   if(showFairUse)return(
     <div style={{minHeight:"100vh",background:C.bg,color:C.txt}}>
@@ -5524,6 +5536,7 @@ function Dashboard({user, onLogout}){
     </div>
   );
 
+  const selectJob=(j)=>{if(j)trackJobVisit(j.id);setSelJob(j);};
   if(selJob)return(
     <JobDetail job={selJob} user={user} onBack={()=>{setSelJob(null);saveNav(null);load();}} onDeleted={()=>{setSelJob(null);saveNav(null);load();}}/>
   );
@@ -5555,7 +5568,7 @@ function Dashboard({user, onLogout}){
         <div style={{position:"absolute",left:16,top:62,background:C.card,border:`1px solid ${C.brd}`,borderRadius:12,marginTop:4,zIndex:90,boxShadow:"0 8px 24px rgba(0,0,0,0.5)",maxHeight:400,overflowY:"auto",minWidth:240}} data-d>
           {act.length===0&&<div style={{padding:16,textAlign:"center",color:C.mut,fontSize:14}}>No active jobs</div>}
           {act.map(j=>{const s=stat(j.id,j.schedule);return(
-            <button key={j.id} onClick={()=>{setSelJob(j);setShowDD(false);}} style={{width:"100%",display:"flex",alignItems:"center",gap:12,padding:"14px 16px",background:"none",border:"none",borderBottom:`1px solid ${C.brd}`,cursor:"pointer",textAlign:"left"}}>
+            <button key={j.id} onClick={()=>{selectJob(j);setShowDD(false);}} style={{width:"100%",display:"flex",alignItems:"center",gap:12,padding:"14px 16px",background:"none",border:"none",borderBottom:`1px solid ${C.brd}`,cursor:"pointer",textAlign:"left"}}>
               {dot(s)}<div style={{flex:1}}><div style={{fontSize:15,fontWeight:600,color:C.txt}}>{j.name}</div><span style={{fontSize:11,color:C.mut}}>{SL[j.schedule]||j.schedule}</span></div>
             </button>);})}
         </div>
@@ -5574,29 +5587,34 @@ function Dashboard({user, onLogout}){
         </div>
       )}
 
-      <div style={{maxWidth:600,margin:"0 auto",padding:"16px 16px 20px"}}>
+      <div style={{maxWidth:600,margin:"0 auto",padding:"16px 16px 20px",overflowX:"hidden"}}>
         <button className="btn-o" onClick={()=>setShowNew(true)} style={{width:"100%",padding:"14px 0",background:C.org,border:`1px solid ${C.blu}`,borderRadius:10,color:"#fff",fontSize:16,fontWeight:700,cursor:"pointer",marginBottom:16}}>+ New Job</button>
 
         {loading&&<p style={{textAlign:"center",color:C.mut,padding:40}}>Loading...</p>}
 
-        {/* ── Job cards — two column grid ── */}
+        {/* ── Job cards — two column grid, max 4 visible ── */}
         {!loading&&act.length>0&&(
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:16}}>
-            {act.map(j=>{const s=stat(j.id,j.schedule);const sc=s==="submitted"?C.ok:s==="working"?C.org:s==="due"?"#ef4444":C.brd;return(
-              <button key={j.id} onClick={()=>setSelJob(j)} style={{textAlign:"left",background:C.card,border:`1px solid ${C.brd}`,borderRadius:12,padding:14,cursor:"pointer",display:"flex",flexDirection:"column",gap:8,position:"relative",borderTop:`3px solid ${sc}`}}>
-                <div style={{display:"flex",alignItems:"center",gap:8}}>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:16,overflow:"hidden"}}>
+            {visibleJobs.map(j=>{const s=stat(j.id,j.schedule);const sc=s==="submitted"?C.ok:s==="working"?C.org:s==="due"?"#ef4444":C.brd;return(
+              <button key={j.id} onClick={()=>selectJob(j)} style={{textAlign:"left",background:C.card,border:`1px solid ${C.brd}`,borderRadius:12,padding:14,cursor:"pointer",display:"flex",flexDirection:"column",gap:8,position:"relative",borderTop:`3px solid ${sc}`,minWidth:0}}>
+                <div style={{display:"flex",alignItems:"center",gap:8,minWidth:0}}>
                   <div style={{width:36,height:36,borderRadius:8,background:C.inp,border:`1px solid ${C.brd}`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:12,fontWeight:700,color:C.mut,flexShrink:0}}>{j.job_type==="worklog"?"WL":"T"}</div>
                   <div style={{flex:1,minWidth:0}}>
-                    <div style={{fontWeight:700,fontSize:14,color:C.txt,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{j.name}</div>
+                    <div style={{fontWeight:700,fontSize:14,color:C.txt,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:"100%"}}>{j.name}</div>
                   </div>
-                  {j.scheduling_enabled&&<span style={{fontSize:14}} title="Scheduling enabled">📅</span>}
+                  {j.scheduling_enabled&&<span style={{fontSize:14,flexShrink:0}} title="Scheduling enabled">📅</span>}
                 </div>
                 <div style={{display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}>
                   <span style={{fontSize:10,fontWeight:600,background:C.inp,border:`1px solid ${C.brd}`,borderRadius:4,padding:"2px 6px",color:C.mut}}>{SL[j.schedule]||j.schedule}</span>
                   {s!=="none"&&<span style={{fontSize:10,fontWeight:700,color:sc}}>{s==="submitted"?"Done":s==="working"?"In Progress":"Due"}</span>}
                 </div>
-                {j.site_address&&<div style={{fontSize:11,color:C.mut,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{j.site_address}</div>}
+                {j.site_address&&<div style={{fontSize:11,color:C.mut,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{j.site_address}</div>}
               </button>);})}
+          </div>
+        )}
+        {!loading&&sortedAct.length>4&&(
+          <div style={{textAlign:"center",marginBottom:12,marginTop:-6}}>
+            <button onClick={()=>setShowDD(true)} style={{background:"none",border:"none",color:C.mut,fontSize:12,cursor:"pointer",padding:"4px 8px"}}>+{sortedAct.length-4} more — tap Jobs dropdown to see all</button>
           </div>
         )}
 
