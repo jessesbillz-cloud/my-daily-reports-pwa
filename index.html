@@ -3556,11 +3556,28 @@ function ReportEditor({job, user, onBack, reportDate}){
     }).catch(e=>console.error("Field config update error:",e));
   };
 
+  // Compress/rotate photo via canvas (fixes EXIF orientation for pdf-lib)
+  const compressFieldPhoto=(dataUrl)=>new Promise(resolve=>{
+    const img=new Image();
+    img.onload=()=>{
+      const MAX=1600;
+      let w=img.naturalWidth,h=img.naturalHeight;
+      if(w>MAX||h>MAX){const r=Math.min(MAX/w,MAX/h);w=Math.round(w*r);h=Math.round(h*r);}
+      const cvs=document.createElement("canvas");cvs.width=w;cvs.height=h;
+      cvs.getContext("2d").drawImage(img,0,0,w,h);
+      resolve(cvs.toDataURL("image/jpeg",0.7));
+    };
+    img.onerror=()=>resolve(dataUrl);
+    img.src=dataUrl;
+  });
   const handlePhoto=(e)=>{
     const files=Array.from(e.target.files||[]);
     files.forEach(file=>{
       const reader=new FileReader();
-      reader.onload=(ev)=>{setPhotos(p=>[...p,{id:Date.now()+Math.random(),src:ev.target.result,name:file.name}]);};
+      reader.onload=async(ev)=>{
+        const compressed=await compressFieldPhoto(ev.target.result);
+        setPhotos(p=>[...p,{id:Date.now()+Math.random(),src:compressed,name:file.name}]);
+      };
       reader.readAsDataURL(file);
     });
     // Reset input so same file can be re-selected
@@ -3781,18 +3798,11 @@ function ReportEditor({job, user, onBack, reportDate}){
             if(pair.length===1){
               drawPhoto(ctx,pair[0],(pgW-Math.min(bodyW,380*scale))/2,60*scale,Math.min(bodyW,380*scale),usableHP-20*scale);
             }else{
-              const bothPortrait=!pair[0].isLandscape&&!pair[1].isLandscape;
-              if(bothPortrait){
-                const colW=(bodyW-12*scale)/2;
-                pair.forEach((p,s)=>{
-                  drawPhoto(ctx,p,36*scale+s*(colW+12*scale),60*scale,colW,usableHP-20*scale);
-                });
-              }else{
-                const rowH=(usableHP-20*scale-12*scale)/2;
-                pair.forEach((p,r)=>{
-                  drawPhoto(ctx,p,(pgW-bodyW)/2,60*scale+r*(rowH+12*scale),bodyW,rowH);
-                });
-              }
+              // Always stacked vertically — 2 rows
+              const rowH=(usableHP-20*scale-12*scale)/2;
+              pair.forEach((p,r)=>{
+                drawPhoto(ctx,p,(pgW-bodyW)/2,60*scale+r*(rowH+12*scale),bodyW,rowH);
+              });
             }
             previewPages.push(cvs.toDataURL("image/jpeg",0.92));cvs.width=0;cvs.height=0;
             idx+=pair.length;
@@ -4017,9 +4027,16 @@ function ReportEditor({job, user, onBack, reportDate}){
           if(pageIdx<0||pageIdx>=pages.length)return;
           const page=pages[pageIdx];const pageH=page.getHeight();
           const sz=f.fontSize||10;
-          const fieldH=f.h||(sz*1.6); // give enough room so text sits inside cell, not on the border
-          const pdfY=pageH-f.y-fieldH;
+          const cellH=f.h||0; // actual cell height from template (0 = unknown)
+          const fieldH=cellH||(sz*1.6);
+          // Vertical centering: if we know the cell height, position text in the middle
+          // AcroForm fields render text ~2pt below the top of the field box
+          // So we shrink the field to text height and offset it to center in the cell
+          const isMulti=f.multiline;
+          const vertPad=(!isMulti&&cellH>sz*2)?Math.max(0,(cellH-sz*1.4)/2):0;
+          const pdfY=pageH-f.y-fieldH+vertPad;
           const fieldW=f.w||120;
+          const renderH=isMulti?fieldH:Math.min(fieldH,sz*1.6);
           const isSig=(f.name||"").toLowerCase().includes("signature")||(f.autoFill==="name"&&(f.name||"").toLowerCase().includes("inspector"));
           let fieldVal=String(f.val);
           if(isSig){
@@ -4050,7 +4067,7 @@ function ReportEditor({job, user, onBack, reportDate}){
           tf.setText(fieldVal);
           tf.setFontSize(useSz);
           if(f.multiline||isSig)tf.enableMultiline();
-          tf.addToPage(page,{x:f.x,y:pdfY+sigYOffset,width:fieldW,height:isSig?fieldH*1.5:fieldH,
+          tf.addToPage(page,{x:f.x,y:pdfY+sigYOffset,width:fieldW,height:isSig?fieldH*1.5:renderH,
             borderWidth:0});
         });
         form.flatten();
@@ -4097,8 +4114,9 @@ function ReportEditor({job, user, onBack, reportDate}){
             // Only draw lines that fit within the field boundary
             lines.forEach((ln,i)=>{const ly=textStartY-(i*sz*1.3);if(ly>=fieldBottomPDF)page.drawText(ln,{x:f.x+2,y:ly,size:sz,font,color:rgb(0,0,0)});});
           }else{
-            // Single line: center in field
-            const pdfY=pageH-f.y-fieldH+sz*0.75;
+            // Single line: vertically center text in the cell
+            // PDF text y = baseline position. Center: fieldTop - (fieldH - sz)/2 - sz*0.8
+            const pdfY=pageH-f.y-(fieldH+sz)/2+sz*0.15;
             page.drawText(String(f.val),{x:f.x+2,y:pdfY,size:sz,font,color:rgb(0,0,0)});
           }
         });
@@ -4211,35 +4229,18 @@ function ReportEditor({job, user, onBack, reportDate}){
               else{imgH=Math.min(maxH,maxW/ratio);imgW=imgH*ratio;}
               pg.drawImage(img,{x:(pageW-imgW)/2,y:photoAreaTop-10-imgH+(usableH-20-imgH)/2,width:imgW,height:imgH});
             }else{
-              // Both portrait → side by side (2 columns, 1 row)
-              // Either landscape → stacked vertically (1 column, 2 rows)
-              const bothPortrait=!pair[0].isLandscape&&!pair[1].isLandscape;
-              if(bothPortrait){
-                const colW=(bodyW-12)/2;const slotH=usableH-20;
-                pair.forEach((p,s)=>{
-                  const {img,ratio}=p;
-                  let imgW,imgH;
-                  if(ratio>=1){imgW=Math.min(colW,slotH*ratio);imgH=imgW/ratio;}
-                  else{imgH=Math.min(slotH,colW/ratio);imgW=imgH*ratio;}
-                  const slotX=36+s*(colW+12);
-                  const xPos=slotX+(colW-imgW)/2;
-                  const yPos=photoAreaTop-10-imgH+(slotH-imgH)/2;
-                  pg.drawImage(img,{x:xPos,y:Math.max(yPos,photoAreaBottom),width:imgW,height:imgH});
-                });
-              }else{
-                // Stacked vertically — 2 rows
-                const rowH=(usableH-20-12)/2;
-                pair.forEach((p,r)=>{
-                  const {img,ratio}=p;
-                  let imgW,imgH;
-                  if(ratio>=1){imgW=Math.min(bodyW,rowH*ratio);imgH=imgW/ratio;}
-                  else{imgH=Math.min(rowH,bodyW/ratio);imgW=imgH*ratio;}
-                  const rowTop=photoAreaTop-10-(r*(rowH+12));
-                  const xPos=(pageW-imgW)/2;
-                  const yPos=rowTop-imgH+(rowH-imgH)/2;
-                  pg.drawImage(img,{x:xPos,y:Math.max(yPos,photoAreaBottom),width:imgW,height:imgH});
-                });
-              }
+              // Always stacked vertically — 2 rows, centered
+              const rowH=(usableH-20-12)/2;
+              pair.forEach((p,r)=>{
+                const {img,ratio}=p;
+                let imgW,imgH;
+                if(ratio>=1){imgW=Math.min(bodyW,rowH*ratio);imgH=imgW/ratio;}
+                else{imgH=Math.min(rowH,bodyW/ratio);imgW=imgH*ratio;}
+                const rowTop=photoAreaTop-10-(r*(rowH+12));
+                const xPos=(pageW-imgW)/2;
+                const yPos=rowTop-imgH+(rowH-imgH)/2;
+                pg.drawImage(img,{x:xPos,y:Math.max(yPos,photoAreaBottom),width:imgW,height:imgH});
+              });
             }
             i+=pair.length;
           }else{
@@ -4629,13 +4630,10 @@ function ReportEditor({job, user, onBack, reportDate}){
           {photos.length>0&&(
             <div style={{display:"grid",gridTemplateColumns:photoLayout==="1"?"1fr":photoLayout==="2"?"1fr 1fr":"1fr 1fr",gap:8,marginBottom:12}}>
               {photos.map(p=>{const aiKey="fr-"+p.id;return(
-                <div key={p.id} style={{borderRadius:8,overflow:"hidden",border:`1px solid ${C.brd}`}}>
-                  <div style={{position:"relative",aspectRatio:photoLayout==="1"?"auto":"1"}}>
-                    <img src={p.src} alt={p.name} style={{width:"100%",height:"100%",objectFit:"cover",display:"block"}}/>
-                    <button onClick={()=>setPhotos(prev=>prev.filter(x=>x.id!==p.id))} style={{position:"absolute",top:4,right:4,width:22,height:22,borderRadius:"50%",background:"rgba(0,0,0,0.7)",border:"none",color:"#fff",fontSize:12,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}>✕</button>
-                    {job.field_config?.aiPhotos&&<button disabled={aiDescribing[aiKey]} onClick={async()=>{const desc=await describePhoto(p.src,`Job: ${job?.name||""}`,aiKey);if(desc)setPhotos(prev=>prev.map(x=>x.id===p.id?{...x,caption:desc}:x));}} style={{position:"absolute",bottom:4,left:4,padding:"3px 7px",borderRadius:5,background:aiDescribing[aiKey]?C.blu:C.org,border:"none",color:"#fff",fontSize:10,fontWeight:700,cursor:aiDescribing[aiKey]?"wait":"pointer",opacity:aiDescribing[aiKey]?0.7:0.9}}>{aiDescribing[aiKey]?"···":"AI"}</button>}
-                  </div>
-                  <input type="text" value={p.caption||""} onChange={e=>setPhotos(prev=>prev.map(x=>x.id===p.id?{...x,caption:e.target.value}:x))} placeholder="Photo caption..." style={{width:"100%",padding:"6px 8px",background:C.inp,border:"none",borderTop:`1px solid ${C.brd}`,color:C.txt,fontSize:11,boxSizing:"border-box"}}/>
+                <div key={p.id} style={{position:"relative",borderRadius:8,overflow:"hidden",border:`1px solid ${C.brd}`,aspectRatio:photoLayout==="1"?"auto":"1"}}>
+                  <img src={p.src} alt={p.name} style={{width:"100%",height:"100%",objectFit:"cover",display:"block"}}/>
+                  <button onClick={()=>setPhotos(prev=>prev.filter(x=>x.id!==p.id))} style={{position:"absolute",top:4,right:4,width:22,height:22,borderRadius:"50%",background:"rgba(0,0,0,0.7)",border:"none",color:"#fff",fontSize:12,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}>✕</button>
+                  {job.field_config?.aiPhotos&&<button disabled={aiDescribing[aiKey]} onClick={async()=>{const notesF=editFields.find(f=>f.voiceEnabled&&/notes|observations|comments/i.test(f.name));const desc=await describePhoto(p.src,`Job: ${job?.name||""}`,aiKey);if(desc&&notesF)setVals(v=>({...v,[notesF.name]:(v[notesF.name]?v[notesF.name]+"\n":"")+desc}));else if(desc)alert(desc);}} style={{position:"absolute",bottom:4,left:4,padding:"3px 7px",borderRadius:5,background:aiDescribing[aiKey]?C.blu:C.org,border:"none",color:"#fff",fontSize:10,fontWeight:700,cursor:aiDescribing[aiKey]?"wait":"pointer",opacity:aiDescribing[aiKey]?0.7:0.9}}>{aiDescribing[aiKey]?"···":"AI"}</button>}
                 </div>
               );})}
             </div>
