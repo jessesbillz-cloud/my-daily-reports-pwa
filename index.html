@@ -3758,14 +3758,18 @@ function ReportEditor({job, user, onBack, reportDate}){
         const pgW=612*scale;const pgH=792*scale;
         const bodyW=(612-72)*scale;
         const usableHP=pgH-80*scale;
-        // Pre-load all images to get real dimensions
+        // Pre-load all images — draw to temp canvas to get EXIF-corrected dimensions
         const loaded=[];
         for(let i=0;i<photos.length;i++){
           try{
             const src=photos[i].src||photos[i];
             const im=new Image();
             await new Promise((res,rej)=>{im.onload=res;im.onerror=rej;im.src=src;});
-            loaded.push({im,ratio:im.naturalWidth/im.naturalHeight,isLandscape:im.naturalWidth>=im.naturalHeight});
+            // Draw to 1x1 canvas to force EXIF rotation, then read rendered size
+            // createImageBitmap respects EXIF and gives us the real dimensions
+            let w=im.naturalWidth,h=im.naturalHeight;
+            try{const bmp=await createImageBitmap(im);w=bmp.width;h=bmp.height;bmp.close();}catch(e){}
+            loaded.push({im,ratio:w/h,isLandscape:w>=h,corrW:w,corrH:h});
           }catch(e){loaded.push(null);}
         }
         const validPhotos=loaded.filter(Boolean);
@@ -3778,11 +3782,15 @@ function ReportEditor({job, user, onBack, reportDate}){
           return {cvs,ctx};
         };
         const drawPhoto=(ctx,p,x,y,maxW,maxH)=>{
-          const {im,ratio}=p;
+          const {im,ratio,corrW,corrH}=p;
           let imgW,imgH;
           if(ratio>=1){imgW=Math.min(maxW,maxH*ratio);imgH=imgW/ratio;}
           else{imgH=Math.min(maxH,maxW/ratio);imgW=imgH*ratio;}
-          ctx.drawImage(im,x+(maxW-imgW)/2,y+(maxH-imgH)/2,imgW,imgH);
+          // Draw via temp canvas to ensure EXIF rotation is applied
+          const tc=document.createElement("canvas");tc.width=corrW||im.naturalWidth;tc.height=corrH||im.naturalHeight;
+          tc.getContext("2d").drawImage(im,0,0,tc.width,tc.height);
+          ctx.drawImage(tc,x+(maxW-imgW)/2,y+(maxH-imgH)/2,imgW,imgH);
+          tc.width=0;tc.height=0; // free memory
         };
         let idx=0;
         while(idx<validPhotos.length){
