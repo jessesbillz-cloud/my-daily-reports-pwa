@@ -2665,7 +2665,7 @@ function WorkLogEditor({job, user, onBack, reportDate}){
     const doc=await PDFDocument.create();
     if(window.fontkit)doc.registerFontkit(window.fontkit);
     // Use Caladea (Cambria-compatible serif) if available, fall back to Times
-    const caladea=await fetchCaladeaFonts();
+    const caladea=window.fontkit?await fetchCaladeaFonts():{};
     let font,fontB;
     if(caladea.regular&&caladea.bold){
       font=await doc.embedFont(caladea.regular);
@@ -4321,7 +4321,7 @@ function ReportEditor({job, user, onBack, reportDate}){
         console.log("[submit] Using AcroForm fill-by-name path");
         pdfDoc=await PDFDocument.load(tplBytes,{ignoreEncryption:true});
         if(window.fontkit)pdfDoc.registerFontkit(window.fontkit);
-        const calF=await fetchCaladeaFonts();
+        const calF=window.fontkit?await fetchCaladeaFonts():{};
         const acroFont=calF.regular?await pdfDoc.embedFont(calF.regular):await pdfDoc.embedFont(StandardFonts.TimesRoman);
         const acroFontItalic=calF.italic?await pdfDoc.embedFont(calF.italic):await pdfDoc.embedFont(StandardFonts.TimesRomanItalic);
         // Strategy: extract widget rectangles from AcroForm fields, remove ALL fields,
@@ -4434,20 +4434,22 @@ function ReportEditor({job, user, onBack, reportDate}){
           }
         });
         // Load a separate copy for photo page header/footer embedding
-        try{srcDoc=await PDFDocument.load(tplBytes,{ignoreEncryption:true});}catch(e){srcDoc=null;}
+        try{srcDoc=await PDFDocument.load(tplBytes,{ignoreEncryption:true});if(window.fontkit)srcDoc.registerFontkit(window.fontkit);}catch(e){srcDoc=null;}
       }else{
         // ── 2a. Standard path: copyPages to preserve original visual content ──
         if(isPdfTemplate){
           srcDoc=await PDFDocument.load(tplBytes,{ignoreEncryption:true});
+          if(window.fontkit)srcDoc.registerFontkit(window.fontkit);
           pdfDoc=await PDFDocument.create();
+          if(window.fontkit)pdfDoc.registerFontkit(window.fontkit);
           const copiedPages=await pdfDoc.copyPages(srcDoc,srcDoc.getPageIndices());
           copiedPages.forEach(p=>pdfDoc.addPage(p));
         }else{
           pdfDoc=await PDFDocument.create();pdfDoc.addPage([612,792]);
         }
       }
-      if(window.fontkit)pdfDoc.registerFontkit(window.fontkit);
-      const calF2=await fetchCaladeaFonts();
+      if(window.fontkit&&!pdfDoc._fontkit)pdfDoc.registerFontkit(window.fontkit);
+      const calF2=window.fontkit?await fetchCaladeaFonts():{};
       const font=calF2.regular?await pdfDoc.embedFont(calF2.regular):await pdfDoc.embedFont(StandardFonts.TimesRoman);
       const fontItalic=calF2.italic?await pdfDoc.embedFont(calF2.italic):await pdfDoc.embedFont(StandardFonts.TimesRomanItalic);
       const pages=pdfDoc.getPages();
