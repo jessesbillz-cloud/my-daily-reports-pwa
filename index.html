@@ -29,6 +29,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.9/babel.min.js"></script>
 <!-- pdf-lib for PDF generation, pdf.js for text extraction -->
 <script src="https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@pdf-lib/fontkit@1.1.1/dist/fontkit.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/mammoth@1.6.0/mammoth.browser.min.js"></script>
 <script>if(window.pdfjsLib){window.pdfjsLib.GlobalWorkerOptions.workerSrc="";window.pdfjsLib.GlobalWorkerOptions.workerPort=null;window.pdfjsLib.disableWorker=true;}</script>
@@ -2662,6 +2663,7 @@ function WorkLogEditor({job, user, onBack, reportDate}){
   const generateWorkLogPdf=async()=>{
     const {PDFDocument,rgb,StandardFonts}=PDFLib;
     const doc=await PDFDocument.create();
+    if(window.fontkit)doc.registerFontkit(window.fontkit);
     // Use Caladea (Cambria-compatible serif) if available, fall back to Times
     const caladea=await fetchCaladeaFonts();
     let font,fontB;
@@ -4318,6 +4320,7 @@ function ReportEditor({job, user, onBack, reportDate}){
       if(isPdfTemplate&&fcSource==="acroform"){
         console.log("[submit] Using AcroForm fill-by-name path");
         pdfDoc=await PDFDocument.load(tplBytes,{ignoreEncryption:true});
+        if(window.fontkit)pdfDoc.registerFontkit(window.fontkit);
         const calF=await fetchCaladeaFonts();
         const acroFont=calF.regular?await pdfDoc.embedFont(calF.regular):await pdfDoc.embedFont(StandardFonts.TimesRoman);
         const acroFontItalic=calF.italic?await pdfDoc.embedFont(calF.italic):await pdfDoc.embedFont(StandardFonts.TimesRomanItalic);
@@ -4443,6 +4446,7 @@ function ReportEditor({job, user, onBack, reportDate}){
           pdfDoc=await PDFDocument.create();pdfDoc.addPage([612,792]);
         }
       }
+      if(window.fontkit)pdfDoc.registerFontkit(window.fontkit);
       const calF2=await fetchCaladeaFonts();
       const font=calF2.regular?await pdfDoc.embedFont(calF2.regular):await pdfDoc.embedFont(StandardFonts.TimesRoman);
       const fontItalic=calF2.italic?await pdfDoc.embedFont(calF2.italic):await pdfDoc.embedFont(StandardFonts.TimesRomanItalic);
