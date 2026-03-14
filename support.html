@@ -123,8 +123,9 @@ function Dashboard({session}){
   const loadConvs=async()=>{
     try{
       const r=await fetch(`${SB_URL}/rest/v1/support_conversations?order=updated_at.desc&select=*`,{headers:hGet()});
-      if(r.ok)setConvs(await r.json());
-    }catch(e){}
+      if(r.ok){const data=await r.json();console.log("[support] convs loaded:",data.length);setConvs(data);}
+      else{console.error("[support] convs fetch failed:",r.status,await r.text());}
+    }catch(e){console.error("[support] convs error:",e);}
   };
 
   // Load messages for selected conversation

@@ -308,21 +308,26 @@ function SupportChat({user}){
   // Start or resume conversation
   const startChat=async()=>{
     try{
-      // Check for existing open conversation
       const tok=AUTH_TOKEN||(localStorage.getItem("sb_access_token"))||SB_KEY;
       const h={"apikey":SB_KEY,"Content-Type":"application/json","Authorization":"Bearer "+tok};
+      // Check for existing open conversation
       if(user){
-        const r=await fetch(`${SB_URL}/rest/v1/support_conversations?user_id=eq.${user.id}&status=eq.open&order=created_at.desc&limit=1`,{headers:h});
-        const existing=await r.json();
-        if(existing&&existing.length>0){
-          setConvId(existing[0].id);
-          // Load messages
-          const mr=await fetch(`${SB_URL}/rest/v1/support_messages?conversation_id=eq.${existing[0].id}&order=created_at.asc`,{headers:h});
-          setMsgs(await mr.json());
-          setStarted(true);
-          subscribeToMessages(existing[0].id);
-          return;
-        }
+        try{
+          const r=await fetch(`${SB_URL}/rest/v1/support_conversations?user_id=eq.${user.id}&status=eq.open&order=created_at.desc&limit=1`,{headers:h});
+          if(r.ok){
+            const existing=await r.json();
+            if(existing&&existing.length>0){
+              setConvId(existing[0].id);
+              try{
+                const mr=await fetch(`${SB_URL}/rest/v1/support_messages?conversation_id=eq.${existing[0].id}&order=created_at.asc`,{headers:h});
+                if(mr.ok)setMsgs(await mr.json());
+              }catch(e){}
+              setStarted(true);
+              subscribeToMessages(existing[0].id);
+              return;
+            }
+          }
+        }catch(e){console.error("resume check:",e);}
       }
       // Create new conversation
       const body={status:"open"};
@@ -330,15 +335,17 @@ function SupportChat({user}){
       if(guestName.trim())body.guest_name=guestName.trim();
       if(guestEmail.trim())body.guest_email=guestEmail.trim();
       const r=await fetch(`${SB_URL}/rest/v1/support_conversations`,{method:"POST",headers:{...h,"Prefer":"return=representation"},body:JSON.stringify(body)});
-      const conv=(await r.json())[0];
+      if(!r.ok){console.error("create conv failed:",r.status,await r.text());return;}
+      const convArr=await r.json();
+      if(!convArr||!convArr[0]){console.error("create conv: empty response");return;}
+      const conv=convArr[0];
       setConvId(conv.id);
       setStarted(true);
       subscribeToMessages(conv.id);
-
-      // Notify support agent
+      // Notify support agent (non-fatal)
       try{
-        await fetch(`${SB_URL}/functions/v1/notify-support`,{method:"POST",headers:{"apikey":SB_KEY,"Authorization":"Bearer "+(AUTH_TOKEN||SB_KEY),"Content-Type":"application/json"},body:JSON.stringify({conversation_id:conv.id,guest_name:guestName.trim()||(user?.user_metadata?.full_name)||"Anonymous",guest_email:guestEmail.trim()||(user?.email)||""})});
-      }catch(e){console.error("notify-support:",e);}
+        await fetch(`${SB_URL}/functions/v1/notify-support`,{method:"POST",headers:{"apikey":SB_KEY,"Authorization":"Bearer "+tok,"Content-Type":"application/json"},body:JSON.stringify({conversation_id:conv.id,guest_name:guestName.trim()||(user?.user_metadata?.full_name)||"Anonymous",guest_email:guestEmail.trim()||(user?.email)||""})});
+      }catch(e){}
     }catch(e){console.error("startChat:",e);}
   };
 
