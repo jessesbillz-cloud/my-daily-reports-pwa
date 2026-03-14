@@ -315,46 +315,25 @@ function SupportChat({user}){
 
   // Start or resume conversation
   const startChat=async()=>{
+    const tok=AUTH_TOKEN||(localStorage.getItem("sb_access_token"))||SB_KEY;
+    const headers={"apikey":SB_KEY,"Content-Type":"application/json","Authorization":"Bearer "+tok,"Prefer":"return=representation"};
     try{
-      const tok=AUTH_TOKEN||(localStorage.getItem("sb_access_token"))||SB_KEY;
-      const h={"apikey":SB_KEY,"Content-Type":"application/json","Authorization":"Bearer "+tok};
-      // Check for existing open conversation
-      if(user){
-        try{
-          const r=await fetch(`${SB_URL}/rest/v1/support_conversations?user_id=eq.${user.id}&status=eq.open&order=created_at.desc&limit=1`,{headers:h});
-          if(r.ok){
-            const existing=await r.json();
-            if(existing&&existing.length>0){
-              setConvId(existing[0].id);
-              try{
-                const mr=await fetch(`${SB_URL}/rest/v1/support_messages?conversation_id=eq.${existing[0].id}&order=created_at.asc`,{headers:h});
-                if(mr.ok)setMsgs(await mr.json());
-              }catch(e){}
-              setStarted(true);
-              subscribeToMessages(existing[0].id);
-              return;
-            }
-          }
-        }catch(e){console.error("resume check:",e);}
-      }
       // Create new conversation
       const body={status:"open"};
       if(user)body.user_id=user.id;
       if(guestName.trim())body.guest_name=guestName.trim();
       if(guestEmail.trim())body.guest_email=guestEmail.trim();
-      const r=await fetch(`${SB_URL}/rest/v1/support_conversations`,{method:"POST",headers:{...h,"Prefer":"return=representation"},body:JSON.stringify(body)});
-      if(!r.ok){console.error("create conv failed:",r.status,await r.text());return;}
-      const convArr=await r.json();
-      if(!convArr||!convArr[0]){console.error("create conv: empty response");return;}
-      const conv=convArr[0];
-      setConvId(conv.id);
+      if(user&&user.user_metadata?.full_name)body.guest_name=user.user_metadata.full_name;
+      if(user&&user.email)body.guest_email=user.email;
+      const r=await fetch(`${SB_URL}/rest/v1/support_conversations`,{method:"POST",headers,body:JSON.stringify(body)});
+      const txt=await r.text();
+      if(!r.ok){alert("Chat error: "+txt);return;}
+      const convArr=JSON.parse(txt);
+      if(!convArr||!convArr[0]){alert("Chat error: no conversation created");return;}
+      setConvId(convArr[0].id);
       setStarted(true);
-      subscribeToMessages(conv.id);
-      // Notify support agent (non-fatal)
-      try{
-        await fetch(`${SB_URL}/functions/v1/notify-support`,{method:"POST",headers:{"apikey":SB_KEY,"Authorization":"Bearer "+tok,"Content-Type":"application/json"},body:JSON.stringify({conversation_id:conv.id,guest_name:guestName.trim()||(user?.user_metadata?.full_name)||"Anonymous",guest_email:guestEmail.trim()||(user?.email)||""})});
-      }catch(e){}
-    }catch(e){console.error("startChat:",e);}
+      subscribeToMessages(convArr[0].id);
+    }catch(e){alert("Chat error: "+e.message);}
   };
 
   const subscribeToMessages=(cid)=>{
@@ -378,16 +357,14 @@ function SupportChat({user}){
     if(!draft.trim()||sending||!convId)return;
     setSending(true);
     try{
-      // Refresh token if available
       const tok=AUTH_TOKEN||(localStorage.getItem("sb_access_token"))||SB_KEY;
       const h={"apikey":SB_KEY,"Authorization":"Bearer "+tok,"Content-Type":"application/json"};
       const pr=await fetch(`${SB_URL}/rest/v1/support_messages`,{method:"POST",headers:h,body:JSON.stringify({conversation_id:convId,sender:"user",body:draft.trim()})});
-      if(!pr.ok){console.error("sendMsg failed:",pr.status,await pr.text());return;}
+      if(!pr.ok){alert("Send failed: "+await pr.text());setSending(false);return;}
       setDraft("");
-      // Immediate fetch
       const r=await fetch(`${SB_URL}/rest/v1/support_messages?conversation_id=eq.${convId}&order=created_at.asc`,{headers:{"apikey":SB_KEY,"Authorization":"Bearer "+tok}});
       if(r.ok)setMsgs(await r.json());
-    }catch(e){console.error("sendMsg:",e);}
+    }catch(e){alert("Send error: "+e.message);}
     finally{setSending(false);}
   };
 
