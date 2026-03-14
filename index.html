@@ -309,8 +309,8 @@ function SupportChat({user}){
   const startChat=async()=>{
     try{
       // Check for existing open conversation
-      const h={"apikey":SB_KEY,"Content-Type":"application/json"};
-      if(AUTH_TOKEN)h["Authorization"]="Bearer "+AUTH_TOKEN;
+      const tok=AUTH_TOKEN||(localStorage.getItem("sb_access_token"))||SB_KEY;
+      const h={"apikey":SB_KEY,"Content-Type":"application/json","Authorization":"Bearer "+tok};
       if(user){
         const r=await fetch(`${SB_URL}/rest/v1/support_conversations?user_id=eq.${user.id}&status=eq.open&order=created_at.desc&limit=1`,{headers:h});
         const existing=await r.json();
@@ -345,8 +345,8 @@ function SupportChat({user}){
   const subscribeToMessages=(cid)=>{
     if(subRef.current)subRef.current.unsubscribe?.();
     // Poll for new messages every 3s (simpler than realtime for PWA)
-    const h={"apikey":SB_KEY};
-    if(AUTH_TOKEN)h["Authorization"]="Bearer "+AUTH_TOKEN;
+    const tok=AUTH_TOKEN||(localStorage.getItem("sb_access_token"))||SB_KEY;
+    const h={"apikey":SB_KEY,"Authorization":"Bearer "+tok};
     const poll=setInterval(async()=>{
       try{
         const r=await fetch(`${SB_URL}/rest/v1/support_messages?conversation_id=eq.${cid}&order=created_at.asc`,{headers:h});
@@ -363,12 +363,14 @@ function SupportChat({user}){
     if(!draft.trim()||sending||!convId)return;
     setSending(true);
     try{
-      const h={"apikey":SB_KEY,"Content-Type":"application/json"};
-      if(AUTH_TOKEN)h["Authorization"]="Bearer "+AUTH_TOKEN;
-      await fetch(`${SB_URL}/rest/v1/support_messages`,{method:"POST",headers:h,body:JSON.stringify({conversation_id:convId,sender:"user",body:draft.trim()})});
+      // Refresh token if available
+      const tok=AUTH_TOKEN||(localStorage.getItem("sb_access_token"))||SB_KEY;
+      const h={"apikey":SB_KEY,"Authorization":"Bearer "+tok,"Content-Type":"application/json"};
+      const pr=await fetch(`${SB_URL}/rest/v1/support_messages`,{method:"POST",headers:h,body:JSON.stringify({conversation_id:convId,sender:"user",body:draft.trim()})});
+      if(!pr.ok){console.error("sendMsg failed:",pr.status,await pr.text());return;}
       setDraft("");
       // Immediate fetch
-      const r=await fetch(`${SB_URL}/rest/v1/support_messages?conversation_id=eq.${convId}&order=created_at.asc`,{headers:{"apikey":SB_KEY,...(AUTH_TOKEN?{"Authorization":"Bearer "+AUTH_TOKEN}:{})}});
+      const r=await fetch(`${SB_URL}/rest/v1/support_messages?conversation_id=eq.${convId}&order=created_at.asc`,{headers:{"apikey":SB_KEY,"Authorization":"Bearer "+tok}});
       if(r.ok)setMsgs(await r.json());
     }catch(e){console.error("sendMsg:",e);}
     finally{setSending(false);}
