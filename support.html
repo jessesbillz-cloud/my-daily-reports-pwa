@@ -82,9 +82,10 @@ function LoginScreen({onAuth}){
       });
       const d=await r.json();
       if(d.error)throw new Error(d.error_description||d.error);
-      const userEmail=(d.user?.email||"").toLowerCase().trim();
-      if(!SUPPORT_AGENTS.map(e=>e.toLowerCase().trim()).includes(userEmail)){
-        setErr("Access denied — "+userEmail+" is not a support agent");
+      // Use the email they typed — we already know it's a valid login at this point
+      const loginEmail=email.toLowerCase().trim();
+      if(!SUPPORT_AGENTS.map(e=>e.toLowerCase().trim()).includes(loginEmail)){
+        setErr("Access denied — "+loginEmail+" is not a support agent");
         return;
       }
       onAuth(d);
