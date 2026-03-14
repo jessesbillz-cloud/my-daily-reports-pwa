@@ -102,14 +102,16 @@ serve(async (req) => {
     // Look up the job owner via profile slug so we can link the request to them
     let ownerId = "";
     let ownerEmail = "";
+    let ownerNtfyTopic = "";
     try {
       const { data: profile } = await supabase
         .from("profiles")
-        .select("id")
+        .select("id, ntfy_topic")
         .eq("slug", project)
         .single();
       if (profile) {
         ownerId = profile.id;
+        ownerNtfyTopic = profile.ntfy_topic || "";
         const { data: authUser } = await supabase.auth.admin.getUserById(
           profile.id
         );
@@ -290,6 +292,25 @@ serve(async (req) => {
         } catch (emailErr) {
           console.error("Email send error:", emailErr);
         }
+      }
+    }
+
+    // Send ntfy push notification to job owner
+    if (ownerNtfyTopic) {
+      try {
+        const typeLabel = inspectionTypes.join(", ");
+        const timeLabel = flexibleDisplay === "flexible" ? "Flexible" : inspectionTime;
+        await fetch(`https://ntfy.sh/${ownerNtfyTopic}`, {
+          method: "POST",
+          headers: {
+            "Title": "New Scheduling Request",
+            "Priority": "high",
+            "Tags": "calendar",
+          },
+          body: `${submittedBy} requested ${typeLabel} on ${inspectionDate} at ${timeLabel} for ${project.replace(/-/g, " ")}`,
+        });
+      } catch (ntfyErr) {
+        console.error("ntfy push error (non-fatal):", ntfyErr);
       }
     }
 

@@ -110,25 +110,40 @@ serve(async (req) => {
         : [],
     };
 
-    const response = await fetch("https://api.resend.com/emails", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${RESEND_API_KEY}`,
-      },
-      body: JSON.stringify(resendPayload),
-    });
+    // Rate-limit aware send with retry + exponential backoff (Resend Pro = 2 req/sec)
+    const MAX_RETRIES = 3;
+    let response: Response | null = null;
+    let result: any = null;
+    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+      response = await fetch("https://api.resend.com/emails", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${RESEND_API_KEY}`,
+        },
+        body: JSON.stringify(resendPayload),
+      });
 
-    const result = await response.json();
-    console.log("[send-report] Resend response:", response.status, JSON.stringify(result));
+      result = await response.json();
+      console.log(`[send-report] Resend response (attempt ${attempt + 1}):`, response.status, JSON.stringify(result));
 
-    if (!response.ok) {
+      if (response.status === 429 && attempt < MAX_RETRIES) {
+        // Rate limited — back off exponentially: 500ms, 1s, 2s
+        const delay = 500 * Math.pow(2, attempt);
+        console.warn(`[send-report] Rate limited (429), retrying in ${delay}ms...`);
+        await new Promise(r => setTimeout(r, delay));
+        continue;
+      }
+      break; // success or non-retryable error
+    }
+
+    if (!response!.ok) {
       // IMPORTANT: return 502 (not Resend's status) so the client doesn't confuse
       // a Resend 401 (bad API key) with a Supabase 401 (expired JWT)
       const resendError = result.message || result.name || "Email send failed";
-      console.error("[send-report] Resend error:", response.status, resendError, JSON.stringify(result));
+      console.error("[send-report] Resend error:", response!.status, resendError, JSON.stringify(result));
       return new Response(
-        JSON.stringify({ error: `Resend API error (${response.status}): ${resendError}`, resend_status: response.status, details: result }),
+        JSON.stringify({ error: `Resend API error (${response!.status}): ${resendError}`, resend_status: response!.status, details: result }),
         {
           status: 502,
           headers: { ...corsHeaders, "Content-Type": "application/json" },

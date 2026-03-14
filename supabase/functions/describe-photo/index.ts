@@ -35,59 +35,75 @@ serve(async (req) => {
     else if (image_base64.startsWith("R0lG")) mediaType = "image/gif";
     else if (image_base64.startsWith("UklG")) mediaType = "image/webp";
 
-    const systemPrompt = `You are a construction site photo analyst for daily inspection reports. Describe what you see in 1-2 concise sentences. Focus on:
-- Work activity (what trade/task is being performed)
-- Materials visible (rebar, concrete, framing, conduit, etc.)
-- Location context if identifiable (floor level, grid line, room, exterior/interior)
-- Stage of work (in progress, completed, inspection-ready)
+    const systemPrompt = `You are a photo analyst for professional daily reports. Describe what you see in 1-2 concise sentences. Focus on:
+- Activity or condition shown (work being done, equipment in use, site conditions, property state)
+- Key details visible (materials, tools, areas, features, damage, progress)
+- Location context if identifiable (room, floor, area, exterior/interior)
+- Status (in progress, completed, needs attention, normal condition)
 
 Keep it factual and professional — this goes directly into an official daily report. Do NOT start with "This photo shows" or "The image depicts". Just state what's happening.`;
 
     const userPrompt = context
-      ? `Describe this construction site photo. Context: ${context}`
-      : "Describe this construction site photo for a daily inspection report.";
+      ? `Describe this photo for a daily report. Context: ${context}`
+      : "Describe this photo for a professional daily report.";
 
     console.log("[describe-photo] Calling Claude API, image size:", image_base64.length, "context:", context?.slice(0, 80));
 
-    const response = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": apiKey,
-        "anthropic-version": "2023-06-01",
-      },
-      body: JSON.stringify({
-        model: "claude-haiku-4-5-20251001",
-        max_tokens: 150,
-        system: systemPrompt,
-        messages: [
-          {
-            role: "user",
-            content: [
-              {
-                type: "image",
-                source: {
-                  type: "base64",
-                  media_type: mediaType,
-                  data: image_base64,
-                },
+    const apiBody = JSON.stringify({
+      model: "claude-haiku-4-5-20251001",
+      max_tokens: 150,
+      system: systemPrompt,
+      messages: [
+        {
+          role: "user",
+          content: [
+            {
+              type: "image",
+              source: {
+                type: "base64",
+                media_type: mediaType,
+                data: image_base64,
               },
-              {
-                type: "text",
-                text: userPrompt,
-              },
-            ],
-          },
-        ],
-      }),
+            },
+            {
+              type: "text",
+              text: userPrompt,
+            },
+          ],
+        },
+      ],
     });
 
-    const result = await response.json();
-    console.log("[describe-photo] Claude response status:", response.status);
+    // Retry with exponential backoff on 429 (rate limit) or 529 (overloaded)
+    const MAX_RETRIES = 3;
+    let response: Response | null = null;
+    let result: any = null;
+    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+      response = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": apiKey,
+          "anthropic-version": "2023-06-01",
+        },
+        body: apiBody,
+      });
 
-    if (!response.ok) {
+      result = await response.json();
+      console.log(`[describe-photo] Claude response (attempt ${attempt + 1}):`, response.status);
+
+      if ((response.status === 429 || response.status === 529) && attempt < MAX_RETRIES) {
+        const delay = 1000 * Math.pow(2, attempt); // 1s, 2s, 4s
+        console.warn(`[describe-photo] Rate limited (${response.status}), retrying in ${delay}ms...`);
+        await new Promise(r => setTimeout(r, delay));
+        continue;
+      }
+      break;
+    }
+
+    if (!response!.ok) {
       const errMsg = result.error?.message || result.message || "AI request failed";
-      console.error("[describe-photo] Claude error:", response.status, errMsg);
+      console.error("[describe-photo] Claude error:", response!.status, errMsg);
       return new Response(
         JSON.stringify({ error: errMsg }),
         { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } }

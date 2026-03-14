@@ -132,9 +132,19 @@ async function readAcroFormFields(pdfData){
     if(/notes|observation|comment|item.*location|description/.test(nl))multiline=true;
     if(type==="signature")category="signature";
     else if(autoFill)category="auto";
+    // Extract font size from the field's default appearance (DA) string
+    let fontSize=null;
+    try{
+      const daStr=f.acroField.getDefaultAppearance();
+      if(daStr){const szMatch=daStr.match(/(\d+(?:\.\d+)?)\s+Tf/);if(szMatch)fontSize=parseFloat(szMatch[1]);}
+    }catch(e){}
+    // Get widget rectangle for height-based sizing fallback
+    try{
+      if(!fontSize){const widgets=f.acroField.getWidgets();if(widgets.length>0){const r=widgets[0].getRectangle();if(r.height>0&&r.height<50)fontSize=Math.min(12,Math.max(8,r.height*0.65));}}
+    }catch(e){}
     // Clean display name: strip trailing numbers like "Date Recd-0" → "Date Recd"
     let displayName=name.replace(/-\d+$/,"").replace(/^Textfield-?\d*$/i,"Notes/Description");
-    result.push({pdfFieldName:name,displayName,type,value,autoFill,multiline,category});
+    result.push({pdfFieldName:name,displayName,type,value,autoFill,multiline,category,fontSize:fontSize||null});
   }
   return result;
 }
@@ -242,6 +252,37 @@ async function authSignUpAndSave(email,password,fullName){
   throw new Error(d.error_description||d.msg||d.error||"Signup failed");
 }
 
+// Google OAuth sign-in
+async function authSignInWithGoogle(){
+  // Redirect to Supabase Google OAuth — after auth, redirects back with tokens in URL hash
+  const redirectTo=window.location.origin+window.location.pathname;
+  window.location.href=`${SB_URL}/auth/v1/authorize?provider=google&redirect_to=${encodeURIComponent(redirectTo)}`;
+}
+
+// Handle OAuth callback — check URL hash for access_token after redirect
+async function authHandleOAuthCallback(){
+  const hash=window.location.hash;
+  if(!hash||!hash.includes("access_token"))return null;
+  const params=new URLSearchParams(hash.substring(1));
+  const accessToken=params.get("access_token");
+  const refreshToken=params.get("refresh_token");
+  if(!accessToken||!refreshToken)return null;
+  // Clear hash from URL
+  window.history.replaceState(null,"",window.location.pathname+window.location.search);
+  // Fetch user info
+  AUTH_TOKEN=accessToken;
+  try{
+    const r=await fetch(`${SB_URL}/auth/v1/user`,{headers:{"apikey":SB_KEY,"Authorization":"Bearer "+accessToken}});
+    const d=await r.json();
+    if(d.id){
+      const u={id:d.id,email:d.email,user_metadata:d.user_metadata||{}};
+      authSaveSession(refreshToken,u);
+      return u;
+    }
+  }catch(e){console.error("OAuth callback error:",e);}
+  return null;
+}
+
 function authLogout(){
   AUTH_TOKEN=null;
   localStorage.removeItem("mdr_session");
@@ -252,6 +293,139 @@ const SL={daily_mf:"Daily M-F",daily_7:"Daily 7 Days",weekly:"Weekly",as_needed:
 /* ── MDR Logo SVG Component ── */
 function MDRLogo({size=36}){
   return <img src="logo.jpg" alt="My Daily Reports" style={{width:size,height:size,borderRadius:size>40?8:4,objectFit:"contain"}}/>;
+}
+
+/* ── Support Chat Widget ── */
+function SupportChat({user}){
+  const [open,setOpen]=useState(false);
+  const [convId,setConvId]=useState(null);
+  const [msgs,setMsgs]=useState([]);
+  const [draft,setDraft]=useState("");
+  const [guestName,setGuestName]=useState("");
+  const [guestEmail,setGuestEmail]=useState("");
+  const [sending,setSending]=useState(false);
+  const [started,setStarted]=useState(false);
+  const scrollRef=useRef(null);
+  const subRef=useRef(null);
+
+  // Start or resume conversation
+  const startChat=async()=>{
+    try{
+      // Check for existing open conversation
+      const h={"apikey":SB_KEY,"Content-Type":"application/json"};
+      if(AUTH_TOKEN)h["Authorization"]="Bearer "+AUTH_TOKEN;
+      if(user){
+        const r=await fetch(`${SB_URL}/rest/v1/support_conversations?user_id=eq.${user.id}&status=eq.open&order=created_at.desc&limit=1`,{headers:h});
+        const existing=await r.json();
+        if(existing&&existing.length>0){
+          setConvId(existing[0].id);
+          // Load messages
+          const mr=await fetch(`${SB_URL}/rest/v1/support_messages?conversation_id=eq.${existing[0].id}&order=created_at.asc`,{headers:h});
+          setMsgs(await mr.json());
+          setStarted(true);
+          subscribeToMessages(existing[0].id);
+          return;
+        }
+      }
+      // Create new conversation
+      const body={status:"open"};
+      if(user)body.user_id=user.id;
+      if(guestName.trim())body.guest_name=guestName.trim();
+      if(guestEmail.trim())body.guest_email=guestEmail.trim();
+      const r=await fetch(`${SB_URL}/rest/v1/support_conversations`,{method:"POST",headers:{...h,"Prefer":"return=representation"},body:JSON.stringify(body)});
+      const conv=(await r.json())[0];
+      setConvId(conv.id);
+      setStarted(true);
+      subscribeToMessages(conv.id);
+
+      // Notify support agent
+      try{
+        await fetch(`${SB_URL}/functions/v1/notify-support`,{method:"POST",headers:{"apikey":SB_KEY,"Authorization":"Bearer "+(AUTH_TOKEN||SB_KEY),"Content-Type":"application/json"},body:JSON.stringify({conversation_id:conv.id,guest_name:guestName.trim()||(user?.user_metadata?.full_name)||"Anonymous",guest_email:guestEmail.trim()||(user?.email)||""})});
+      }catch(e){console.error("notify-support:",e);}
+    }catch(e){console.error("startChat:",e);}
+  };
+
+  const subscribeToMessages=(cid)=>{
+    if(subRef.current)subRef.current.unsubscribe?.();
+    // Poll for new messages every 3s (simpler than realtime for PWA)
+    const h={"apikey":SB_KEY};
+    if(AUTH_TOKEN)h["Authorization"]="Bearer "+AUTH_TOKEN;
+    const poll=setInterval(async()=>{
+      try{
+        const r=await fetch(`${SB_URL}/rest/v1/support_messages?conversation_id=eq.${cid}&order=created_at.asc`,{headers:h});
+        if(r.ok){const newMsgs=await r.json();setMsgs(newMsgs);}
+      }catch(e){}
+    },3000);
+    subRef.current={unsubscribe:()=>clearInterval(poll)};
+  };
+
+  useEffect(()=>{return()=>{if(subRef.current)subRef.current.unsubscribe?.();};},[]);
+  useEffect(()=>{if(scrollRef.current)scrollRef.current.scrollTop=scrollRef.current.scrollHeight;},[msgs]);
+
+  const sendMsg=async()=>{
+    if(!draft.trim()||sending||!convId)return;
+    setSending(true);
+    try{
+      const h={"apikey":SB_KEY,"Content-Type":"application/json"};
+      if(AUTH_TOKEN)h["Authorization"]="Bearer "+AUTH_TOKEN;
+      await fetch(`${SB_URL}/rest/v1/support_messages`,{method:"POST",headers:h,body:JSON.stringify({conversation_id:convId,sender:"user",body:draft.trim()})});
+      setDraft("");
+      // Immediate fetch
+      const r=await fetch(`${SB_URL}/rest/v1/support_messages?conversation_id=eq.${convId}&order=created_at.asc`,{headers:{"apikey":SB_KEY,...(AUTH_TOKEN?{"Authorization":"Bearer "+AUTH_TOKEN}:{})}});
+      if(r.ok)setMsgs(await r.json());
+    }catch(e){console.error("sendMsg:",e);}
+    finally{setSending(false);}
+  };
+
+  if(!open)return(
+    <button onClick={()=>setOpen(true)} style={{position:"fixed",bottom:20,right:20,width:56,height:56,borderRadius:"50%",background:C.org,border:"none",color:"#fff",fontSize:24,cursor:"pointer",zIndex:9999,boxShadow:"0 4px 12px rgba(0,0,0,0.4)",display:"flex",alignItems:"center",justifyContent:"center"}}>
+      💬
+    </button>
+  );
+
+  return(
+    <div style={{position:"fixed",bottom:20,right:20,width:340,maxWidth:"calc(100vw - 40px)",height:460,maxHeight:"calc(100vh - 40px)",background:C.card,border:`1px solid ${C.brd}`,borderRadius:16,zIndex:9999,display:"flex",flexDirection:"column",boxShadow:"0 8px 32px rgba(0,0,0,0.5)",overflow:"hidden"}}>
+      {/* Header */}
+      <div style={{padding:"14px 16px",background:C.org,display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+        <div style={{color:"#fff",fontWeight:700,fontSize:15}}>Support Chat</div>
+        <button onClick={()=>setOpen(false)} style={{background:"none",border:"none",color:"#fff",fontSize:20,cursor:"pointer",lineHeight:1}}>×</button>
+      </div>
+
+      {!started?(
+        <div style={{flex:1,padding:20,display:"flex",flexDirection:"column",gap:12}}>
+          <div style={{fontSize:14,color:C.lt,lineHeight:1.5}}>Have a question or found a bug? Chat with our support team.</div>
+          {!user&&(
+            <>
+              <input type="text" placeholder="Your name (optional)" value={guestName} onChange={e=>setGuestName(e.target.value)} style={{padding:"10px 12px",background:C.inp,border:`1px solid ${C.brd}`,borderRadius:8,color:C.txt,fontSize:13}}/>
+              <input type="email" placeholder="Your email (optional)" value={guestEmail} onChange={e=>setGuestEmail(e.target.value)} style={{padding:"10px 12px",background:C.inp,border:`1px solid ${C.brd}`,borderRadius:8,color:C.txt,fontSize:13}}/>
+            </>
+          )}
+          {user&&<div style={{fontSize:12,color:C.mut}}>Chatting as {user.user_metadata?.full_name||user.email}</div>}
+          <button onClick={startChat} style={{padding:"14px 0",background:C.org,border:"none",borderRadius:10,color:"#fff",fontSize:15,fontWeight:700,cursor:"pointer",marginTop:"auto"}}>Start Chat</button>
+        </div>
+      ):(
+        <>
+          {/* Messages */}
+          <div ref={scrollRef} style={{flex:1,overflowY:"auto",padding:12,display:"flex",flexDirection:"column",gap:8}}>
+            {msgs.length===0&&<div style={{textAlign:"center",color:C.mut,fontSize:13,marginTop:20}}>Send a message to get started</div>}
+            {msgs.map(m=>(
+              <div key={m.id} style={{alignSelf:m.sender==="user"?"flex-end":"flex-start",maxWidth:"80%"}}>
+                <div style={{padding:"8px 12px",borderRadius:12,background:m.sender==="user"?C.org:"#333",color:"#fff",fontSize:13,lineHeight:1.5,borderBottomRightRadius:m.sender==="user"?4:12,borderBottomLeftRadius:m.sender==="agent"?4:12}}>
+                  {m.body}
+                </div>
+                <div style={{fontSize:10,color:C.mut,marginTop:2,textAlign:m.sender==="user"?"right":"left"}}>{new Date(m.created_at).toLocaleTimeString([],{hour:"numeric",minute:"2-digit"})}</div>
+              </div>
+            ))}
+          </div>
+          {/* Input */}
+          <div style={{padding:10,borderTop:`1px solid ${C.brd}`,display:"flex",gap:8}}>
+            <input type="text" value={draft} onChange={e=>setDraft(e.target.value)} onKeyDown={e=>{if(e.key==="Enter"&&!e.shiftKey)sendMsg();}} placeholder="Type a message..." style={{flex:1,padding:"10px 12px",background:C.inp,border:`1px solid ${C.brd}`,borderRadius:8,color:C.txt,fontSize:13}}/>
+            <button onClick={sendMsg} disabled={sending||!draft.trim()} style={{padding:"10px 16px",background:C.org,border:"none",borderRadius:8,color:"#fff",fontSize:14,fontWeight:700,cursor:sending?"default":"pointer",opacity:sending||!draft.trim()?0.5:1}}>→</button>
+          </div>
+        </>
+      )}
+    </div>
+  );
 }
 
 // Refresh auth token if stale — returns true if refreshed
@@ -573,6 +747,7 @@ function AccountSettings({user, onBack, onLogout}){
   const [uploadingLogo,setUploadingLogo]=useState(false);
   const logoInputRef=useRef(null);
   const [companyRole,setCompanyRole]=useState("member");
+  const [ntfyTopic,setNtfyTopic]=useState("");
 
   const TZ_OPTIONS = [
     "America/New_York","America/Chicago","America/Denver","America/Phoenix",
@@ -602,6 +777,7 @@ function AccountSettings({user, onBack, onLogout}){
           if(p.timezone)setTimezone(p.timezone);
           if(p.slug)setSlug(p.slug);
           if(p.company_role)setCompanyRole(p.company_role);
+          if(p.ntfy_topic)setNtfyTopic(p.ntfy_topic);
         }
       }catch(e){console.error(e);}
       finally{setLoading(false);}
@@ -674,6 +850,7 @@ function AccountSettings({user, onBack, onLogout}){
         company_id:companyId||null,
         timezone,
         slug:slugVal,
+        ntfy_topic:ntfyTopic.trim()||("mdr-"+slugVal),
       };
       await db.upsertProfile(data);
       flash("Settings saved successfully");
@@ -703,9 +880,8 @@ function AccountSettings({user, onBack, onLogout}){
   return(
     <div style={{minHeight:"100vh",background:C.bg,color:C.txt}}>
       {/* Header */}
-      <div style={{display:"flex",alignItems:"center",gap:12,padding:"16px 20px",borderBottom:`1px solid ${C.brd}`,background:C.card}}>
-        <button onClick={onBack} style={{background:"none",border:"none",color:C.blu,fontSize:28,cursor:"pointer",padding:"8px 12px",lineHeight:1,borderRadius:8,minWidth:48,minHeight:48,display:"flex",alignItems:"center",justifyContent:"center"}}>←</button>
-        <MDRLogo size={28}/>
+      <div style={{display:"flex",alignItems:"center",gap:10,padding:"14px 16px",borderBottom:`1px solid ${C.brd}`,background:C.card}}>
+        <button onClick={onBack} style={{background:"none",border:"none",color:C.mut,fontSize:24,cursor:"pointer",lineHeight:1,minWidth:44,minHeight:44,display:"flex",alignItems:"center",justifyContent:"center"}}>←</button>
         <span style={{fontWeight:700,fontSize:17}}>Account Settings</span>
       </div>
 
@@ -843,11 +1019,22 @@ function AccountSettings({user, onBack, onLogout}){
                   Notifications
                 </div>
                 <div style={{fontSize:13,color:C.mut,lineHeight:1.6,marginBottom:14}}>
-                  Email reminders are sent based on your per-job reminder settings.
+                  Email reminders are sent based on your per-job reminder settings. Push notifications use ntfy for real-time scheduling alerts.
                 </div>
                 <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"12px 0",borderTop:`1px solid ${C.brd}`}}>
                   <div><div style={{fontSize:14,fontWeight:600,color:C.lt}}>Email Reminders</div><div style={{fontSize:11,color:C.mut}}>Configured per-job in job settings</div></div>
                   <div style={{fontSize:12,fontWeight:600,color:C.ok}}>Active</div>
+                </div>
+                <div style={{padding:"14px 0 0",borderTop:`1px solid ${C.brd}`,marginTop:12}}>
+                  <div style={{fontSize:14,fontWeight:600,color:C.lt,marginBottom:8}}>Push Notifications (ntfy)</div>
+                  <div style={{fontSize:12,color:C.mut,lineHeight:1.6,marginBottom:10}}>
+                    Get instant push notifications on your phone when scheduling requests come in. Install the free <a href="https://ntfy.sh" target="_blank" rel="noopener" style={{color:C.org}}>ntfy app</a> on your phone, then subscribe to your topic below.
+                  </div>
+                  <div style={{display:"flex",gap:8,alignItems:"center"}}>
+                    <input type="text" value={ntfyTopic} onChange={e=>setNtfyTopic(e.target.value.replace(/[^a-zA-Z0-9_-]/g,""))} placeholder={"mdr-"+(slug||"your-slug")} style={{flex:1,padding:"10px 12px",background:C.inp,border:`1px solid ${C.brd}`,borderRadius:8,color:C.txt,fontSize:13}}/>
+                    {ntfyTopic&&<button onClick={()=>{navigator.clipboard?.writeText("https://ntfy.sh/"+ntfyTopic);flash("Copied subscribe link");}} style={{padding:"10px 14px",background:C.inp,border:`1px solid ${C.brd}`,borderRadius:8,color:C.lt,fontSize:12,fontWeight:600,cursor:"pointer",whiteSpace:"nowrap"}}>Copy Link</button>}
+                  </div>
+                  {ntfyTopic&&<div style={{fontSize:11,color:C.mut,marginTop:6}}>Subscribe URL: <span style={{color:C.lt}}>ntfy.sh/{ntfyTopic}</span></div>}
                 </div>
               </div>
             </div>
@@ -858,18 +1045,57 @@ function AccountSettings({user, onBack, onLogout}){
                 <div style={{fontWeight:700,fontSize:15,color:C.txt,marginBottom:12,display:"flex",alignItems:"center",gap:8}}>
                   Subscription
                 </div>
-                <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:12}}>
-                  <div>
-                    <div style={{fontSize:14,fontWeight:600,color:C.txt}}>Early Access</div>
-                    <div style={{fontSize:12,color:C.ok,fontWeight:600}}>Active</div>
-                  </div>
-                  <div style={{background:"rgba(34,197,94,0.1)",border:"1px solid rgba(34,197,94,0.3)",borderRadius:8,padding:"6px 12px"}}>
-                    <span style={{fontSize:12,fontWeight:700,color:C.ok}}>FREE</span>
-                  </div>
-                </div>
-                <div style={{fontSize:12,color:C.mut,lineHeight:1.5}}>
-                  You're part of the early access group. Paid tiers coming soon with additional features.
-                </div>
+                {(()=>{
+                  const ss=profile?.subscription_status||"trialing";
+                  const isActive=ss==="active";
+                  const isTrial=ss==="trialing";
+                  const trialEnd=profile?.trial_ends_at?new Date(profile.trial_ends_at):null;
+                  const trialDays=trialEnd?Math.max(0,Math.ceil((trialEnd-new Date())/(1000*60*60*24))):0;
+                  return <>
+                    <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:12}}>
+                      <div>
+                        <div style={{fontSize:14,fontWeight:600,color:C.txt}}>{isActive?"Subscribed":isTrial?"Free Trial":"Inactive"}</div>
+                        <div style={{fontSize:12,color:isActive?C.ok:isTrial?C.org:C.err,fontWeight:600}}>
+                          {isActive?"Active":isTrial?`${trialDays} days remaining`:"Expired"}
+                        </div>
+                      </div>
+                      <div style={{background:isActive?"rgba(34,197,94,0.1)":isTrial?"rgba(232,116,42,0.1)":"rgba(239,68,68,0.1)",border:`1px solid ${isActive?"rgba(34,197,94,0.3)":isTrial?"rgba(232,116,42,0.3)":"rgba(239,68,68,0.3)"}`,borderRadius:8,padding:"6px 12px"}}>
+                        <span style={{fontSize:12,fontWeight:700,color:isActive?C.ok:isTrial?C.org:C.err}}>{isActive?"$19.99/mo":isTrial?"TRIAL":"EXPIRED"}</span>
+                      </div>
+                    </div>
+                    {isActive&&(
+                      <button onClick={async()=>{
+                        try{const r=await fetch(`${SB_URL}/functions/v1/manage-subscription`,{method:"POST",headers:{"apikey":SB_KEY,"Authorization":"Bearer "+(AUTH_TOKEN||SB_KEY),"Content-Type":"application/json"},body:JSON.stringify({user_id:user.id,action:"portal"})});const d=await r.json();if(d.url)window.location.href=d.url;}catch(e){flash(e.message,"err");}
+                      }} style={{width:"100%",padding:"10px 0",background:C.inp,border:`1px solid ${C.brd}`,borderRadius:8,color:C.lt,fontSize:13,fontWeight:600,cursor:"pointer",marginBottom:8}}>
+                        Manage Billing
+                      </button>
+                    )}
+                    {(isTrial||ss==="expired"||ss==="cancelled")&&(
+                      <div style={{marginTop:8}}>
+                        <div style={{fontSize:12,color:C.mut,marginBottom:10}}>Subscribe to keep using My Daily Reports after your trial ends.</div>
+                        <div style={{display:"flex",gap:8}}>
+                          <button onClick={async()=>{
+                            const pid=localStorage.getItem("mdr_price_monthly")||"";
+                            if(!pid){flash("Stripe not configured yet","err");return;}
+                            try{const r=await fetch(`${SB_URL}/functions/v1/create-checkout`,{method:"POST",headers:{"apikey":SB_KEY,"Authorization":"Bearer "+(AUTH_TOKEN||SB_KEY),"Content-Type":"application/json"},body:JSON.stringify({user_id:user.id,price_id:pid})});const d=await r.json();if(d.url)window.location.href=d.url;else flash(d.error||"Error","err");}catch(e){flash(e.message,"err");}
+                          }} style={{flex:1,padding:"10px 0",background:C.org,border:"none",borderRadius:8,color:"#fff",fontSize:13,fontWeight:700,cursor:"pointer"}}>
+                            $19.99/mo
+                          </button>
+                          <button onClick={async()=>{
+                            const pid=localStorage.getItem("mdr_price_annual")||"";
+                            if(!pid){flash("Stripe not configured yet","err");return;}
+                            try{const r=await fetch(`${SB_URL}/functions/v1/create-checkout`,{method:"POST",headers:{"apikey":SB_KEY,"Authorization":"Bearer "+(AUTH_TOKEN||SB_KEY),"Content-Type":"application/json"},body:JSON.stringify({user_id:user.id,price_id:pid})});const d=await r.json();if(d.url)window.location.href=d.url;else flash(d.error||"Error","err");}catch(e){flash(e.message,"err");}
+                          }} style={{flex:1,padding:"10px 0",background:C.blu,border:"none",borderRadius:8,color:"#fff",fontSize:13,fontWeight:700,cursor:"pointer"}}>
+                            $199/yr
+                          </button>
+                        </div>
+                        <div style={{fontSize:11,color:C.mut,marginTop:8,lineHeight:1.5}}>
+                          PayPal and Venmo available at checkout. For Zelle or crypto, email jessesbillz@gmail.com
+                        </div>
+                      </div>
+                    )}
+                  </>;
+                })()}
               </div>
             </div>
 
@@ -1368,7 +1594,7 @@ function CreateJob({user, onBack, onCreated}){
               let mode="edit";
               if(f.autoFill==="date")mode="auto-date";
               else if(f.autoFill)mode="lock";
-              all.push({name:f.displayName,pdfFieldName:f.pdfFieldName,pdfDateParts:uniqueParts,value:f.value||"",mode,type:f.type,autoFill:f.autoFill||"date",multiline:false,voiceEnabled:false,source:"acroform"});
+              all.push({name:f.displayName,pdfFieldName:f.pdfFieldName,pdfDateParts:uniqueParts,value:f.value||"",mode,type:f.type,autoFill:f.autoFill||"date",multiline:false,voiceEnabled:false,source:"acroform",fontSize:f.fontSize||null});
             }
             return; // skip individual parts
           }
@@ -1380,7 +1606,7 @@ function CreateJob({user, onBack, onCreated}){
           else if(f.autoFill==="date")mode="auto-date";
           else if(f.autoFill==="ir_number")mode="auto-num";
           else if(f.autoFill)mode="lock"; // auto-filled fields start locked
-          all.push({name:f.displayName,pdfFieldName:f.pdfFieldName,value:f.value||"",mode,type:f.type,autoFill:f.autoFill,multiline:f.multiline,voiceEnabled:f.multiline,source:"acroform"});
+          all.push({name:f.displayName,pdfFieldName:f.pdfFieldName,value:f.value||"",mode,type:f.type,autoFill:f.autoFill,multiline:f.multiline,voiceEnabled:f.multiline,source:"acroform",fontSize:f.fontSize||null});
         });
         setFields(all);
         return; // skip AI detection
@@ -1710,9 +1936,8 @@ function CreateJob({user, onBack, onCreated}){
 
   return(
     <div style={{minHeight:"100vh",background:C.bg,color:C.txt}}>
-      <div style={{display:"flex",alignItems:"center",gap:12,padding:"16px 20px",borderBottom:`1px solid ${C.brd}`,background:C.card}}>
-        <button onClick={onBack} style={{background:"none",border:"none",color:C.blu,fontSize:28,cursor:"pointer",padding:"8px 12px",lineHeight:1,borderRadius:8,minWidth:48,minHeight:48,display:"flex",alignItems:"center",justifyContent:"center"}}>←</button>
-        <MDRLogo size={28}/>
+      <div style={{display:"flex",alignItems:"center",gap:10,padding:"14px 16px",borderBottom:`1px solid ${C.brd}`,background:C.card}}>
+        <button onClick={onBack} style={{background:"none",border:"none",color:C.mut,fontSize:24,cursor:"pointer",lineHeight:1,minWidth:44,minHeight:44,display:"flex",alignItems:"center",justifyContent:"center"}}>←</button>
         <span style={{fontWeight:700,fontSize:17}}>New Job</span>
       </div>
       <div style={{maxWidth:500,margin:"0 auto",padding:"24px 20px"}}>
@@ -2010,9 +2235,8 @@ function CreateJob({user, onBack, onCreated}){
 function ArchivedJobs({jobs, onBack, onSelect}){
   return(
     <div style={{minHeight:"100vh",background:C.bg,color:C.txt}}>
-      <div style={{display:"flex",alignItems:"center",gap:12,padding:"16px 20px",borderBottom:`1px solid ${C.brd}`,background:C.card}}>
-        <button onClick={onBack} style={{background:"none",border:"none",color:C.blu,fontSize:28,cursor:"pointer",padding:"8px 12px",lineHeight:1,borderRadius:8,minWidth:48,minHeight:48,display:"flex",alignItems:"center",justifyContent:"center"}}>←</button>
-        <MDRLogo size={28}/>
+      <div style={{display:"flex",alignItems:"center",gap:10,padding:"14px 16px",borderBottom:`1px solid ${C.brd}`,background:C.card}}>
+        <button onClick={onBack} style={{background:"none",border:"none",color:C.mut,fontSize:24,cursor:"pointer",lineHeight:1,minWidth:44,minHeight:44,display:"flex",alignItems:"center",justifyContent:"center"}}>←</button>
         <span style={{fontWeight:700,fontSize:17}}>Archived Jobs</span>
         <span style={{fontSize:13,color:C.mut,marginLeft:"auto"}}>{jobs.length} job{jobs.length!==1?"s":""}</span>
       </div>
@@ -2021,7 +2245,7 @@ function ArchivedJobs({jobs, onBack, onSelect}){
         {jobs.map(j=>(
           <button key={j.id} onClick={()=>onSelect(j)} style={{width:"100%",textAlign:"left",background:C.card,border:`1px solid ${C.brd}`,borderRadius:12,padding:"16px 18px",marginBottom:10,cursor:"pointer",display:"flex",alignItems:"center",gap:14}}>
             <div style={{fontSize:16,fontWeight:700,color:C.mut}}>—</div>
-            <div style={{flex:1}}><div style={{fontWeight:600,fontSize:16,color:C.txt,marginBottom:4}}>{j.name}</div><div style={{display:"flex",alignItems:"center",gap:8}}><span style={{fontSize:11,fontWeight:600,background:C.inp,border:`1px solid ${C.brd}`,borderRadius:6,padding:"2px 8px",color:C.mut}}>{SL[j.schedule]||j.schedule}</span>{j.site_address&&<span style={{fontSize:12,color:C.mut}}>{j.site_address}</span>}</div></div>
+            <div style={{flex:1,minWidth:0}}><div style={{fontWeight:600,fontSize:16,color:C.txt,marginBottom:4,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{j.name}</div><div style={{display:"flex",alignItems:"center",gap:8}}><span style={{fontSize:11,fontWeight:600,background:C.inp,border:`1px solid ${C.brd}`,borderRadius:6,padding:"2px 8px",color:C.mut}}>{SL[j.schedule]||j.schedule}</span>{j.site_address&&<span style={{fontSize:12,color:C.mut,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{j.site_address}</span>}</div></div>
             <span style={{color:C.mut,fontSize:18}}>›</span>
           </button>
         ))}
@@ -2057,6 +2281,27 @@ async function fetchCaladeaFonts(){
   })();
   return _caladeaCache.loading;
 }
+
+// ── Global: AI photo description daily limit (per job, per day) ──
+const AI_DESCRIBE_DAILY_LIMIT=25;
+const _aiUsage={};
+function getAiUsageKey(jobId){
+  const d=new Date().toLocaleDateString("en-CA",{timeZone:Intl.DateTimeFormat().resolvedOptions().timeZone});
+  return jobId+"_"+d;
+}
+function checkAiLimit(jobId){
+  const key=getAiUsageKey(jobId);
+  return(_aiUsage[key]||0)<AI_DESCRIBE_DAILY_LIMIT;
+}
+function getAiUsageCount(jobId){return _aiUsage[getAiUsageKey(jobId)]||0;}
+function incrementAiUsage(jobId){
+  const key=getAiUsageKey(jobId);
+  _aiUsage[key]=(_aiUsage[key]||0)+1;
+  // Persist to localStorage so refreshes don't reset the counter
+  try{localStorage.setItem("mdr_ai_usage",JSON.stringify(_aiUsage));}catch(e){}
+}
+// Restore from localStorage on load
+try{const stored=localStorage.getItem("mdr_ai_usage");if(stored)Object.assign(_aiUsage,JSON.parse(stored));}catch(e){}
 
 /* ── Work Log Editor ── */
 function WorkLogEditor({job, user, onBack, reportDate}){
@@ -2297,13 +2542,33 @@ function WorkLogEditor({job, user, onBack, reportDate}){
     img.src=dataUrl;
   });
 
+  // Downscale image for AI vision — 800px max, lower quality (description doesn't need full-res)
+  const downscaleForAI=(dataUrl)=>new Promise(resolve=>{
+    const img=new Image();
+    img.onload=()=>{
+      const MAX=800;
+      let w=img.width,h=img.height;
+      if(w<=MAX&&h<=MAX){resolve(dataUrl);return;}
+      const r=Math.min(MAX/w,MAX/h);w=Math.round(w*r);h=Math.round(h*r);
+      const cvs=document.createElement("canvas");cvs.width=w;cvs.height=h;
+      cvs.getContext("2d").drawImage(img,0,0,w,h);
+      resolve(cvs.toDataURL("image/jpeg",0.5));
+    };
+    img.onerror=()=>resolve(dataUrl);
+    img.src=dataUrl;
+  });
+
   // AI photo description — calls describe-photo edge function
   const [aiDescribing,setAiDescribing]=useState({}); // keyed by uniqueId e.g. "contractor-{cid}-{photoIdx}"
+  const [aiUsageCount,setAiUsageCount]=useState(getAiUsageCount(job?.id));
+  const aiLimitReached=aiUsageCount>=AI_DESCRIBE_DAILY_LIMIT;
   const describePhoto=async(imageDataUrl,context,uniqueId)=>{
+    if(!checkAiLimit(job?.id)){alert(`AI description limit reached (${AI_DESCRIBE_DAILY_LIMIT}/day per job). Resets tomorrow.`);return null;}
     setAiDescribing(p=>({...p,[uniqueId]:true}));
     try{
-      // Strip data:image/...;base64, prefix
-      const b64=imageDataUrl.includes(",")?imageDataUrl.split(",")[1]:imageDataUrl;
+      // Downscale for AI vision (800px vs 1600px stored), then strip prefix
+      const aiImg=await downscaleForAI(imageDataUrl);
+      const b64=aiImg.includes(",")?aiImg.split(",")[1]:aiImg;
       const r=await fetch(`${SB_URL}/functions/v1/describe-photo`,{
         method:"POST",
         headers:{"Content-Type":"application/json",apikey:SB_KEY},
@@ -2311,6 +2576,8 @@ function WorkLogEditor({job, user, onBack, reportDate}){
       });
       const data=await r.json();
       if(!r.ok)throw new Error(data.error||"AI request failed");
+      incrementAiUsage(job?.id);
+      setAiUsageCount(getAiUsageCount(job?.id));
       return data.description||"";
     }catch(e){
       console.error("[AI describe]",e);
@@ -2999,6 +3266,7 @@ function WorkLogEditor({job, user, onBack, reportDate}){
   useEffect(()=>{
     if(contractors.filter(c=>c.active!==false).length===0||submitSuccess)return;
     const t=setInterval(()=>{
+      if(savingRef.current)return; // skip if save already in flight
       const hash=JSON.stringify({contractors,generalNotes,safetyNotes,materials,equipment,qualityControl,customCategories,survey,weatherAM,weatherMid,weatherPM,sectionPhotos});
       if(hash===lastSaveHash.current)return; // nothing changed
       lastSaveHash.current=hash;
@@ -3020,8 +3288,7 @@ function WorkLogEditor({job, user, onBack, reportDate}){
     return(
       <div style={{minHeight:"100vh",background:C.bg,color:C.txt,display:"flex",flexDirection:"column"}}>
         <div style={{display:"flex",alignItems:"center",gap:10,padding:"12px 16px",borderBottom:`1px solid ${C.brd}`,background:C.card}}>
-          <button onClick={()=>setViewingPreview(null)} style={{background:"none",border:"none",color:C.blu,fontSize:28,cursor:"pointer",padding:"8px 12px",lineHeight:1,borderRadius:8,minWidth:48,minHeight:48,display:"flex",alignItems:"center",justifyContent:"center"}}>←</button>
-          <MDRLogo size={28}/>
+          <button onClick={()=>setViewingPreview(null)} style={{background:"none",border:"none",color:C.mut,fontSize:24,cursor:"pointer",padding:"8px 12px",lineHeight:1,borderRadius:8,minWidth:44,minHeight:44,display:"flex",alignItems:"center",justifyContent:"center"}}>←</button>
           <div style={{flex:1}}>
             <div style={{fontWeight:700,fontSize:17}}>Report Preview</div>
             <div style={{fontSize:12,color:C.mut}}>{viewingPreview.length} page{viewingPreview.length>1?"s":""}</div>
@@ -3057,11 +3324,10 @@ function WorkLogEditor({job, user, onBack, reportDate}){
         </div>
       )}
       {/* Header */}
-      <div style={{display:"flex",alignItems:"center",gap:12,padding:"16px 20px",borderBottom:`1px solid ${C.brd}`,background:C.card}}>
-        <button onClick={async()=>{await saveWorking();onBack();}} style={{background:"none",border:"none",color:C.blu,fontSize:28,cursor:"pointer",padding:"8px 12px",lineHeight:1,borderRadius:8,minWidth:48,minHeight:48,display:"flex",alignItems:"center",justifyContent:"center"}}>←</button>
-        <MDRLogo size={28}/>
-        <div style={{flex:1}}>
-          <div style={{fontWeight:700,fontSize:16}}>{job.name}</div>
+      <div style={{display:"flex",alignItems:"center",gap:12,padding:"14px 16px",borderBottom:`1px solid ${C.brd}`,background:C.card}}>
+        <button onClick={async()=>{await saveWorking();onBack();}} style={{background:"none",border:"none",color:C.mut,fontSize:24,cursor:"pointer",padding:"8px 12px",lineHeight:1,borderRadius:8,minWidth:44,minHeight:44,display:"flex",alignItems:"center",justifyContent:"center"}}>←</button>
+        <div style={{flex:1,minWidth:0}}>
+          <div style={{fontWeight:700,fontSize:16,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{job.name}</div>
           <div style={{fontSize:12,color:C.mut}}>Work Log — {new Date(todayISO+"T12:00:00").toLocaleDateString("en-US",{weekday:"short",month:"short",day:"numeric",timeZone:tz})}</div>
         </div>
         <button onClick={saveWorking} disabled={saving} style={{padding:"8px 14px",background:C.blu,border:"none",borderRadius:8,color:"#fff",fontSize:13,fontWeight:600,cursor:saving?"default":"pointer",opacity:saving?0.7:1}}>
@@ -3183,7 +3449,7 @@ function WorkLogEditor({job, user, onBack, reportDate}){
                         <div key={i} style={{width:72,height:72,borderRadius:8,overflow:"hidden",position:"relative",border:`1px solid ${C.brd}`}}>
                           <img src={ph.data} style={{width:"100%",height:"100%",objectFit:"cover"}}/>
                           <button onClick={()=>removePhoto(c.id,i)} style={{position:"absolute",top:2,right:2,width:20,height:20,borderRadius:"50%",background:"rgba(0,0,0,0.6)",border:"none",color:"#fff",fontSize:12,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}>✕</button>
-                          {job.field_config?.aiPhotos&&<button disabled={aiDescribing[aiKey]} onClick={async()=>{const desc=await describePhoto(ph.data,`Contractor: ${c.name}, Job: ${job?.name||""}`,aiKey);if(desc)updateContractor(c.id,"description",(c.description?c.description+"\n":"")+desc);}} style={{position:"absolute",bottom:2,left:2,padding:"2px 5px",borderRadius:4,background:aiDescribing[aiKey]?C.blu:C.org,border:"none",color:"#fff",fontSize:9,fontWeight:700,cursor:aiDescribing[aiKey]?"wait":"pointer",opacity:aiDescribing[aiKey]?0.7:0.9}}>{aiDescribing[aiKey]?"···":"AI"}</button>}
+                          {job.field_config?.aiPhotos&&<button disabled={aiDescribing[aiKey]||aiLimitReached} onClick={async()=>{const desc=await describePhoto(ph.data,`Contractor: ${c.name}, Job: ${job?.name||""}`,aiKey);if(desc)updateContractor(c.id,"description",(c.description?c.description+"\n":"")+desc);}} style={{position:"absolute",bottom:2,left:2,padding:"2px 5px",borderRadius:4,background:aiLimitReached?"#666":aiDescribing[aiKey]?C.blu:C.org,border:"none",color:"#fff",fontSize:9,fontWeight:700,cursor:aiDescribing[aiKey]?"wait":aiLimitReached?"not-allowed":"pointer",opacity:aiDescribing[aiKey]||aiLimitReached?0.7:0.9}}>{aiDescribing[aiKey]?"···":aiLimitReached?"—":"AI"}</button>}
                         </div>
                       );})}
                     </div>
@@ -3254,7 +3520,7 @@ function WorkLogEditor({job, user, onBack, reportDate}){
                       <div key={pi} style={{position:"relative",width:60,height:60,borderRadius:6,overflow:"hidden",border:`1px solid ${C.brd}`}}>
                         <img src={ph.data} alt="" style={{width:"100%",height:"100%",objectFit:"cover"}}/>
                         <button onClick={()=>removeSectionPhoto(sec.key,pi)} style={{position:"absolute",top:1,right:1,background:"rgba(0,0,0,0.6)",border:"none",color:"#fff",fontSize:10,width:16,height:16,borderRadius:"50%",cursor:"pointer",lineHeight:1,padding:0}}>✕</button>
-                        {job.field_config?.aiPhotos&&<button disabled={aiDescribing[aiKey]} onClick={async()=>{const desc=await describePhoto(ph.data,`Section: ${sec.title}, Job: ${job?.name||""}`,aiKey);if(desc)sec.set((sec.val?sec.val+"\n":"")+desc);}} style={{position:"absolute",bottom:1,left:1,padding:"1px 4px",borderRadius:3,background:aiDescribing[aiKey]?C.blu:C.org,border:"none",color:"#fff",fontSize:8,fontWeight:700,cursor:aiDescribing[aiKey]?"wait":"pointer",opacity:aiDescribing[aiKey]?0.7:0.9}}>{aiDescribing[aiKey]?"···":"AI"}</button>}
+                        {job.field_config?.aiPhotos&&<button disabled={aiDescribing[aiKey]||aiLimitReached} onClick={async()=>{const desc=await describePhoto(ph.data,`Section: ${sec.title}, Job: ${job?.name||""}`,aiKey);if(desc)sec.set((sec.val?sec.val+"\n":"")+desc);}} style={{position:"absolute",bottom:1,left:1,padding:"1px 4px",borderRadius:3,background:aiLimitReached?"#666":aiDescribing[aiKey]?C.blu:C.org,border:"none",color:"#fff",fontSize:8,fontWeight:700,cursor:aiDescribing[aiKey]?"wait":aiLimitReached?"not-allowed":"pointer",opacity:aiDescribing[aiKey]||aiLimitReached?0.7:0.9}}>{aiDescribing[aiKey]?"···":aiLimitReached?"—":"AI"}</button>}
                       </div>
                     );})}
                   </div>
@@ -3352,7 +3618,7 @@ function WorkLogEditor({job, user, onBack, reportDate}){
           <div style={{background:C.card,border:`1px solid ${C.brd}`,borderRadius:16,padding:24,maxWidth:400,width:"100%",textAlign:"center"}}>
             <div style={{fontSize:48,marginBottom:12}}>✅</div>
             <div style={{fontSize:18,fontWeight:700,color:C.txt,marginBottom:6}}>Report Submitted</div>
-            <div style={{fontSize:13,color:C.mut,marginBottom:20}}>{submitSuccess.pdfFilename}</div>
+            <input type="text" value={submitSuccess.pdfFilename} onChange={e=>setSubmitSuccess(p=>({...p,pdfFilename:e.target.value}))} style={{width:"100%",background:C.inp,border:`1px solid ${C.brd}`,borderRadius:8,padding:"8px 10px",fontSize:13,color:C.lt,textAlign:"center",marginBottom:20,outline:"none"}} onClick={e=>e.target.select()}/>
             <div style={{display:"flex",flexDirection:"column",gap:10}}>
               <button onClick={downloadPdf} style={{width:"100%",padding:"14px 0",background:C.blu,border:"none",borderRadius:10,color:"#fff",fontSize:15,fontWeight:700,cursor:"pointer"}}>
                 Download / Share PDF
@@ -3460,12 +3726,32 @@ function ReportEditor({job, user, onBack, reportDate}){
   const [photoLayout,setPhotoLayout]=useState("2"); // "1","2","4"
   const photoRef=useRef(null);
 
+  // Downscale image for AI vision — 800px max, lower quality
+  const downscaleForAI=(dataUrl)=>new Promise(resolve=>{
+    const img=new Image();
+    img.onload=()=>{
+      const MAX=800;
+      let w=img.width,h=img.height;
+      if(w<=MAX&&h<=MAX){resolve(dataUrl);return;}
+      const r=Math.min(MAX/w,MAX/h);w=Math.round(w*r);h=Math.round(h*r);
+      const cvs=document.createElement("canvas");cvs.width=w;cvs.height=h;
+      cvs.getContext("2d").drawImage(img,0,0,w,h);
+      resolve(cvs.toDataURL("image/jpeg",0.5));
+    };
+    img.onerror=()=>resolve(dataUrl);
+    img.src=dataUrl;
+  });
+
   // AI photo description
   const [aiDescribing,setAiDescribing]=useState({});
+  const [aiUsageCount,setAiUsageCount]=useState(getAiUsageCount(job?.id));
+  const aiLimitReached=aiUsageCount>=AI_DESCRIBE_DAILY_LIMIT;
   const describePhoto=async(imageDataUrl,context,uniqueId)=>{
+    if(!checkAiLimit(job?.id)){alert(`AI description limit reached (${AI_DESCRIBE_DAILY_LIMIT}/day per job). Resets tomorrow.`);return null;}
     setAiDescribing(p=>({...p,[uniqueId]:true}));
     try{
-      const b64=imageDataUrl.includes(",")?imageDataUrl.split(",")[1]:imageDataUrl;
+      const aiImg=await downscaleForAI(imageDataUrl);
+      const b64=aiImg.includes(",")?aiImg.split(",")[1]:aiImg;
       const r=await fetch(`${SB_URL}/functions/v1/describe-photo`,{
         method:"POST",
         headers:{"Content-Type":"application/json",apikey:SB_KEY},
@@ -3473,6 +3759,8 @@ function ReportEditor({job, user, onBack, reportDate}){
       });
       const data=await r.json();
       if(!r.ok)throw new Error(data.error||"AI request failed");
+      incrementAiUsage(job?.id);
+      setAiUsageCount(getAiUsageCount(job?.id));
       return data.description||"";
     }catch(e){
       console.error("[AI describe]",e);
@@ -3627,7 +3915,10 @@ function ReportEditor({job, user, onBack, reportDate}){
     if(photoRef.current)photoRef.current.value="";
   };
 
+  const reSavingRef=useRef(false);
   const saveWorking=async()=>{
+    if(reSavingRef.current)return;
+    reSavingRef.current=true;
     setSaving(true);
     try{
       // Always use fresh date (not stale closure if app was open overnight)
@@ -3641,16 +3932,16 @@ function ReportEditor({job, user, onBack, reportDate}){
         content:JSON.stringify(content),
         updated_at:new Date().toISOString()
       });
-      onBack();
     }catch(e){
       console.error("Save error:",e);
       alert("Save failed: "+e.message);
-    }finally{setSaving(false);}
+    }finally{reSavingRef.current=false;setSaving(false);}
   };
 
   const [submitting,setSubmitting]=useState(false);
   const [submitStep,setSubmitStep]=useState("");
   const [viewLoading,setViewLoading]=useState(false);
+  const busyRef=useRef(false); // prevent View+Submit overlap
   const [viewingReport,setViewingReport]=useState(null); // array of page image data URLs
   const [viewDocxHtml,setViewDocxHtml]=useState(null); // HTML string for DOCX preview
   const [submitSuccess,setSubmitSuccess]=useState(null); // {pdfBlob, pdfFilename, teamEmails} after submit
@@ -3674,11 +3965,6 @@ function ReportEditor({job, user, onBack, reportDate}){
       ctx.font=sz+"px Caladea, Cambria, Georgia, serif";
       const drawX=f.x*scale;
       const drawY=f.y*scale+sz;
-      // Draw white bg to cover any old template text before writing new value
-      if(f.w){
-        ctx.fillStyle="#ffffff";
-        ctx.fillRect(drawX-1,f.y*scale-1,(f.w||120)*scale+2,(f.h||sz)*scale+2);
-      }
       // Signature stamp — "Signed by Name on Day, Date at Time — powered by My Daily Reports"
       // Positioned ABOVE the signature line (line is at bottom of field)
       const isSig=(f.name||"").toLowerCase().includes("signature")||(f.autoFill==="name"&&(f.name||"").toLowerCase().includes("inspector"));
@@ -3718,7 +4004,7 @@ function ReportEditor({job, user, onBack, reportDate}){
           words.forEach(w=>{const test=cur?cur+(cur===prefix?"":" ")+w:prefix+w;if(ctx.measureText(test).width>maxW&&cur!==prefix){lines.push(cur);cur=new Array(Math.ceil(indent/ctx.measureText(" ").width)+1).join(" ")+w;}else cur=test;});
           if(cur)lines.push(cur);
         });
-        lines.forEach((ln,li)=>{ctx.fillText(ln,drawX,drawY+(li*sz*1.3));});
+        lines.forEach((ln,li)=>{ctx.fillText(ln,drawX,drawY+(li*sz*1.5));});
       }else{
         ctx.fillText(String(f.val),drawX,drawY);
       }
@@ -3727,6 +4013,8 @@ function ReportEditor({job, user, onBack, reportDate}){
 
   // View Report — renders original template with pdf.js, overlays field values + notes on canvas
   const viewReport=async()=>{
+    if(busyRef.current)return;
+    busyRef.current=true;
     setViewLoading(true);
     try{
       const tplRecord=await db.getTemplate(job.id);
@@ -3875,11 +4163,13 @@ function ReportEditor({job, user, onBack, reportDate}){
     }catch(e){
       console.error("View report error:",e);
       showToast("Error: "+e.message);
-    }finally{setViewLoading(false);}
+    }finally{busyRef.current=false;setViewLoading(false);}
   };
 
   // Submit Report — generates filled PDF with pdf-lib, uploads, emails, all in one step
   const submitReport=async()=>{
+    if(busyRef.current)return;
+    busyRef.current=true;
     setSubmitting(true);setSubmitStep("Loading template...");
     // Always use fresh current date at submit time (not stale closure value)
     const submitDate=reportDate||new Date().toLocaleDateString("en-CA",{timeZone:tz});
@@ -3925,7 +4215,7 @@ function ReportEditor({job, user, onBack, reportDate}){
         const conv=job.field_config?.filenameConvention||{};
         const padding=conv.numberPadding||0;
         const rptNum=padding>0?String(rptNumber).padStart(padding,"0"):String(rptNumber);
-        const now=new Date();
+        const now=new Date(submitDate+"T12:00:00");
         const fmtMM=now.toLocaleDateString("en-US",{month:"2-digit",timeZone:tz});
         const fmtDD=now.toLocaleDateString("en-US",{day:"2-digit",timeZone:tz});
         const fmtYYYY=now.toLocaleDateString("en-US",{year:"numeric",timeZone:tz});
@@ -3955,7 +4245,12 @@ function ReportEditor({job, user, onBack, reportDate}){
         baseName=baseName.replace(/\{date\}/g,formatDate(conv.dateFormat));
         baseName=baseName.replace(/\{year\}/g,fmtYYYY);
         baseName=baseName.replace(/\{project\}/g,(job.name||"").replace(/\s+/g,"_"));
-        if(!hasDateToken)baseName+="_"+fmtMon+" "+fmtDay+"_"+fmtYYYY;
+        if(!hasDateToken){
+          const litDateRx=/(?:January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[\s_]+\d{1,2}[,\s_]+\d{4}/;
+          const newDateStr=fmtMon+" "+fmtDay+"_"+fmtYYYY;
+          if(litDateRx.test(baseName)){baseName=baseName.replace(litDateRx,newDateStr);}
+          else{baseName+="_"+newDateStr;}
+        }
         if(!hasNumToken){
           const replaced=baseName.replace(/_(\d+)(?=_)/,()=>"_"+rptNum);
           if(replaced===baseName)baseName=rptNum+"_"+baseName;
@@ -3995,17 +4290,38 @@ function ReportEditor({job, user, onBack, reportDate}){
         pdfDoc=await PDFDocument.load(tplBytes,{ignoreEncryption:true});
         const calF=await fetchCaladeaFonts();
         const acroFont=calF.regular?await pdfDoc.embedFont(calF.regular):await pdfDoc.embedFont(StandardFonts.TimesRoman);
+        const acroFontItalic=calF.italic?await pdfDoc.embedFont(calF.italic):await pdfDoc.embedFont(StandardFonts.TimesRomanItalic);
+        // Strategy: extract widget rectangles from AcroForm fields, remove ALL fields,
+        // then drawText directly on the page — no appearance streams, no white boxes.
+        const textsToDraw=[];
         try{
           const form=pdfDoc.getForm();
+          const pdfPages=pdfDoc.getPages();
+          // Build page ref→index map for finding which page a widget belongs to
+          const pageRefs=pdfPages.map((p,i)=>({ref:p.ref,idx:i}));
+          const getPageIdx=(widget)=>{
+            try{const pRef=widget.P();if(pRef){const match=pageRefs.find(pr=>pr.ref===pRef);if(match)return match.idx;}}catch(e){}
+            // Fallback: check which page contains this widget annotation
+            for(let pi=0;pi<pdfPages.length;pi++){try{const annots=pdfPages[pi].node.Annots();if(annots){const refs=annots.asArray();for(const r of refs){if(r===widget.ref||r.toString()===widget.ref.toString())return pi;}}}catch(e){}}
+            return 0;
+          };
+          const getWidgetRect=(fieldName)=>{
+            try{
+              const f=form.getTextField(fieldName);
+              const widgets=f.acroField.getWidgets();
+              if(widgets.length>0){const w=widgets[0];const r=w.getRectangle();return{x:r.x,y:r.y,w:r.width,h:r.height,pageIdx:getPageIdx(w)};}
+            }catch(e){}
+            return null;
+          };
+
           allFields.forEach(f=>{
             if(!f.val)return;
             const pfn=f.pdfFieldName;
             if(!pfn)return;
             try{
-              // Grouped date fields — split value across MM/DD/YYYY parts
+              // Grouped date fields — split value across parts
               if(f.pdfDateParts&&f.pdfDateParts.length>1){
                 const dateVal=String(f.val);
-                // Parse date into parts: try MM/DD/YYYY, MM-DD-YYYY, YYYY-MM-DD
                 let parts=[];
                 const slashMatch=dateVal.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})$/);
                 const isoMatch=dateVal.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
@@ -4013,38 +4329,77 @@ function ReportEditor({job, user, onBack, reportDate}){
                 if(slashMatch)parts=[slashMatch[1],slashMatch[2],slashMatch[3]];
                 else if(isoMatch)parts=[isoMatch[2],isoMatch[3],isoMatch[1]];
                 else if(longMatch){const mi=["january","february","march","april","may","june","july","august","september","october","november","december"].indexOf(longMatch[1].toLowerCase())+1;parts=[String(mi),longMatch[2],longMatch[3]];}
-                else parts=[dateVal]; // can't split — use whole value
+                else parts=[dateVal];
                 f.pdfDateParts.forEach((partName,i)=>{
-                  try{
-                    const tf=form.getTextField(partName);
-                    tf.setText(parts[i]||"");
-                  }catch(e){console.warn("[submit] Date part fill '"+partName+"':",e.message);}
+                  if(!parts[i])return;
+                  const rect=getWidgetRect(partName);
+                  if(rect)textsToDraw.push({val:parts[i],x:rect.x,y:rect.y,w:rect.w,h:rect.h,pageIdx:rect.pageIdx,fontSize:f.fontSize});
                 });
                 return;
               }
               if(f.type==="checkbox"){
-                const cb=form.getCheckBox(pfn);
-                if(f.val==="on"||f.val===true)cb.check();else cb.uncheck();
-              }else if(f.type==="dropdown"){
-                const dd=form.getDropdown(pfn);
-                dd.select(String(f.val));
-              }else{
-                // Text field (most common)
-                const tf=form.getTextField(pfn);
-                tf.setText(String(f.val));
-                // Set font size if field has one
-                if(f.fontSize)try{tf.setFontSize(f.fontSize);}catch(e){}
+                // Checkboxes: use form API then flatten individually
+                try{const cb=form.getCheckBox(pfn);if(f.val==="on"||f.val===true)cb.check();else cb.uncheck();}catch(e){}
+                return;
               }
+              // Text fields and dropdowns: extract rect, draw text directly
+              const rect=getWidgetRect(pfn);
+              if(!rect)return;
+              const isSig=(f.name||"").toLowerCase().includes("signature")||(f.autoFill==="name"&&(f.name||"").toLowerCase().includes("inspector"));
+              textsToDraw.push({val:String(f.val),x:rect.x,y:rect.y,w:rect.w,h:rect.h,pageIdx:rect.pageIdx,fontSize:f.fontSize,isSig,multiline:f.multiline,name:f.name});
             }catch(fieldErr){
-              console.warn("[submit] Could not fill AcroForm field '"+pfn+"':",fieldErr.message);
+              console.warn("[submit] Could not process AcroForm field '"+pfn+"':",fieldErr.message);
             }
           });
-          // Update appearances then flatten to get clean rendering
-          try{form.updateFieldAppearances(acroFont);}catch(e){console.warn("updateFieldAppearances:",e.message);}
-          form.flatten();
+
+          // Remove ALL form fields — no white boxes, no appearance streams
+          const allFormFields=form.getFields();
+          allFormFields.forEach(field=>{try{form.removeField(field);}catch(e){}});
         }catch(formErr){
-          console.error("[submit] AcroForm fill failed:",formErr);
+          console.error("[submit] AcroForm field extraction failed:",formErr);
         }
+
+        // Draw text directly on pages at the extracted coordinates
+        const pdfPages2=pdfDoc.getPages();
+        textsToDraw.forEach(td=>{
+          const page=pdfPages2[td.pageIdx];
+          if(!page)return;
+          const sz=td.fontSize||10;
+          if(td.isSig){
+            // Signature: place above the field area
+            const sigSz=sz*0.85;
+            const sigY=td.y+td.h-sigSz*0.3;
+            const sigTime=sigTimestamps[td.name]?new Date(sigTimestamps[td.name]):new Date();
+            const dayName=sigTime.toLocaleDateString("en-US",{weekday:"long"});
+            const datePart=sigTime.toLocaleDateString("en-US",{month:"long",day:"numeric",year:"numeric"});
+            const timePart=sigTime.toLocaleTimeString("en-US",{hour:"numeric",minute:"2-digit",hour12:true});
+            page.drawText("Signed by "+td.val,{x:td.x+2,y:sigY,size:sigSz,font:acroFontItalic,color:rgb(0.1,0.1,0.1)});
+            page.drawText(dayName+", "+datePart+" at "+timePart,{x:td.x+2,y:sigY-sigSz*1.15,size:sigSz*0.65,font:acroFont,color:rgb(0.4,0.4,0.4)});
+            page.drawText("powered by My Daily Reports",{x:td.x+2,y:sigY-sigSz*2.1,size:sigSz*0.55,font:acroFontItalic,color:rgb(0.6,0.6,0.6)});
+          }else if(td.multiline&&td.w>0){
+            // Multiline: bullet-formatted, start text at top of field, wrap within width
+            const textStartY=td.y+td.h-sz;
+            const rawLines=td.val.split(/\n/).filter(l=>l.trim());
+            const useBullets=rawLines.length>1;
+            const bullet="\u2022 ";
+            const bulletW=useBullets?acroFont.widthOfTextAtSize(bullet,sz):0;
+            const lines=[];
+            rawLines.forEach(rl=>{
+              const prefix=useBullets?bullet:"";
+              const indentW=bulletW;
+              const lineMaxW=td.w-4-indentW;
+              const words=rl.trim().split(" ");let cur=prefix;
+              words.forEach(w=>{const test=cur+(cur===prefix?"":" ")+w;const tw=acroFont.widthOfTextAtSize(test,sz);if(tw>td.w-4&&cur!==prefix){lines.push(cur);cur=(useBullets?"  ":"")+w;}else cur=test;});
+              if(cur)lines.push(cur);
+            });
+            const lh=sz*1.5;
+            lines.forEach((ln,i)=>{const ly=textStartY-(i*lh);if(ly>=td.y)page.drawText(ln,{x:td.x+2,y:ly,size:sz,font:acroFont,color:rgb(0,0,0)});});
+          }else{
+            // Single line: vertically center text in the field rect
+            const textY=td.y+(td.h-sz)/2+sz*0.15;
+            page.drawText(td.val,{x:td.x+2,y:textY,size:sz,font:acroFont,color:rgb(0,0,0)});
+          }
+        });
         // Load a separate copy for photo page header/footer embedding
         try{srcDoc=await PDFDocument.load(tplBytes,{ignoreEncryption:true});}catch(e){srcDoc=null;}
       }else{
@@ -4151,19 +4506,24 @@ function ReportEditor({job, user, onBack, reportDate}){
             page.drawText(dayName+", "+datePart+" at "+timePart,{x:f.x+2,y:pdfY-sigSz*1.15,size:sigSz*0.65,font,color:rgb(0.4,0.4,0.4)});
             page.drawText("powered by My Daily Reports",{x:f.x+2,y:pdfY-sigSz*2.1,size:sigSz*0.55,font:fontItalic,color:rgb(0.6,0.6,0.6)});
           }else if(f.multiline&&f.w){
-            // Multiline: start text at TOP of field and clip at bottom
+            // Multiline: bullet-formatted, start text at TOP of field and clip at bottom
             const fieldTopPDF=pageH-f.y;
             const fieldBottomPDF=pageH-f.y-fieldH;
             const textStartY=fieldTopPDF-sz; // first baseline just below top edge
             const maxW=f.w;const rawLines=f.val.split(/\n/).filter(l=>l.trim());
+            const useBullets=rawLines.length>1;
+            const bullet="\u2022 ";
+            const bulletW=useBullets?font.widthOfTextAtSize(bullet,sz):0;
             const lines=[];
             rawLines.forEach(rl=>{
-              const words=rl.trim().split(" ");let cur="";
-              words.forEach(w=>{const test=cur?cur+" "+w:w;const tw=font.widthOfTextAtSize(test,sz);if(tw>maxW&&cur){lines.push(cur);cur=w;}else cur=test;});
+              const prefix=useBullets?bullet:"";
+              const words=rl.trim().split(" ");let cur=prefix;
+              words.forEach(w=>{const test=cur+(cur===prefix?"":" ")+w;const tw=font.widthOfTextAtSize(test,sz);if(tw>maxW&&cur!==prefix){lines.push(cur);cur=(useBullets?"  ":"")+w;}else cur=test;});
               if(cur)lines.push(cur);
             });
             // Only draw lines that fit within the field boundary
-            lines.forEach((ln,i)=>{const ly=textStartY-(i*sz*1.3);if(ly>=fieldBottomPDF)page.drawText(ln,{x:f.x+2,y:ly,size:sz,font,color:rgb(0,0,0)});});
+            const lh=sz*1.5;
+            lines.forEach((ln,i)=>{const ly=textStartY-(i*lh);if(ly>=fieldBottomPDF)page.drawText(ln,{x:f.x+2,y:ly,size:sz,font,color:rgb(0,0,0)});});
           }else{
             // Single line: vertically center text in the cell
             // PDF text y = baseline position. Center: fieldTop - (fieldH - sz)/2 - sz*0.8
@@ -4331,8 +4691,8 @@ function ReportEditor({job, user, onBack, reportDate}){
       const conv=job.field_config?.filenameConvention||{};
       const padding=conv.numberPadding||0;
       const rptNum=padding>0?String(rptNumber).padStart(padding,"0"):String(rptNumber);
-      // Format today's date according to the AI-detected format
-      const now=new Date();
+      // Format report date according to the AI-detected format
+      const now=new Date(submitDate+"T12:00:00");
       const fmtMM=now.toLocaleDateString("en-US",{month:"2-digit",timeZone:tz});
       const fmtDD=now.toLocaleDateString("en-US",{day:"2-digit",timeZone:tz});
       const fmtYYYY=now.toLocaleDateString("en-US",{year:"numeric",timeZone:tz});
@@ -4370,7 +4730,12 @@ function ReportEditor({job, user, onBack, reportDate}){
       baseName=baseName.replace(/\{year\}/g,fmtYYYY);
       baseName=baseName.replace(/\{project\}/g,(job.name||"").replace(/\s+/g,"_"));
       // If pattern had no date/number tokens (raw filename), force-append to ensure uniqueness
-      if(!hasDateToken)baseName+="_"+fmtMon+" "+fmtDay+"_"+fmtYYYY;
+      if(!hasDateToken){
+        const litDateRx=/(?:January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[\s_]+\d{1,2}[,\s_]+\d{4}/;
+        const newDateStr=fmtMon+" "+fmtDay+"_"+fmtYYYY;
+        if(litDateRx.test(baseName)){baseName=baseName.replace(litDateRx,newDateStr);}
+        else{baseName+="_"+newDateStr;}
+      }
       if(!hasNumToken){
         // Try to replace existing number between underscores, otherwise prepend number after first segment
         const replaced=baseName.replace(/_(\d+)(?=_)/,()=>"_"+rptNum);
@@ -4411,7 +4776,7 @@ function ReportEditor({job, user, onBack, reportDate}){
     }catch(e){
       console.error("Submit error:",e);
       showToast("Submit failed: "+e.message);
-    }finally{setSubmitting(false);}
+    }finally{busyRef.current=false;setSubmitting(false);}
   };
 
   // Post-submit: Download/save PDF to device
@@ -4474,8 +4839,7 @@ function ReportEditor({job, user, onBack, reportDate}){
     return(
       <div style={{minHeight:"100vh",background:C.bg,color:C.txt,display:"flex",flexDirection:"column"}}>
         <div style={{display:"flex",alignItems:"center",gap:10,padding:"12px 16px",borderBottom:`1px solid ${C.brd}`,background:C.card}}>
-          <button onClick={()=>{setViewingReport(null);setViewDocxHtml(null);}} style={{background:"none",border:"none",color:C.blu,fontSize:28,cursor:"pointer",padding:"8px 12px",lineHeight:1,borderRadius:8,minWidth:48,minHeight:48,display:"flex",alignItems:"center",justifyContent:"center"}}>←</button>
-          <MDRLogo size={28}/>
+          <button onClick={()=>{setViewingReport(null);setViewDocxHtml(null);}} style={{background:"none",border:"none",color:C.mut,fontSize:24,cursor:"pointer",padding:"8px 12px",lineHeight:1,borderRadius:8,minWidth:44,minHeight:44,display:"flex",alignItems:"center",justifyContent:"center"}}>←</button>
           <div style={{flex:1}}>
             <div style={{fontWeight:700,fontSize:17}}>Report Preview</div>
             <div style={{fontSize:12,color:C.mut}}>This is how your report will look</div>
@@ -4493,11 +4857,14 @@ function ReportEditor({job, user, onBack, reportDate}){
           )}
         </div>
         <div style={{position:"fixed",bottom:0,left:0,right:0,padding:"14px 20px",borderTop:`1px solid ${C.brd}`,background:C.card,zIndex:100,display:"flex",gap:10}}>
-          <button onClick={()=>{setViewingReport(null);setViewDocxHtml(null);}} style={{flex:1,padding:"14px 0",background:C.card,border:`1px solid ${C.brd}`,borderRadius:10,color:C.txt,fontSize:15,fontWeight:700,cursor:"pointer"}}>
-            Back to Editing
+          <button onClick={()=>{setViewingReport(null);setViewDocxHtml(null);}} style={{padding:"14px 16px",background:C.card,border:`1px solid ${C.brd}`,borderRadius:10,color:C.mut,fontSize:15,fontWeight:700,cursor:"pointer"}}>
+            ←
           </button>
-          <button onClick={async()=>{await saveWorking();}} disabled={saving} style={{flex:1,padding:"14px 0",background:C.blu,border:"none",borderRadius:10,color:"#fff",fontSize:15,fontWeight:700,cursor:"pointer",opacity:saving?0.5:1}}>
-            {saving?"Saving...":"Save & Close"}
+          <button onClick={async()=>{await saveWorking();setViewingReport(null);setViewDocxHtml(null);onBack();}} disabled={saving} style={{flex:1,padding:"14px 0",background:C.card,border:`1px solid ${C.brd}`,borderRadius:10,color:C.txt,fontSize:15,fontWeight:700,cursor:"pointer",opacity:saving?0.5:1}}>
+            {saving?"Saving...":"Save & Exit"}
+          </button>
+          <button onClick={()=>{setViewingReport(null);setViewDocxHtml(null);submitReport();}} disabled={submitting} className="btn-o" style={{flex:1,padding:"14px 0",background:C.org,border:"none",borderRadius:10,color:"#fff",fontSize:15,fontWeight:700,cursor:submitting?"default":"pointer",opacity:submitting?0.6:1}}>
+            {submitting?"Submitting...":"Submit"}
           </button>
         </div>
       </div>
@@ -4512,10 +4879,9 @@ function ReportEditor({job, user, onBack, reportDate}){
       <div style={{minHeight:"100vh",background:C.bg,color:C.txt,display:"flex",flexDirection:"column"}}>
         {toast&&<div style={{position:"fixed",top:60,left:"50%",transform:"translateX(-50%)",background:C.card,border:`1px solid ${C.ok}`,borderRadius:10,padding:"10px 20px",fontSize:14,fontWeight:600,color:C.ok,zIndex:9999}}>{toast}</div>}
         <div style={{display:"flex",alignItems:"center",gap:10,padding:"12px 16px",borderBottom:`1px solid ${C.brd}`,background:C.card}}>
-          <MDRLogo size={28}/>
           <div style={{flex:1}}>
             <div style={{fontWeight:700,fontSize:17}}>Report Submitted</div>
-            <div style={{fontSize:12,color:C.mut}}>{submitSuccess.pdfFilename}</div>
+            <input type="text" value={submitSuccess.pdfFilename} onChange={e=>setSubmitSuccess(p=>({...p,pdfFilename:e.target.value}))} style={{width:"100%",background:C.inp,border:`1px solid ${C.brd}`,borderRadius:6,padding:"6px 8px",fontSize:12,color:C.lt,textAlign:"center",outline:"none"}} onClick={e=>e.target.select()}/>
           </div>
         </div>
         <div style={{flex:1,padding:"24px 20px",display:"flex",flexDirection:"column",alignItems:"center",gap:20}}>
@@ -4574,12 +4940,11 @@ function ReportEditor({job, user, onBack, reportDate}){
       {/* Toast */}
       {toast&&<div style={{position:"fixed",top:60,left:"50%",transform:"translateX(-50%)",background:C.card,border:`1px solid ${C.ok}`,borderRadius:10,padding:"10px 20px",fontSize:14,fontWeight:600,color:C.ok,zIndex:9999}}>{toast}</div>}
       {/* Header */}
-      <div style={{display:"flex",alignItems:"center",gap:12,padding:"16px 20px",borderBottom:`1px solid ${C.brd}`,background:C.card}}>
-        <button onClick={onBack} style={{background:"none",border:"none",color:C.blu,fontSize:28,cursor:"pointer",padding:"8px 12px",lineHeight:1,borderRadius:8,minWidth:48,minHeight:48,display:"flex",alignItems:"center",justifyContent:"center"}}>←</button>
-        <MDRLogo size={28}/>
-        <div style={{flex:1}}>
+      <div style={{display:"flex",alignItems:"center",gap:12,padding:"14px 16px",borderBottom:`1px solid ${C.brd}`,background:C.card}}>
+        <button onClick={async()=>{await saveWorking();onBack();}} style={{background:"none",border:"none",color:C.mut,fontSize:24,cursor:"pointer",padding:"8px 12px",lineHeight:1,borderRadius:8,minWidth:44,minHeight:44,display:"flex",alignItems:"center",justifyContent:"center"}}>←</button>
+        <div style={{flex:1,minWidth:0}}>
           <div style={{fontWeight:700,fontSize:17}}>{reportStatus==="submitted"?"Submitted Report":"Today's Report"}</div>
-          <div style={{fontSize:12,color:C.mut}}>{job.name}</div>
+          <div style={{fontSize:12,color:C.mut,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{job.name}</div>
         </div>
         {reportStatus==="submitted"&&<span style={{padding:"4px 10px",fontSize:11,fontWeight:700,borderRadius:6,background:C.ok+"22",color:C.ok}}>Submitted</span>}
       </div>
@@ -4684,7 +5049,7 @@ function ReportEditor({job, user, onBack, reportDate}){
                 <div key={p.id} style={{position:"relative",borderRadius:8,overflow:"hidden",border:`1px solid ${C.brd}`,aspectRatio:photoLayout==="1"?"auto":"1"}}>
                   <img src={p.src} alt={p.name} style={{width:"100%",height:"100%",objectFit:"cover",display:"block"}}/>
                   <button onClick={()=>setPhotos(prev=>prev.filter(x=>x.id!==p.id))} style={{position:"absolute",top:4,right:4,width:22,height:22,borderRadius:"50%",background:"rgba(0,0,0,0.7)",border:"none",color:"#fff",fontSize:12,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}>✕</button>
-                  {job.field_config?.aiPhotos&&<button disabled={aiDescribing[aiKey]} onClick={async()=>{const notesF=editFields.find(f=>f.voiceEnabled&&/notes|observations|comments/i.test(f.name));const desc=await describePhoto(p.src,`Job: ${job?.name||""}`,aiKey);if(desc&&notesF)setVals(v=>({...v,[notesF.name]:(v[notesF.name]?v[notesF.name]+"\n":"")+desc}));else if(desc)alert(desc);}} style={{position:"absolute",bottom:4,left:4,padding:"3px 7px",borderRadius:5,background:aiDescribing[aiKey]?C.blu:C.org,border:"none",color:"#fff",fontSize:10,fontWeight:700,cursor:aiDescribing[aiKey]?"wait":"pointer",opacity:aiDescribing[aiKey]?0.7:0.9}}>{aiDescribing[aiKey]?"···":"AI"}</button>}
+                  {job.field_config?.aiPhotos&&<button disabled={aiDescribing[aiKey]||aiLimitReached} onClick={async()=>{const notesF=editFields.find(f=>f.voiceEnabled&&/notes|observations|comments/i.test(f.name));const desc=await describePhoto(p.src,`Job: ${job?.name||""}`,aiKey);if(desc&&notesF)setVals(v=>({...v,[notesF.name]:(v[notesF.name]?v[notesF.name]+"\n":"")+desc}));else if(desc)alert(desc);}} style={{position:"absolute",bottom:4,left:4,padding:"3px 7px",borderRadius:5,background:aiLimitReached?"#666":aiDescribing[aiKey]?C.blu:C.org,border:"none",color:"#fff",fontSize:10,fontWeight:700,cursor:aiDescribing[aiKey]?"wait":aiLimitReached?"not-allowed":"pointer",opacity:aiDescribing[aiKey]||aiLimitReached?0.7:0.9}}>{aiDescribing[aiKey]?"···":aiLimitReached?"—":"AI"}</button>}
                 </div>
               );})}
             </div>
@@ -4710,7 +5075,7 @@ function ReportEditor({job, user, onBack, reportDate}){
         <div style={{maxWidth:600,margin:"0 auto",display:"flex",flexDirection:"column",gap:8}}>
           <div style={{display:"flex",gap:10}}>
             {reportStatus!=="submitted"&&(
-              <button onClick={saveWorking} disabled={saving||submitting||viewLoading} style={{flex:1,padding:"12px 0",background:C.blu,border:"none",borderRadius:10,color:"#fff",fontSize:14,fontWeight:700,cursor:saving?"default":"pointer",opacity:saving?0.6:1}}>
+              <button onClick={async()=>{await saveWorking();showToast("Draft saved");}} disabled={saving||submitting||viewLoading} style={{flex:1,padding:"12px 0",background:C.blu,border:"none",borderRadius:10,color:"#fff",fontSize:14,fontWeight:700,cursor:saving?"default":"pointer",opacity:saving?0.6:1}}>
                 {saving?"Saving...":"Save Draft"}
               </button>
             )}
@@ -4805,6 +5170,19 @@ function JobDetail({job, user, onBack, onDeleted}){
   const [showSchedSet,setShowSchedSet]=useState(false);
   const [schedEnabled,setSchedEnabled]=useState(!!job.scheduling_enabled);
   const [schedSaving,setSchedSaving]=useState(false);
+  const [showFreqSet,setShowFreqSet]=useState(false);
+  // Parse current schedule into editable state
+  const initSched=job.schedule||"as_needed";
+  const initDays=job.schedule_days||[];
+  const [jdSched,setJdSched]=useState(initSched==="custom"?"custom":initSched==="daily_mf"?"custom":initSched==="daily_7"?"custom":initSched);
+  const [jdDays,setJdDays]=useState(initSched==="daily_mf"?["Mon","Tue","Wed","Thu","Fri"]:initSched==="daily_7"?["Mon","Tue","Wed","Thu","Fri","Sat","Sun"]:initDays);
+  const [jdRemOn,setJdRemOn]=useState(!!job.reminder_enabled);
+  const [jdRemT,setJdRemT]=useState(job.reminder_time||"5:00 PM");
+  const [jdRemH,setJdRemH]=useState(job.reminder_hours_before||2);
+  const [freqSaving,setFreqSaving]=useState(false);
+  const jdTogDay=(d)=>{setJdSched("custom");setJdDays(p=>p.includes(d)?p.filter(x=>x!==d):[...p,d]);};
+  const jdPreset=(p)=>{setJdSched(p);setJdDays([]);if(p==="as_needed")setJdRemOn(false);};
+  const jdEffSch=()=>{if(jdSched==="weekly"||jdSched==="as_needed")return jdSched;if(jdDays.length===5&&["Mon","Tue","Wed","Thu","Fri"].every(d=>jdDays.includes(d))&&!jdDays.includes("Sat")&&!jdDays.includes("Sun"))return"daily_mf";if(jdDays.length===7)return"daily_7";if(jdDays.length>0)return"custom";return jdSched||"as_needed";};
   const [jdSlug,setJdSlug]=useState("");
   useEffect(()=>{db.getProfile(user.id).then(p=>{if(p?.slug)setJdSlug(p.slug);}).catch(()=>{});},[user.id]);
   const [showFieldEdit,setShowFieldEdit]=useState(false);
@@ -4878,7 +5256,13 @@ function JobDetail({job, user, onBack, onDeleted}){
     n=n.replace(/\{project\}/g,(job.name||"").replace(/\s+/g,"_"));
     // Force-append date/number if pattern had no tokens (raw filename)
     const fmtDay=String(parseInt(dd));
-    if(!hasDateToken)n+="_"+monNames[monthIdx]+" "+fmtDay+"_"+yyyy;
+    if(!hasDateToken){
+      // Check if pattern contains a literal date (from original template filename) and replace it
+      const litDateRx=/(?:January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[\s_]+\d{1,2}[,\s_]+\d{4}/;
+      const newDateStr=monNames[monthIdx]+" "+fmtDay+"_"+yyyy;
+      if(litDateRx.test(n)){n=n.replace(litDateRx,newDateStr);}
+      else{n+="_"+newDateStr;}
+    }
     if(!hasNumToken){
       const replaced=n.replace(/_(\d+)(?=_)/,()=>"_"+padNum);
       if(replaced===n)n=padNum+"_"+n;
@@ -4965,12 +5349,11 @@ function JobDetail({job, user, onBack, onDeleted}){
     <div style={{minHeight:"100vh",background:C.bg,color:C.txt}}>
       {jdToast&&<div style={{position:"fixed",top:60,left:"50%",transform:"translateX(-50%)",background:C.card,border:`1px solid ${C.ok}`,borderRadius:10,padding:"10px 20px",fontSize:14,fontWeight:600,color:C.ok,zIndex:9999}}>{jdToast}</div>}
       {/* Header */}
-      <div style={{display:"flex",alignItems:"center",gap:12,padding:"16px 20px",borderBottom:`1px solid ${C.brd}`,background:C.card}}>
-        <button onClick={onBack} style={{background:"none",border:"none",color:C.blu,fontSize:28,cursor:"pointer",padding:"8px 12px",lineHeight:1,borderRadius:8,minWidth:48,minHeight:48,display:"flex",alignItems:"center",justifyContent:"center"}}>←</button>
-        <MDRLogo size={28}/>
-        <div style={{flex:1}}>
-          <div style={{fontWeight:700,fontSize:17}}>{job.name}</div>
-          {job.site_address&&<div style={{fontSize:12,color:C.mut}}>{job.site_address}</div>}
+      <div style={{display:"flex",alignItems:"center",gap:12,padding:"14px 16px",borderBottom:`1px solid ${C.brd}`,background:C.card}}>
+        <button onClick={onBack} style={{background:"none",border:"none",color:C.mut,fontSize:24,cursor:"pointer",padding:"8px 12px",lineHeight:1,borderRadius:8,minWidth:44,minHeight:44,display:"flex",alignItems:"center",justifyContent:"center"}}>←</button>
+        <div style={{flex:1,minWidth:0}}>
+          <div style={{fontWeight:700,fontSize:17,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{job.name}</div>
+          {job.site_address&&<div style={{fontSize:12,color:C.mut,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{job.site_address}</div>}
         </div>
         <button onClick={()=>setShowJobSet(!showJobSet)} style={{width:34,height:34,borderRadius:8,background:C.inp,border:`1px solid ${showJobSet?C.org:C.brd}`,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",fontSize:12,fontWeight:700,color:C.mut}}>⚙</button>
       </div>
@@ -4994,7 +5377,7 @@ function JobDetail({job, user, onBack, onDeleted}){
               </div>
             )}
           </div>
-          <button onClick={()=>openReport(today)} className="btn-o" style={{width:"100%",padding:"14px 0",background:todayRpt||reportStarted?C.blu:C.org,border:`1px solid ${C.blu}`,borderRadius:10,color:"#fff",fontSize:16,fontWeight:700,cursor:"pointer"}}>
+          <button onClick={()=>openReport(today)} className="btn-o" style={{width:"100%",padding:"14px 0",background:C.org,border:"none",borderRadius:10,color:"#fff",fontSize:16,fontWeight:700,cursor:"pointer"}}>
             {todayRpt?(todayRpt.status==="submitted"?"Edit Submitted Report":"Continue Editing"):reportStarted?"Continue Editing":"Start Today's Report"}
           </button>
         </div>
@@ -5016,11 +5399,11 @@ function JobDetail({job, user, onBack, onDeleted}){
           ):(
             working.map((r,i)=>{const rptName=buildReportName(r.report_number||1,r.report_date);return(
               <div key={r.id} style={{display:"flex",alignItems:"center",borderBottom:i<working.length-1?`1px solid ${C.brd}`:"none"}}>
-                <button onClick={()=>openReport(r.report_date)} style={{flex:1,display:"flex",alignItems:"center",gap:12,padding:"14px 16px",background:"transparent",border:"none",cursor:"pointer",textAlign:"left"}}>
+                <button onClick={()=>openReport(r.report_date)} style={{flex:1,minWidth:0,display:"flex",alignItems:"center",gap:12,padding:"14px 16px",background:"transparent",border:"none",cursor:"pointer",textAlign:"left"}}>
                   <div style={{width:10,height:10,borderRadius:"50%",background:C.org,flexShrink:0}}/>
                   <div style={{flex:1,minWidth:0}}>
-                    <div style={{fontSize:14,fontWeight:600,color:C.lt,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{rptName} — {new Date(r.report_date+"T12:00:00").toLocaleDateString("en-US",{weekday:"short",month:"short",day:"numeric",timeZone:tz})}</div>
-                    <div style={{fontSize:11,color:C.mut}}>Last edited {r.updated_at?new Date(r.updated_at).toLocaleTimeString("en-US",{hour:"numeric",minute:"2-digit",timeZone:tz}):""}</div>
+                    <div style={{fontSize:14,fontWeight:600,color:C.lt,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{rptName}</div>
+                    <div style={{fontSize:12,color:C.mut,marginTop:2}}>{new Date(r.report_date+"T12:00:00").toLocaleDateString("en-US",{weekday:"short",month:"short",day:"numeric",timeZone:tz})} — Last edited {r.updated_at?new Date(r.updated_at).toLocaleTimeString("en-US",{hour:"numeric",minute:"2-digit",timeZone:tz}):""}</div>
                   </div>
                   <div style={{color:C.org,fontSize:20,flexShrink:0}}>›</div>
                 </button>
@@ -5143,6 +5526,49 @@ function JobDetail({job, user, onBack, onDeleted}){
           </div>
         )}
 
+        {/* ── Frequency & Reminders Panel ── */}
+        {showFreqSet&&(
+          <div style={{background:C.card,border:`1px solid ${C.org}`,borderRadius:12,padding:20,marginBottom:16}}>
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:6}}>
+              <div style={{fontWeight:700,fontSize:15,color:C.org,display:"flex",alignItems:"center",gap:8}}>
+                <span>🔔</span> Frequency & Reminders
+              </div>
+              <button onClick={()=>setShowFreqSet(false)} style={{background:"none",border:"none",color:C.mut,cursor:"pointer",fontSize:20,padding:"0 4px"}}>✕</button>
+            </div>
+            <div style={{fontSize:12,color:C.mut,marginBottom:16,lineHeight:1.5}}>Set how often you file reports and when to get reminded.</div>
+            <div style={{fontSize:13,fontWeight:600,color:C.lt,marginBottom:8}}>Report Days</div>
+            <div style={{display:"flex",gap:6,marginBottom:10,flexWrap:"wrap"}}>
+              {["Mon","Tue","Wed","Thu","Fri","Sat","Sun"].map(d=>{const a=jdDays.includes(d);return<button key={d} onClick={()=>jdTogDay(d)} style={{width:42,height:42,borderRadius:"50%",border:a?`2px solid ${C.org}`:`1px solid ${C.brd}`,background:a?C.org:"transparent",color:a?"#fff":C.mut,fontWeight:600,fontSize:11,cursor:"pointer"}}>{d}</button>;})}
+            </div>
+            <div style={{display:"flex",gap:8,marginBottom:16}}>
+              {[{k:"weekly",l:"Weekly"},{k:"as_needed",l:"As Needed"}].map(({k,l})=><button key={k} onClick={()=>jdPreset(k)} style={{padding:"8px 14px",borderRadius:8,border:jdSched===k?`2px solid ${C.org}`:`1px solid ${C.brd}`,background:jdSched===k?C.org:"transparent",color:jdSched===k?"#fff":C.mut,fontWeight:600,fontSize:12,cursor:"pointer"}}>{l}</button>)}
+            </div>
+            {jdEffSch()!=="as_needed"&&(
+              <div style={{marginBottom:16}}>
+                <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"12px 14px",background:C.inp,border:`1px solid ${C.brd}`,borderRadius:8,marginBottom:10}}>
+                  <span style={{fontSize:14,fontWeight:600,color:C.lt}}>Email Reminders</span>
+                  <button onClick={()=>setJdRemOn(!jdRemOn)} style={{width:48,height:26,borderRadius:13,border:"none",background:jdRemOn?C.ok:C.brd,cursor:"pointer",position:"relative",transition:"background 0.2s"}}>
+                    <div style={{width:20,height:20,borderRadius:"50%",background:"#fff",position:"absolute",top:3,left:jdRemOn?25:3,transition:"left 0.2s"}}/>
+                  </button>
+                </div>
+                {jdRemOn&&(
+                  <div style={{display:"flex",gap:10}}>
+                    <div style={{flex:1}}><label style={{display:"block",color:C.mut,fontSize:11,marginBottom:4}}>Submit by</label><select value={jdRemT} onChange={e=>setJdRemT(e.target.value)} style={{width:"100%",padding:"8px 10px",background:C.bg,border:`1px solid ${C.brd}`,borderRadius:8,color:C.txt,fontSize:13}}>
+                      {["12:00 PM","1:00 PM","2:00 PM","3:00 PM","4:00 PM","5:00 PM","6:00 PM","7:00 PM","8:00 PM","9:00 PM"].map(t=><option key={t} value={t}>{t}</option>)}
+                    </select></div>
+                    <div style={{flex:1}}><label style={{display:"block",color:C.mut,fontSize:11,marginBottom:4}}>Remind me</label><select value={jdRemH} onChange={e=>setJdRemH(Number(e.target.value))} style={{width:"100%",padding:"8px 10px",background:C.bg,border:`1px solid ${C.brd}`,borderRadius:8,color:C.txt,fontSize:13}}>
+                      {[1,2,3,4,6].map(h=><option key={h} value={h}>{h} hr{h>1?"s":""} before</option>)}
+                    </select></div>
+                  </div>
+                )}
+              </div>
+            )}
+            <button onClick={async()=>{setFreqSaving(true);try{const es=jdEffSch();const patch={schedule:es,schedule_days:es==="custom"?jdDays:[],reminder_enabled:jdRemOn,reminder_time:jdRemOn?jdRemT:null,reminder_hours_before:jdRemOn?jdRemH:null};await fetch(`${SB_URL}/rest/v1/jobs?id=eq.${job.id}`,{method:"PATCH",headers:db._h(),body:JSON.stringify(patch)});Object.assign(job,patch);setShowFreqSet(false);showToast("Frequency & reminders saved");}catch(e){alert("Save failed: "+e.message);}finally{setFreqSaving(false);}}} disabled={freqSaving} style={{width:"100%",padding:"12px 0",background:C.org,border:"none",borderRadius:8,color:"#fff",fontSize:14,fontWeight:700,cursor:freqSaving?"default":"pointer",opacity:freqSaving?0.6:1}}>
+              {freqSaving?"Saving...":"Save Frequency & Reminders"}
+            </button>
+          </div>
+        )}
+
         {/* ── Edit Template Fields Panel ── */}
         {showFieldEdit&&fieldEditFields&&(
           <div style={{background:C.card,border:`1px solid ${C.org}`,borderRadius:12,overflow:"hidden",marginBottom:16}}>
@@ -5236,6 +5662,12 @@ function JobDetail({job, user, onBack, onDeleted}){
               </div>
               <span style={{fontSize:11,color:schedEnabled?C.ok:C.mut,fontWeight:600}}>{schedEnabled?"ON":"OFF"}</span>
             </button>
+            <button onClick={()=>{setShowFreqSet(!showFreqSet);}} style={{width:"100%",display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,padding:"14px 18px",background:"none",border:"none",borderBottom:`1px solid ${C.brd}`,cursor:"pointer",textAlign:"left"}}>
+              <div style={{display:"flex",alignItems:"center",gap:10}}>
+                <span style={{fontSize:16}}>🔔</span><span style={{fontSize:14,fontWeight:600,color:C.lt}}>Frequency & Reminders</span>
+              </div>
+              <span style={{fontSize:11,color:C.mut,fontWeight:600}}>{SL[job.schedule]||job.schedule||"As Needed"}</span>
+            </button>
             <div style={{padding:"14px 18px",borderTop:`1px solid #5c2023`}}>
               {!showDel?(
                 <button onClick={()=>setShowDel(true)} style={{width:"100%",padding:"10px 16px",background:"transparent",border:"1px solid #5c2023",borderRadius:8,color:C.err,fontSize:13,fontWeight:600,cursor:"pointer"}}>Delete This Job</button>
@@ -5271,12 +5703,13 @@ const GUIDES=[
     {icon:"▶",title:"Start a Report",body:"From the job dashboard, tap \"Start Today's Report\". Locked fields are pre-filled. Auto-date shows today. Auto-# increments from your last report.",tip:"One report per day per job. Working copies can be edited anytime."},
     {icon:"✏",title:"Fill In Fields",body:"Editable fields are ready for your daily entries — notes, weather, hours, observations. Locked fields (project name, contractor, etc.) are already filled in.",tip:null},
     {icon:"🎤",title:"Voice Dictation",body:"Tap any text field, then tap the mic on your keyboard. Speak naturally — your phone's built-in dictation does the rest. No extra setup needed.",tip:"Take notes throughout the day as things happen. Come back later and everything's saved."},
-    {icon:"—",title:"Save & Submit",body:"Tap \"Save Working Copy\" to save progress. Tap \"Submit\" when done — the app generates a PDF using your template with your entries overlaid and emails it to your team.",tip:null},
+    {icon:"📷",title:"Photos & AI",body:"Add photos to your report with the Photo or Library buttons. If AI Descriptions is enabled in Job Settings, tap the orange AI button on any photo to auto-generate a description that goes straight into your notes field.",tip:"AI descriptions are limited to 25 per job per day. Great for quick documentation of site conditions."},
+    {icon:"—",title:"Save & Submit",body:"Tap \"Save Working Copy\" to save progress. Tap \"Submit\" when done — the app generates a PDF using your template with your entries overlaid and emails it to your team. Need a fresh start? Delete the working copy from the submit screen.",tip:null},
   ]},
   {icon:"▬",color:C.org,title:"Work Log Reports",sub:"Track contractors, hours, and daily activity",steps:[
     {icon:"+",title:"Add Contractors",body:"Tap \"+ Add Contractor\" and enter their name. Add a work description, hours, and quantity (number of people). Use your keyboard mic to dictate descriptions.",tip:null},
     {icon:"🔒",title:"Save Contractors",body:"Expand a contractor and choose \"Name + Work\" or \"Name Only\" under Carry Over to keep them on tomorrow's report. Hours and photos always reset.",tip:"Use \"Name + Work\" for crews doing the same task every day. Use \"Name Only\" when the work changes daily."},
-    {icon:"📷",title:"Photos",body:"Each contractor has Photo and Library buttons at the bottom of their card. Take a photo with your camera or pick from your library. Photos are grouped by contractor in the report.",tip:"Context shots, close-ups of issues, and progress photos make the best documentation."},
+    {icon:"📷",title:"Photos",body:"Each contractor has Photo and Library buttons at the bottom of their card. Take a photo with your camera or pick from your library. Photos are grouped by contractor in the report. If AI Descriptions is enabled in Job Settings, tap the orange AI button on any photo to auto-generate a description.",tip:"AI descriptions are limited to 25 per job per day. Context shots, close-ups of issues, and progress photos make the best documentation."},
     {icon:"—",title:"Custom Sections",body:"Need to track something extra? Tap \"+ Add Category\" to create new sections like Materials or Equipment. In the Survey, tap \"+ Add Concern\" to add custom questions.",tip:null},
     {icon:"✓",title:"Preview & Submit",body:"Tap \"View Report\" to preview the PDF. Weather, work logs, notes, survey — it's all there. Hit \"Submit Report\" to generate and email the final PDF.",tip:null},
   ]},
@@ -5286,8 +5719,9 @@ const GUIDES=[
     {icon:"↻",title:"Past Reports",body:"Completed reports live in the Completed folder on your job dashboard. Re-download or resend anytime.",tip:null},
   ]},
   {icon:"⚙",color:"#14b8a6",title:"Managing Jobs",sub:"Edit, update, and organize your projects",steps:[
-    {icon:"⚙",title:"Job Settings",body:"Tap the gear icon on any job dashboard. From here: edit job name and address, manage your project team (name + email), edit template fields, toggle scheduling, or delete the job.",tip:null},
+    {icon:"⚙",title:"Job Settings",body:"Tap the gear icon on any job dashboard. From here: edit job name and address, manage your project team (name + email), edit template fields, toggle scheduling, enable AI photo descriptions, or delete the job.",tip:"AI Descriptions adds an orange AI button to every photo — tap it to auto-generate a description from the image."},
     {icon:"—",title:"Edit Template Fields",body:"In Job Settings, tap \"Edit Template Fields\" to change any field's mode (Edit, Lock, Auto-Date, Auto-#) or update its value. Changes apply to all future reports.",tip:null},
+    {icon:"↻",title:"Replace Template",body:"Need to swap in a new PDF? In Job Settings, tap \"Replace Template File\" to upload a fresh version. Your field configuration is preserved — only the underlying PDF changes.",tip:"Useful when your company updates their form or you uploaded the wrong file."},
     {icon:"▬",title:"Archive a Job",body:"When a project is done, archive it. Reports and data are preserved but the job hides from your active list.",tip:"Archive instead of delete — you may need old reports later."},
   ]},
   {icon:"📅",color:C.blu,title:"Scheduling Calendar",sub:"Share your availability with your team",steps:[
@@ -5334,10 +5768,9 @@ function TrainingCenter({onBack}){
     const s=g.steps[step];
     return(
       <div style={{minHeight:"100vh",background:C.bg,color:C.txt,display:"flex",flexDirection:"column"}}>
-        <div style={{display:"flex",alignItems:"center",gap:12,padding:"16px 20px",borderBottom:`1px solid ${C.brd}`,background:C.card}}>
-          <button onClick={()=>{setSelGuide(null);setStep(0);}} style={{background:"none",border:"none",color:C.mut,fontSize:22,cursor:"pointer",padding:0,lineHeight:1}}>←</button>
-          <MDRLogo size={28}/>
-          <span style={{fontWeight:700,fontSize:17}}>{g.title}</span>
+        <div style={{display:"flex",alignItems:"center",gap:12,padding:"14px 16px",borderBottom:`1px solid ${C.brd}`,background:C.card}}>
+          <button onClick={()=>{setSelGuide(null);setStep(0);}} style={{background:"none",border:"none",color:C.mut,fontSize:24,cursor:"pointer",padding:"8px 12px",lineHeight:1,borderRadius:8,minWidth:44,minHeight:44,display:"flex",alignItems:"center",justifyContent:"center"}}>←</button>
+          <span style={{fontWeight:700,fontSize:17,flex:1}}>{g.title}</span>
         </div>
         <div style={{display:"flex",gap:4,padding:"16px 20px 8px"}}>
           {g.steps.map((_,i)=>(
@@ -5421,9 +5854,8 @@ function TrainingCenter({onBack}){
 
   return(
     <div style={{minHeight:"100vh",background:C.bg,color:C.txt}}>
-      <div style={{display:"flex",alignItems:"center",gap:12,padding:"16px 20px",borderBottom:`1px solid ${C.brd}`,background:C.card}}>
-        <button onClick={onBack} style={{background:"none",border:"none",color:C.blu,fontSize:28,cursor:"pointer",padding:"8px 12px",lineHeight:1,borderRadius:8,minWidth:48,minHeight:48,display:"flex",alignItems:"center",justifyContent:"center"}}>←</button>
-        <MDRLogo size={28}/>
+      <div style={{display:"flex",alignItems:"center",gap:10,padding:"14px 16px",borderBottom:`1px solid ${C.brd}`,background:C.card}}>
+        <button onClick={onBack} style={{background:"none",border:"none",color:C.mut,fontSize:24,cursor:"pointer",lineHeight:1,minWidth:44,minHeight:44,display:"flex",alignItems:"center",justifyContent:"center"}}>←</button>
         <span style={{fontWeight:700,fontSize:17}}>Training Center</span>
       </div>
       <div style={{maxWidth:600,margin:"0 auto",padding:"24px"}}>
@@ -5472,6 +5904,10 @@ function Dashboard({user, onLogout}){
   const [shareCopied,setShareCopied]=useState(false);
   const [navRestored,setNavRestored]=useState(false);
   const [dashLogoUrl,setDashLogoUrl]=useState(null);
+  const [subStatus,setSubStatus]=useState("loading"); // loading, trialing, active, expired, past_due, cancelled, trial_abused
+  const [trialEndsAt,setTrialEndsAt]=useState(null);
+  const [subPlan,setSubPlan]=useState("");
+  const [showPaywall,setShowPaywall]=useState(false);
 
   // Persist navigation state — saves selected job ID so user returns to where they were
   const saveNav=(jobId)=>{try{localStorage.setItem("mdr_nav",JSON.stringify({jobId:jobId||null,ts:Date.now()}));}catch(e){}};
@@ -5491,7 +5927,19 @@ function Dashboard({user, onLogout}){
   };
   // Quick refresh — only update report statuses (used on back navigation to avoid full reload)
   const refreshStatuses=async()=>{try{const ids=jobs.filter(j=>!j.is_archived).map(j=>j.id);if(ids.length)setRpts(await db.todayRpts(ids));}catch(e){}};
-  const load=async()=>{setLoading(true);try{const a=await db.jobs(user.id);setJobs(a);const ids=a.filter(j=>!j.is_archived).map(j=>j.id);if(ids.length)setRpts(await db.todayRpts(ids));const p=await db.getProfile(user.id);if(p?.slug)setProfileSlug(p.slug);if(p?.company_id){const savedLogo=db.getCompanyLogo(p.company_id);if(savedLogo)setDashLogoUrl(savedLogo);}await loadRequests();
+  const load=async()=>{setLoading(true);try{const a=await db.jobs(user.id);setJobs(a);const ids=a.filter(j=>!j.is_archived).map(j=>j.id);if(ids.length)setRpts(await db.todayRpts(ids));const p=await db.getProfile(user.id);if(p?.slug)setProfileSlug(p.slug);if(p?.company_id){const savedLogo=db.getCompanyLogo(p.company_id);if(savedLogo)setDashLogoUrl(savedLogo);}
+    // Check subscription status
+    if(p){
+      const ss=p.subscription_status||"trialing";
+      setSubStatus(ss);
+      setSubPlan(p.subscription_plan||"");
+      if(p.trial_ends_at)setTrialEndsAt(new Date(p.trial_ends_at));
+      // Check if trial has expired
+      if(ss==="trialing"&&p.trial_ends_at&&new Date(p.trial_ends_at)<new Date()){
+        setSubStatus("expired");
+      }
+    }
+    await loadRequests();
     // Restore navigation state — reopen the job user was on before closing the app
     if(!navRestored){setNavRestored(true);try{const raw=localStorage.getItem("mdr_nav");if(raw){const nav=JSON.parse(raw);if(nav.jobId&&(Date.now()-nav.ts)<24*60*60*1000){const match=a.find(j=>j.id===nav.jobId);if(match)setSelJob(match);}}}catch(e){}}
   }catch(e){console.error(e);}finally{setLoading(false);}};
@@ -5515,9 +5963,8 @@ function Dashboard({user, onLogout}){
   if(showTrain)return<TrainingCenter onBack={()=>setShowTrain(false)}/>;
   if(showFairUse)return(
     <div style={{minHeight:"100vh",background:C.bg,color:C.txt}}>
-      <div style={{display:"flex",alignItems:"center",gap:12,padding:"16px 20px",borderBottom:`1px solid ${C.brd}`,background:C.card}}>
-        <button onClick={()=>setShowFairUse(false)} style={{background:"none",border:"none",color:C.mut,fontSize:22,cursor:"pointer",padding:0,lineHeight:1}}>←</button>
-        <MDRLogo size={28}/>
+      <div style={{display:"flex",alignItems:"center",gap:10,padding:"14px 16px",borderBottom:`1px solid ${C.brd}`,background:C.card}}>
+        <button onClick={()=>setShowFairUse(false)} style={{background:"none",border:"none",color:C.mut,fontSize:24,cursor:"pointer",lineHeight:1,minWidth:44,minHeight:44,display:"flex",alignItems:"center",justifyContent:"center"}}>←</button>
         <span style={{fontWeight:700,fontSize:17}}>Fair Use Agreement</span>
       </div>
       <div style={{maxWidth:600,margin:"0 auto",padding:"24px 20px"}}>
@@ -5565,9 +6012,8 @@ function Dashboard({user, onLogout}){
 
   if(showTos)return(
     <div style={{minHeight:"100vh",background:C.bg,color:C.txt}}>
-      <div style={{display:"flex",alignItems:"center",gap:12,padding:"16px 20px",borderBottom:`1px solid ${C.brd}`,background:C.card}}>
-        <button onClick={()=>setShowTos(false)} style={{background:"none",border:"none",color:C.mut,fontSize:22,cursor:"pointer",padding:0,lineHeight:1}}>←</button>
-        <MDRLogo size={28}/>
+      <div style={{display:"flex",alignItems:"center",gap:10,padding:"14px 16px",borderBottom:`1px solid ${C.brd}`,background:C.card}}>
+        <button onClick={()=>setShowTos(false)} style={{background:"none",border:"none",color:C.mut,fontSize:24,cursor:"pointer",lineHeight:1,minWidth:44,minHeight:44,display:"flex",alignItems:"center",justifyContent:"center"}}>←</button>
         <div><span style={{fontWeight:700,fontSize:17}}>Terms of Service</span><div style={{fontSize:11,color:C.mut}}>Last updated: January 11, 2025</div></div>
       </div>
       <div style={{maxWidth:600,margin:"0 auto",padding:"24px 20px"}}>
@@ -5659,9 +6105,8 @@ function Dashboard({user, onLogout}){
 
   if(showPriv)return(
     <div style={{minHeight:"100vh",background:C.bg,color:C.txt}}>
-      <div style={{display:"flex",alignItems:"center",gap:12,padding:"16px 20px",borderBottom:`1px solid ${C.brd}`,background:C.card}}>
-        <button onClick={()=>setShowPriv(false)} style={{background:"none",border:"none",color:C.mut,fontSize:22,cursor:"pointer",padding:0,lineHeight:1}}>←</button>
-        <MDRLogo size={28}/>
+      <div style={{display:"flex",alignItems:"center",gap:10,padding:"14px 16px",borderBottom:`1px solid ${C.brd}`,background:C.card}}>
+        <button onClick={()=>setShowPriv(false)} style={{background:"none",border:"none",color:C.mut,fontSize:24,cursor:"pointer",lineHeight:1,minWidth:44,minHeight:44,display:"flex",alignItems:"center",justifyContent:"center"}}>←</button>
         <div><span style={{fontWeight:700,fontSize:17}}>Privacy Policy</span><div style={{fontSize:11,color:C.mut}}>Last updated: January 11, 2025</div></div>
       </div>
       <div style={{maxWidth:600,margin:"0 auto",padding:"24px 20px"}}>
@@ -5738,32 +6183,108 @@ function Dashboard({user, onLogout}){
   );
 
   const selectJob=(j)=>{if(j)trackJobVisit(j.id);setSelJob(j);};
+
+  // Subscription checkout helper
+  const startCheckout=async(priceId)=>{
+    try{
+      const r=await fetch(`${SB_URL}/functions/v1/create-checkout`,{method:"POST",headers:{"apikey":SB_KEY,"Authorization":"Bearer "+(AUTH_TOKEN||SB_KEY),"Content-Type":"application/json"},body:JSON.stringify({user_id:user.id,price_id:priceId})});
+      const d=await r.json();
+      if(d.url)window.location.href=d.url;
+      else showToast(d.error||"Checkout failed");
+    }catch(e){showToast("Checkout error: "+e.message);}
+  };
+
+  // Paywall screen — shown when trial expired or subscription cancelled
+  if(subStatus==="expired"||subStatus==="cancelled"||subStatus==="trial_abused"){
+    const PRICE_MONTHLY=localStorage.getItem("mdr_price_monthly")||"";
+    const PRICE_ANNUAL=localStorage.getItem("mdr_price_annual")||"";
+    return(
+      <div style={{minHeight:"100vh",background:C.bg,color:C.txt,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:20}}>
+        <div style={{maxWidth:420,width:"100%",textAlign:"center"}}>
+          <MDRLogo size={72}/>
+          <div style={{fontSize:22,fontWeight:800,marginTop:16,marginBottom:8}}>
+            {subStatus==="trial_abused"?"Trial Not Available":"Your Free Trial Has Ended"}
+          </div>
+          <div style={{fontSize:14,color:C.mut,lineHeight:1.6,marginBottom:28}}>
+            {subStatus==="trial_abused"
+              ?"This card has already been used for a free trial on another account."
+              :"Subscribe to continue creating reports, managing jobs, and using all features. Your data is safe — pick a plan to get back to work."}
+          </div>
+
+          <div style={{display:"flex",flexDirection:"column",gap:12,marginBottom:20}}>
+            <button onClick={()=>startCheckout(PRICE_MONTHLY)} style={{padding:"16px 20px",background:C.org,border:"none",borderRadius:12,color:"#fff",fontSize:16,fontWeight:700,cursor:"pointer"}}>
+              $19.99 / month
+            </button>
+            <button onClick={()=>startCheckout(PRICE_ANNUAL)} style={{padding:"16px 20px",background:C.blu,border:"none",borderRadius:12,color:"#fff",fontSize:16,fontWeight:700,cursor:"pointer"}}>
+              $199 / year <span style={{fontSize:12,fontWeight:400,opacity:0.8}}>— save 17%</span>
+            </button>
+          </div>
+
+          <div style={{padding:16,background:C.card,border:`1px solid ${C.brd}`,borderRadius:12,marginBottom:16}}>
+            <div style={{fontSize:13,fontWeight:700,color:C.lt,marginBottom:8}}>Other Payment Options</div>
+            <div style={{fontSize:12,color:C.mut,lineHeight:1.6}}>
+              <strong style={{color:C.lt}}>PayPal / Venmo:</strong> Available at checkout (select PayPal as payment method)
+            </div>
+            <div style={{fontSize:12,color:C.mut,lineHeight:1.6,marginTop:6}}>
+              <strong style={{color:C.lt}}>Zelle:</strong> Send $19.99/mo or $199/yr to <span style={{color:C.org}}>jessesbillz@gmail.com</span> — we'll activate your account within 24 hours
+            </div>
+            <div style={{fontSize:12,color:C.mut,lineHeight:1.6,marginTop:6}}>
+              <strong style={{color:C.lt}}>Crypto:</strong> <a href="mailto:jessesbillz@gmail.com?subject=Crypto%20Payment%20Inquiry" style={{color:C.org}}>Contact us</a> for cryptocurrency payment options
+            </div>
+          </div>
+
+          <div style={{fontSize:13,fontWeight:700,color:C.lt,marginBottom:8}}>Enterprise</div>
+          <div style={{fontSize:12,color:C.mut,lineHeight:1.6,marginBottom:16}}>
+            Unlimited jobs, unlimited AI, company-wide templates, dedicated support, and custom integrations.{" "}
+            <a href="mailto:jessesbillz@gmail.com?subject=Enterprise%20Inquiry" style={{color:C.org}}>Contact us</a>
+          </div>
+
+          <button onClick={()=>{authLogout();window.location.reload();}} style={{padding:"10px 20px",background:"none",border:`1px solid ${C.brd}`,borderRadius:8,color:C.mut,fontSize:13,cursor:"pointer"}}>
+            Sign Out
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   if(selJob)return(
     <JobDetail job={selJob} user={user} onBack={()=>{setSelJob(null);saveNav(null);refreshStatuses();}} onDeleted={()=>{setSelJob(null);saveNav(null);load();}}/>
   );
 
   return(
     <div style={{minHeight:"100vh",background:C.bg,color:C.txt,position:"relative"}} onClick={e=>{if(showSet&&!e.target.closest('[data-s]'))setShowSet(false);if(showDD&&!e.target.closest('[data-d]'))setShowDD(false);}}>
+      {/* Ghosted MDR watermark */}
+      <div style={{position:"fixed",top:"50%",left:"50%",transform:"translate(-50%,-50%)",opacity:0.03,pointerEvents:"none",zIndex:0,display:"flex",flexDirection:"column",alignItems:"center",gap:8}}>
+        <img src="logo.jpg" alt="" style={{width:180,height:180,borderRadius:16,objectFit:"contain"}}/>
+        <div style={{fontSize:22,fontWeight:800,letterSpacing:1,color:C.txt,whiteSpace:"nowrap"}}>My Daily Reports</div>
+      </div>
       {/* ── Header: Dropdown (left) | Logo (center) | Settings (right) ── */}
-      <div style={{display:"grid",gridTemplateColumns:"1fr auto 1fr",alignItems:"center",padding:"12px 16px",borderBottom:`1px solid ${C.brd}`,background:C.card}} data-s>
-        <div style={{justifySelf:"start"}} data-d>
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"12px 16px",borderBottom:`1px solid ${C.brd}`,background:C.card}} data-s>
+        <div style={{display:"flex",alignItems:"center",gap:10}} data-d>
           <button onClick={()=>setShowDD(!showDD)} style={{display:"flex",alignItems:"center",gap:6,padding:"8px 12px",background:C.inp,border:`1px solid ${showDD?C.org:C.brd}`,borderRadius:8,cursor:"pointer",color:C.txt}}>
-            <span style={{fontSize:13,fontWeight:600,maxWidth:120,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{selJob?selJob.name:"Jobs"}</span>
+            <span style={{fontSize:14,fontWeight:600,maxWidth:160,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{selJob?selJob.name:"Jobs"}</span>
             <span style={{color:C.mut,fontSize:11,transform:showDD?"rotate(180deg)":"none",transition:"transform 0.2s"}}>▼</span>
           </button>
-        </div>
-
-        <div style={{display:"flex",alignItems:"center",gap:8,justifySelf:"center"}}>
-          <MDRLogo size={34}/>
-          <span style={{fontWeight:700,fontSize:16,color:C.txt,letterSpacing:-0.3}}>My Daily Reports</span>
-        </div>
-
-        <div style={{justifySelf:"end",display:"flex",alignItems:"center",gap:8}}>
           {dashLogoUrl&&<img src={dashLogoUrl} alt="" style={{width:34,height:34,borderRadius:8,objectFit:"contain",background:"#fff",border:`1px solid ${C.brd}`}}/>}
+        </div>
+        <div style={{display:"flex",alignItems:"center",gap:8}}>
           <button onClick={doShare} style={{width:34,height:34,borderRadius:8,background:C.inp,border:`1px solid ${C.brd}`,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",fontSize:14,color:C.mut}}>↗</button>
           <button onClick={()=>setShowSet(!showSet)} style={{width:34,height:34,borderRadius:8,background:C.inp,border:`1px solid ${C.brd}`,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",fontSize:14,color:C.mut}}>⚙️</button>
         </div>
       </div>
+
+      {/* Trial countdown banner */}
+      {subStatus==="trialing"&&trialEndsAt&&(()=>{
+        const days=Math.max(0,Math.ceil((trialEndsAt-new Date())/(1000*60*60*24)));
+        return days<=7?(
+          <div style={{padding:"10px 16px",background:days<=3?"rgba(239,68,68,0.15)":"rgba(232,116,42,0.12)",borderBottom:`1px solid ${C.brd}`,display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+            <div style={{fontSize:12,color:days<=3?C.err:C.org,fontWeight:600}}>
+              {days===0?"Trial ends today":days===1?"Trial ends tomorrow":`${days} days left in your free trial`}
+            </div>
+            <button onClick={()=>setShowPaywall(true)} style={{padding:"4px 12px",background:C.org,border:"none",borderRadius:6,color:"#fff",fontSize:11,fontWeight:700,cursor:"pointer"}}>Subscribe</button>
+          </div>
+        ):null;
+      })()}
 
       {/* Job dropdown */}
       {showDD&&(
@@ -6466,13 +6987,25 @@ function LoginScreen({onAuth}){
         <div style={{textAlign:"center",marginBottom:32}}>
           <MDRLogo size={72}/>
           <div style={{fontSize:24,fontWeight:800,color:C.txt,marginTop:12}}>My Daily Reports</div>
-          <div style={{color:C.mut,fontSize:14,marginTop:4}}>Jobsite reporting made simple</div>
+          <div style={{color:C.mut,fontSize:14,marginTop:4}}>Daily reporting made simple</div>
         </div>
 
         {/* Toggle */}
         <div style={{display:"flex",background:C.inp,borderRadius:10,padding:3,marginBottom:24}}>
           <button onClick={()=>{setMode("login");setErr("");}} style={{flex:1,padding:"10px 0",background:mode==="login"?C.card:"transparent",border:"none",borderRadius:8,color:mode==="login"?C.txt:C.mut,fontSize:14,fontWeight:700,cursor:"pointer"}}>Sign In</button>
           <button onClick={()=>{setMode("signup");setErr("");}} style={{flex:1,padding:"10px 0",background:mode==="signup"?C.card:"transparent",border:"none",borderRadius:8,color:mode==="signup"?C.txt:C.mut,fontSize:14,fontWeight:700,cursor:"pointer"}}>Create Account</button>
+        </div>
+
+        {/* Google Sign In */}
+        <button onClick={authSignInWithGoogle} style={{width:"100%",padding:"14px 0",background:"#fff",border:`1px solid ${C.brd}`,borderRadius:10,color:"#333",fontSize:15,fontWeight:600,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",gap:10,marginBottom:20}}>
+          <svg width="18" height="18" viewBox="0 0 48 48"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/></svg>
+          Continue with Google
+        </button>
+
+        <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:20}}>
+          <div style={{flex:1,height:1,background:C.brd}}/>
+          <span style={{fontSize:12,color:C.mut}}>or</span>
+          <div style={{flex:1,height:1,background:C.brd}}/>
         </div>
 
         <form onSubmit={handleSubmit} style={{display:"flex",flexDirection:"column",gap:14}}>
@@ -6497,7 +7030,7 @@ function LoginScreen({onAuth}){
         </div>
 
         <div style={{textAlign:"center",marginTop:24,color:C.mut,fontSize:11}}>
-          Free during beta — no credit card required
+          14-day free trial — $19.99/month after
         </div>
 
         {/* Concierge service blurb */}
@@ -6628,21 +7161,33 @@ function App(){
   // Clear stale parse attempt counters from localStorage
   useEffect(()=>{try{Object.keys(localStorage).filter(k=>k.startsWith("mdr_parse_")).forEach(k=>localStorage.removeItem(k));}catch(e){}},[]);
 
-  // On mount, try to restore existing session
+  // On mount, try to restore existing session or handle OAuth callback
   useEffect(()=>{
-    authGetSession().then(async(u)=>{
+    (async()=>{
+      // Check for OAuth callback (Google sign-in redirect)
+      const oauthUser=await authHandleOAuthCallback();
+      if(oauthUser){
+        setUser(oauthUser);
+        try{
+          const p=await db.getProfile(oauthUser.id);
+          setSetupDone(p?.setup_complete===true);
+          if(p?.full_name)window._mdrUserName=p.full_name;
+        }catch(e){setSetupDone(false);}
+        setBooting(false);
+        return;
+      }
+      // Normal session restore
+      const u=await authGetSession();
       if(u){
         setUser(u);
         try{
           const p=await db.getProfile(u.id);
           setSetupDone(p?.setup_complete===true);
           if(p?.full_name)window._mdrUserName=p.full_name;
-        }catch(e){
-          setSetupDone(false);
-        }
+        }catch(e){setSetupDone(false);}
       }
       setBooting(false);
-    }).catch(()=>setBooting(false));
+    })().catch(()=>setBooting(false));
   },[]);
 
   // Called after successful login/signup
@@ -6681,7 +7226,7 @@ function App(){
   if(setupDone===false)return<SetupWizard user={user} inviteCompany={inviteCompany} onComplete={()=>setSetupDone(true)}/>;
 
   // Fully set up — show dashboard
-  return<><Dashboard user={user} onLogout={handleLogout}/><InstallBanner/></>;
+  return<><Dashboard user={user} onLogout={handleLogout}/><InstallBanner/><SupportChat user={user}/></>;
 }
 ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
 </script>

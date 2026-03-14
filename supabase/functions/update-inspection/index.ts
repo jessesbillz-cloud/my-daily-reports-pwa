@@ -53,15 +53,17 @@ serve(async (req) => {
       );
     }
 
-    // Look up the job owner's email via profile slug so they always get notified
+    // Look up the job owner's email + ntfy topic via profile slug
     let ownerEmail = "";
+    let ownerNtfyTopic = "";
     try {
       const { data: profile } = await supabase
         .from("profiles")
-        .select("id")
+        .select("id, ntfy_topic")
         .eq("slug", existing.project)
         .single();
       if (profile) {
+        ownerNtfyTopic = profile.ntfy_topic || "";
         const { data: authUser } = await supabase.auth.admin.getUserById(
           profile.id
         );
@@ -85,6 +87,20 @@ serve(async (req) => {
       Deno.env.get("FROM_EMAIL") || "reports@mydailyreports.org";
     const projectName = (existing.project || "").replace(/-/g, " ");
     const typeLabel = (existing.inspection_types || []).join(", ");
+
+    // Helper to send ntfy push notification
+    const sendNtfy = async (title: string, body: string, tags = "calendar", priority = "default") => {
+      if (!ownerNtfyTopic) return;
+      try {
+        await fetch(`https://ntfy.sh/${ownerNtfyTopic}`, {
+          method: "POST",
+          headers: { "Title": title, "Priority": priority, "Tags": tags },
+          body,
+        });
+      } catch (e) {
+        console.error("ntfy push error (non-fatal):", e);
+      }
+    };
 
     // Helper to send notification email
     const sendEmail = async (
@@ -162,6 +178,7 @@ serve(async (req) => {
          <tr><td style="padding:8px 0;font-weight:bold;">Cancelled By:</td><td>${action_by || "Unknown"}</td></tr>
          ${reason ? `<tr><td style="padding:8px 0;font-weight:bold;">Reason:</td><td>${reason}</td></tr>` : ""}`
       );
+      await sendNtfy("Request Cancelled", `${typeLabel} on ${existing.inspection_date} for ${projectName} was cancelled by ${action_by || "Unknown"}`, "x", "default");
 
       return new Response(JSON.stringify({ success: true, action: "cancel" }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -227,6 +244,7 @@ serve(async (req) => {
          <tr><td style="padding:8px 0;font-weight:bold;">New Time:</td><td style="color:#e8742a;font-weight:bold;">${new_time || existing.inspection_time}</td></tr>
          <tr><td style="padding:8px 0;font-weight:bold;">Updated By:</td><td>${action_by || "Unknown"}</td></tr>`
       );
+      await sendNtfy("Request Updated", `${typeLabel} for ${projectName} rescheduled to ${new_date || existing.inspection_date} at ${new_time || existing.inspection_time}`, "pencil", "default");
 
       return new Response(JSON.stringify({ success: true, action: "edit" }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -256,6 +274,7 @@ serve(async (req) => {
          <tr><td style="padding:8px 0;font-weight:bold;">Submitted By:</td><td>${existing.submitted_by}</td></tr>
          <tr><td style="padding:8px 0;font-weight:bold;">Status:</td><td style="color:#4a4;font-weight:bold;">✅ Scheduled</td></tr>`
       );
+      await sendNtfy("Request Confirmed", `${typeLabel} on ${existing.inspection_date} for ${projectName} is confirmed`, "white_check_mark", "default");
 
       return new Response(
         JSON.stringify({ success: true, action: "schedule" }),
