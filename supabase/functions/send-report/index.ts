@@ -152,6 +152,56 @@ serve(async (req) => {
     }
 
     console.log("[send-report] Success! Email ID:", result.id);
+
+    // Increment monthly send counter and check threshold
+    if (SUPABASE_URL && SUPABASE_SERVICE_KEY) {
+      try {
+        const sb = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
+        const { data: counterData } = await sb.rpc("increment_email_counter");
+        if (counterData) {
+          const cnt = counterData.count;
+          const alertSent = counterData.alert_sent;
+          const MONTHLY_LIMIT = 50000;
+          const THRESHOLD = Math.floor(MONTHLY_LIMIT * 0.8); // 40,000
+          console.log(`[send-report] Monthly send count: ${cnt}/${MONTHLY_LIMIT}`);
+
+          if (cnt >= THRESHOLD && !alertSent) {
+            // Fire alert — ntfy + email to owner
+            console.warn(`[send-report] ALERT: ${cnt} emails sent this month (${Math.round(cnt/MONTHLY_LIMIT*100)}% of limit)`);
+            const alertMsg = `⚠️ Resend Email Alert: ${cnt.toLocaleString()} / ${MONTHLY_LIMIT.toLocaleString()} emails sent this month (${Math.round(cnt/MONTHLY_LIMIT*100)}%). Upgrade plan or reduce volume soon.`;
+
+            // ntfy alert
+            try {
+              await fetch("https://ntfy.sh/mdr-system-alerts", {
+                method: "POST",
+                headers: { "Title": "Email Limit Warning", "Priority": "urgent", "Tags": "warning,email" },
+                body: alertMsg,
+              });
+            } catch (e) { console.error("[send-report] ntfy alert failed:", e); }
+
+            // Self-email alert
+            try {
+              await fetch("https://api.resend.com/emails", {
+                method: "POST",
+                headers: { "Content-Type": "application/json", Authorization: `Bearer ${RESEND_API_KEY}` },
+                body: JSON.stringify({
+                  from: `MDR System <${Deno.env.get("FROM_EMAIL") || "reports@mydailyreports.org"}>`,
+                  to: ["jessesbillz@gmail.com"],
+                  subject: `⚠️ Resend Limit Alert: ${cnt.toLocaleString()} / ${MONTHLY_LIMIT.toLocaleString()} emails`,
+                  html: `<div style="font-family:sans-serif;padding:20px;"><h2 style="color:#e8742a;">Email Volume Alert</h2><p>Your MDR app has sent <strong>${cnt.toLocaleString()}</strong> of your <strong>${MONTHLY_LIMIT.toLocaleString()}</strong> monthly Resend emails (${Math.round(cnt/MONTHLY_LIMIT*100)}%).</p><p>Consider upgrading your Resend plan or monitoring volume closely.</p></div>`,
+                }),
+              });
+            } catch (e) { console.error("[send-report] alert email failed:", e); }
+
+            // Mark alert as sent so we don't spam
+            await sb.rpc("mark_email_alert_sent");
+          }
+        }
+      } catch (counterErr) {
+        console.error("[send-report] Counter increment failed (non-fatal):", counterErr);
+      }
+    }
+
     return new Response(
       JSON.stringify({
         success: true,

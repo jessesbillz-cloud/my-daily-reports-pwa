@@ -748,6 +748,7 @@ function AccountSettings({user, onBack, onLogout}){
   const logoInputRef=useRef(null);
   const [companyRole,setCompanyRole]=useState("member");
   const [ntfyTopic,setNtfyTopic]=useState("");
+  const [emailCount,setEmailCount]=useState(null); // {month, count, alert_sent}
 
   const TZ_OPTIONS = [
     "America/New_York","America/Chicago","America/Denver","America/Phoenix",
@@ -779,6 +780,14 @@ function AccountSettings({user, onBack, onLogout}){
           if(p.company_role)setCompanyRole(p.company_role);
           if(p.ntfy_topic)setNtfyTopic(p.ntfy_topic);
         }
+        // Load email send counter for current month
+        try{
+          const mo=new Date().toISOString().slice(0,7);
+          const cr=await fetch(`${SB_URL}/rest/v1/email_send_counter?month=eq.${mo}&select=*`,{headers:{"apikey":SB_KEY,"Authorization":"Bearer "+(AUTH_TOKEN||SB_KEY)}});
+          const rows=await cr.json();
+          if(rows&&rows.length>0)setEmailCount(rows[0]);
+          else setEmailCount({month:mo,send_count:0,alert_sent:false});
+        }catch(e){console.error("Counter load:",e);}
       }catch(e){console.error(e);}
       finally{setLoading(false);}
     })();
@@ -1025,6 +1034,27 @@ function AccountSettings({user, onBack, onLogout}){
                   <div><div style={{fontSize:14,fontWeight:600,color:C.lt}}>Email Reminders</div><div style={{fontSize:11,color:C.mut}}>Configured per-job in job settings</div></div>
                   <div style={{fontSize:12,fontWeight:600,color:C.ok}}>Active</div>
                 </div>
+                {emailCount&&(
+                  <div style={{padding:"14px 0 0",borderTop:`1px solid ${C.brd}`,marginTop:12}}>
+                    <div style={{fontSize:14,fontWeight:600,color:C.lt,marginBottom:8}}>Monthly Email Usage</div>
+                    {(()=>{
+                      const cnt=emailCount.send_count||0;
+                      const limit=50000;
+                      const pct=Math.min(100,Math.round(cnt/limit*100));
+                      const barColor=pct>=80?C.err:pct>=50?C.org:C.ok;
+                      return <>
+                        <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:6}}>
+                          <div style={{fontSize:20,fontWeight:800,color:C.txt}}>{cnt.toLocaleString()}</div>
+                          <div style={{fontSize:12,color:C.mut}}>of {limit.toLocaleString()} ({emailCount.month})</div>
+                        </div>
+                        <div style={{height:6,background:C.inp,borderRadius:3,overflow:"hidden",marginBottom:4}}>
+                          <div style={{height:"100%",width:pct+"%",background:barColor,borderRadius:3,transition:"width 0.3s"}}/>
+                        </div>
+                        <div style={{fontSize:11,color:pct>=80?C.err:C.mut}}>{pct}% used{pct>=80?" — alert threshold reached":""}</div>
+                      </>;
+                    })()}
+                  </div>
+                )}
                 <div style={{padding:"14px 0 0",borderTop:`1px solid ${C.brd}`,marginTop:12}}>
                   <div style={{fontSize:14,fontWeight:600,color:C.lt,marginBottom:8}}>Push Notifications (ntfy)</div>
                   <div style={{fontSize:12,color:C.mut,lineHeight:1.6,marginBottom:10}}>

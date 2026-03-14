@@ -5,16 +5,60 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 // email.sent, email.delivered, email.bounced,
 // email.complained, email.delivery_delayed, email.opened, email.clicked
 
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, svix-id, svix-timestamp, svix-signature",
+};
+
+async function verifyWebhookSignature(
+  secret: string,
+  msgId: string,
+  timestamp: string,
+  body: string,
+  signatures: string
+): Promise<boolean> {
+  try {
+    // Resend/Svix secret starts with "whsec_" prefix — strip it and decode base64
+    const secretBytes = Uint8Array.from(
+      atob(secret.startsWith("whsec_") ? secret.slice(6) : secret),
+      (c) => c.charCodeAt(0)
+    );
+
+    const toSign = `${msgId}.${timestamp}.${body}`;
+    const key = await crypto.subtle.importKey(
+      "raw",
+      secretBytes,
+      { name: "HMAC", hash: "SHA-256" },
+      false,
+      ["sign"]
+    );
+    const sig = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(toSign));
+    const expected = btoa(String.fromCharCode(...new Uint8Array(sig)));
+
+    // Svix sends multiple signatures separated by spaces: "v1,<sig1> v1,<sig2>"
+    const sigs = signatures.split(" ").map((s) => s.replace("v1,", ""));
+    return sigs.some((s) => s === expected);
+  } catch (e) {
+    console.error("Signature verification error:", e);
+    return false;
+  }
+}
+
 serve(async (req) => {
-  // Resend sends POST with JSON body; verify via signing secret
+  if (req.method === "OPTIONS") {
+    return new Response("ok", { headers: corsHeaders });
+  }
+
   if (req.method !== "POST") {
-    return new Response("Method not allowed", { status: 405 });
+    return new Response("Method not allowed", { status: 405, headers: corsHeaders });
   }
 
   try {
     const WEBHOOK_SECRET = Deno.env.get("RESEND_WEBHOOK_SECRET");
     const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
     const SUPABASE_SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+
+    const body = await req.text();
 
     // Verify webhook signature if secret is configured
     if (WEBHOOK_SECRET) {
@@ -24,7 +68,10 @@ serve(async (req) => {
 
       if (!svixId || !svixTimestamp || !svixSignature) {
         console.error("Missing Svix headers");
-        return new Response("Unauthorized", { status: 401 });
+        return new Response(JSON.stringify({ error: "Missing signature headers" }), {
+          status: 401,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
       }
 
       // Timestamp check — reject if older than 5 minutes
@@ -32,22 +79,34 @@ serve(async (req) => {
       const ts = parseInt(svixTimestamp);
       if (Math.abs(now - ts) > 300) {
         console.error("Webhook timestamp too old:", svixTimestamp);
-        return new Response("Unauthorized", { status: 401 });
+        return new Response(JSON.stringify({ error: "Timestamp expired" }), {
+          status: 401,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      const valid = await verifyWebhookSignature(WEBHOOK_SECRET, svixId, svixTimestamp, body, svixSignature);
+      if (!valid) {
+        console.error("Invalid webhook signature");
+        return new Response(JSON.stringify({ error: "Invalid signature" }), {
+          status: 401,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
       }
     }
 
-    const body = await req.text();
     const event = JSON.parse(body);
-
     const eventType = event.type;
     const data = event.data;
 
     if (!eventType || !data) {
       return new Response(JSON.stringify({ error: "Invalid event" }), {
         status: 400,
-        headers: { "Content-Type": "application/json" },
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
+
+    console.log("[email-webhook] Event:", eventType, "Email ID:", data.email_id || data.id);
 
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
 
@@ -67,25 +126,28 @@ serve(async (req) => {
     if (eventType === "email.bounced" || eventType === "email.complained") {
       const badEmail = Array.isArray(data.to) ? data.to[0] : data.to;
       if (badEmail) {
+        const normalized = badEmail.toLowerCase().trim();
+        const reason = eventType === "email.bounced" ? "bounce" : "complaint";
+        const bounceType = data.bounce?.type || data.complaint?.type || null;
+
         // Upsert into suppression list
         await supabase.from("email_suppressions").upsert(
           {
-            email: badEmail.toLowerCase().trim(),
-            reason: eventType === "email.bounced" ? "bounce" : "complaint",
-            bounce_type: data.bounce?.type || null,
+            email: normalized,
+            reason,
+            bounce_type: bounceType,
             last_event_at: new Date().toISOString(),
             event_count: 1,
+            suppressed: true,
           },
-          {
-            onConflict: "email",
-          }
+          { onConflict: "email" }
         );
 
-        // Update the count for existing records
+        // Increment count for existing records
         const { data: existing } = await supabase
           .from("email_suppressions")
           .select("event_count")
-          .eq("email", badEmail.toLowerCase().trim())
+          .eq("email", normalized)
           .single();
 
         if (existing && existing.event_count > 0) {
@@ -94,26 +156,24 @@ serve(async (req) => {
             .update({
               event_count: existing.event_count + 1,
               last_event_at: new Date().toISOString(),
-              reason: eventType === "email.bounced" ? "bounce" : "complaint",
-              bounce_type: data.bounce?.type || null,
+              reason,
+              bounce_type: bounceType,
             })
-            .eq("email", badEmail.toLowerCase().trim());
+            .eq("email", normalized);
         }
 
-        console.warn(
-          `Email ${eventType}: ${badEmail} — ${data.bounce?.type || data.complaint?.type || "unknown"}`
-        );
+        console.warn(`Email ${eventType}: ${normalized} — ${bounceType || "unknown"}`);
       }
     }
 
     return new Response(JSON.stringify({ received: true }), {
-      headers: { "Content-Type": "application/json" },
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (error) {
     console.error("Webhook error:", error);
     return new Response(JSON.stringify({ error: error.message }), {
       status: 500,
-      headers: { "Content-Type": "application/json" },
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   }
 });
