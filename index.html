@@ -10,9 +10,6 @@
   <link rel="manifest" href="manifest.json" />
   <link rel="apple-touch-icon" href="icon-192.png" />
   <link rel="icon" type="image/png" href="icon-192.png" />
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Caladea:ital,wght@0,400;0,700;1,400&display=swap" rel="stylesheet" />
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0f0f0f; color: #fff; min-height: 100vh; -webkit-font-smoothing: antialiased; }
@@ -29,7 +26,6 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.9/babel.min.js"></script>
 <!-- pdf-lib for PDF generation, pdf.js for text extraction -->
 <script src="https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@pdf-lib/fontkit@1.1.1/dist/fontkit.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/mammoth@1.6.0/mammoth.browser.min.js"></script>
 <script>if(window.pdfjsLib){window.pdfjsLib.GlobalWorkerOptions.workerSrc="";window.pdfjsLib.GlobalWorkerOptions.workerPort=null;window.pdfjsLib.disableWorker=true;}</script>
@@ -2285,33 +2281,6 @@ function ArchivedJobs({jobs, onBack, onSelect}){
   );
 }
 
-// ── Global: Caladea (Cambria-compatible) font cache & fetch for PDF embedding ──
-// Raw TTF files hosted on GitHub's google/fonts repo (guaranteed TTF, not WOFF2)
-const _caladeaCache={regular:null,bold:null,italic:null,loading:null,tried:false};
-async function fetchCaladeaFonts(){
-  if(_caladeaCache.regular||_caladeaCache.tried)return _caladeaCache;
-  if(_caladeaCache.loading)return _caladeaCache.loading;
-  _caladeaCache.loading=(async()=>{
-    try{
-      const base="https://raw.githubusercontent.com/google/fonts/main/ofl/caladea/";
-      const fetchFont=async(file)=>{
-        try{const r=await fetch(base+file);if(!r.ok)return null;return new Uint8Array(await r.arrayBuffer());}catch(e){return null;}
-      };
-      const [reg,bold,ital]=await Promise.all([
-        fetchFont("Caladea-Regular.ttf"),
-        fetchFont("Caladea-Bold.ttf"),
-        fetchFont("Caladea-Italic.ttf")
-      ]);
-      if(reg)_caladeaCache.regular=reg;
-      if(bold)_caladeaCache.bold=bold;
-      if(ital)_caladeaCache.italic=ital;
-    }catch(e){console.warn("[font] Caladea fetch failed:",e);}
-    _caladeaCache.tried=true;
-    _caladeaCache.loading=null;
-    return _caladeaCache;
-  })();
-  return _caladeaCache.loading;
-}
 
 // ── Global: AI photo description daily limit (per job, per day) ──
 const AI_DESCRIBE_DAILY_LIMIT=25;
@@ -2663,17 +2632,8 @@ function WorkLogEditor({job, user, onBack, reportDate}){
   const generateWorkLogPdf=async()=>{
     const {PDFDocument,rgb,StandardFonts}=PDFLib;
     const doc=await PDFDocument.create();
-    if(window.fontkit)doc.registerFontkit(window.fontkit);
-    // Use Caladea (Cambria-compatible serif) if available, fall back to Times
-    const caladea=window.fontkit?await fetchCaladeaFonts():{};
-    let font,fontB;
-    if(caladea.regular&&caladea.bold){
-      font=await doc.embedFont(caladea.regular);
-      fontB=await doc.embedFont(caladea.bold);
-    }else{
-      font=await doc.embedFont(StandardFonts.TimesRoman);
-      fontB=await doc.embedFont(StandardFonts.TimesRomanBold);
-    }
+    const font=await doc.embedFont(StandardFonts.TimesRoman);
+    const fontB=await doc.embedFont(StandardFonts.TimesRomanBold);
     const W=612,H=792; // letter size
     const M=40; // margin
     const CW=W-2*M; // content width
@@ -3994,7 +3954,7 @@ function ReportEditor({job, user, onBack, reportDate}){
       const isAutoField=f.autoFill==="date"||f.autoFill==="increment";
       if(!isAutoField&&f.originalValue&&f.val===f.originalValue)return;
       const sz=(f.fontSize||10)*scale;
-      ctx.font=sz+"px Caladea, Cambria, Georgia, serif";
+      ctx.font=sz+"px Georgia, Cambria, serif";
       const drawX=f.x*scale;
       const drawY=f.y*scale+sz;
       // Signature stamp — "Signed by Name on Day, Date at Time — powered by My Daily Reports"
@@ -4008,13 +3968,13 @@ function ReportEditor({job, user, onBack, reportDate}){
         const timePart=sigTime.toLocaleTimeString("en-US",{hour:"numeric",minute:"2-digit",hour12:true});
         // Shift up: drawY normally is at bottom of field, move up so sig block sits above the line
         const sigDrawY=f.y*scale-sigSz*0.5;
-        ctx.font="italic "+sigSz+"px Caladea, Cambria, Georgia, serif";
+        ctx.font="italic "+sigSz+"px Georgia, Cambria, serif";
         ctx.fillStyle="#1a1a1a";
         ctx.fillText("Signed by "+f.val,drawX,sigDrawY);
-        ctx.font=(sigSz*0.65)+"px Caladea, Cambria, Georgia, serif";
+        ctx.font=(sigSz*0.65)+"px Georgia, Cambria, serif";
         ctx.fillStyle="#666666";
         ctx.fillText(dayName+", "+datePart+" at "+timePart,drawX,sigDrawY+sigSz*1.15);
-        ctx.font="italic "+(sigSz*0.55)+"px Caladea, Cambria, Georgia, serif";
+        ctx.font="italic "+(sigSz*0.55)+"px Georgia, Cambria, serif";
         ctx.fillStyle="#999999";
         ctx.fillText("powered by My Daily Reports",drawX,sigDrawY+sigSz*2.1);
         return;
@@ -4138,7 +4098,7 @@ function ReportEditor({job, user, onBack, reportDate}){
           const cvs=document.createElement("canvas");cvs.width=pgW;cvs.height=pgH;
           const ctx=cvs.getContext("2d");
           ctx.fillStyle="#ffffff";ctx.fillRect(0,0,pgW,pgH);
-          ctx.fillStyle="#666666";ctx.font=(12*scale)+"px Caladea, Cambria, Georgia, serif";
+          ctx.fillStyle="#666666";ctx.font=(12*scale)+"px Georgia, Cambria, serif";
           ctx.fillText("Photos — "+job.name,36*scale,40*scale);
           return {cvs,ctx};
         };
@@ -4320,10 +4280,8 @@ function ReportEditor({job, user, onBack, reportDate}){
       if(isPdfTemplate&&fcSource==="acroform"){
         console.log("[submit] Using AcroForm fill-by-name path");
         pdfDoc=await PDFDocument.load(tplBytes,{ignoreEncryption:true});
-        if(window.fontkit)pdfDoc.registerFontkit(window.fontkit);
-        const calF=window.fontkit?await fetchCaladeaFonts():{};
-        const acroFont=calF.regular?await pdfDoc.embedFont(calF.regular):await pdfDoc.embedFont(StandardFonts.TimesRoman);
-        const acroFontItalic=calF.italic?await pdfDoc.embedFont(calF.italic):await pdfDoc.embedFont(StandardFonts.TimesRomanItalic);
+        const acroFont=await pdfDoc.embedFont(StandardFonts.TimesRoman);
+        const acroFontItalic=await pdfDoc.embedFont(StandardFonts.TimesRomanItalic);
         // Strategy: extract widget rectangles from AcroForm fields, remove ALL fields,
         // then drawText directly on the page — no appearance streams, no white boxes.
         const textsToDraw=[];
@@ -4434,24 +4392,20 @@ function ReportEditor({job, user, onBack, reportDate}){
           }
         });
         // Load a separate copy for photo page header/footer embedding
-        try{srcDoc=await PDFDocument.load(tplBytes,{ignoreEncryption:true});if(window.fontkit)srcDoc.registerFontkit(window.fontkit);}catch(e){srcDoc=null;}
+        try{srcDoc=await PDFDocument.load(tplBytes,{ignoreEncryption:true});}catch(e){srcDoc=null;}
       }else{
         // ── 2a. Standard path: copyPages to preserve original visual content ──
         if(isPdfTemplate){
           srcDoc=await PDFDocument.load(tplBytes,{ignoreEncryption:true});
-          if(window.fontkit)srcDoc.registerFontkit(window.fontkit);
           pdfDoc=await PDFDocument.create();
-          if(window.fontkit)pdfDoc.registerFontkit(window.fontkit);
           const copiedPages=await pdfDoc.copyPages(srcDoc,srcDoc.getPageIndices());
           copiedPages.forEach(p=>pdfDoc.addPage(p));
         }else{
           pdfDoc=await PDFDocument.create();pdfDoc.addPage([612,792]);
         }
       }
-      if(window.fontkit&&!pdfDoc._fontkit)pdfDoc.registerFontkit(window.fontkit);
-      const calF2=window.fontkit?await fetchCaladeaFonts():{};
-      const font=calF2.regular?await pdfDoc.embedFont(calF2.regular):await pdfDoc.embedFont(StandardFonts.TimesRoman);
-      const fontItalic=calF2.italic?await pdfDoc.embedFont(calF2.italic):await pdfDoc.embedFont(StandardFonts.TimesRomanItalic);
+      const font=await pdfDoc.embedFont(StandardFonts.TimesRoman);
+      const fontItalic=await pdfDoc.embedFont(StandardFonts.TimesRomanItalic);
       const pages=pdfDoc.getPages();
 
       // ── 3. Fill fields by coordinates (standard path — skip for AcroForm fill-by-name) ──
@@ -4611,7 +4565,7 @@ function ReportEditor({job, user, onBack, reportDate}){
         const usableH=photoAreaTop-photoAreaBottom;
 
         // Font for photo captions
-        const captionFont=calF2.regular?await pdfDoc.embedFont(calF2.regular):await pdfDoc.embedFont(StandardFonts.TimesRoman);
+        const captionFont=await pdfDoc.embedFont(StandardFonts.TimesRoman);
         const captionSize=8;
 
         // Embed all photos first so we know their dimensions
