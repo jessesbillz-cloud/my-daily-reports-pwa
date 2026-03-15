@@ -690,6 +690,7 @@ const db = {
     if(!r.ok){const e=await r.json().catch(()=>({}));throw new Error(e.message||"Delete failed");}
   },
   // Get company templates
+  async getCompanyTemplates(companyId){
     const r=await fetch(`${SB_URL}/rest/v1/company_templates?company_id=eq.${companyId}&select=*&order=created_at.desc`,{headers:this._h()});
     if(!r.ok)return[];
     const all=await r.json();
