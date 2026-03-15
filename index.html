@@ -25,6 +25,8 @@
     input:focus, select:focus, textarea:focus { border-color: #e8742a !important; outline: none; }
     .btn-o:hover:not(:disabled) { background: #d4691f !important; }
     button, input, select, textarea { transition: all 0.2s ease; }
+    @keyframes fadeSlideIn{from{opacity:0;transform:translateX(12px)}to{opacity:1;transform:translateX(0)}}
+    .page-in{animation:fadeSlideIn 0.18s ease-out}
   </style>
 </head>
 <body>
@@ -303,15 +305,32 @@ function MDRLogo({size=36}){
 /* ── Support Chat Widget ── */
 function SupportChat({user}){
   const [open,setOpen]=useState(false);
-  const [convId,setConvId]=useState(null);
+  const savedConvId=useMemo(()=>{try{return localStorage.getItem("mdr_support_conv")||null;}catch(e){return null;}},[]);
+  const [convId,setConvId]=useState(savedConvId);
   const [msgs,setMsgs]=useState([]);
   const [draft,setDraft]=useState("");
   const [guestName,setGuestName]=useState("");
   const [guestEmail,setGuestEmail]=useState("");
   const [sending,setSending]=useState(false);
-  const [started,setStarted]=useState(false);
+  const [started,setStarted]=useState(!!savedConvId);
   const scrollRef=useRef(null);
   const subRef=useRef(null);
+
+  // Resume existing conversation on open
+  useEffect(()=>{
+    if(open&&convId&&started){
+      // Load existing messages and start polling
+      const tok=AUTH_TOKEN||(localStorage.getItem("sb_access_token"))||SB_KEY;
+      (async()=>{
+        try{
+          const r=await fetch(`${SB_URL}/rest/v1/support_messages?conversation_id=eq.${convId}&order=created_at.asc`,{headers:{"apikey":SB_KEY,"Authorization":"Bearer "+tok}});
+          if(r.ok)setMsgs(await r.json());
+        }catch(e){}
+      })();
+      subscribeToMessages(convId);
+    }
+    return()=>{if(!open&&subRef.current)subRef.current.unsubscribe?.();};
+  },[open]);
 
   // Start or resume conversation
   const startChat=async()=>{
@@ -332,6 +351,7 @@ function SupportChat({user}){
       if(!convArr||!convArr[0]){alert("Chat error: no conversation created");return;}
       setConvId(convArr[0].id);
       setStarted(true);
+      try{localStorage.setItem("mdr_support_conv",convArr[0].id);}catch(e){}
       subscribeToMessages(convArr[0].id);
     }catch(e){alert("Chat error: "+e.message);}
   };
@@ -379,7 +399,10 @@ function SupportChat({user}){
       {/* Header */}
       <div style={{padding:"14px 16px",background:C.org,display:"flex",alignItems:"center",justifyContent:"space-between"}}>
         <div style={{color:"#fff",fontWeight:700,fontSize:15}}>Support Chat</div>
-        <button onClick={()=>setOpen(false)} style={{background:"none",border:"none",color:"#fff",fontSize:20,cursor:"pointer",lineHeight:1}}>×</button>
+        <div style={{display:"flex",alignItems:"center",gap:8}}>
+          {started&&<button onClick={()=>{setConvId(null);setMsgs([]);setStarted(false);if(subRef.current)subRef.current.unsubscribe?.();try{localStorage.removeItem("mdr_support_conv");}catch(e){}}} style={{background:"rgba(255,255,255,0.2)",border:"none",color:"#fff",fontSize:11,fontWeight:700,cursor:"pointer",padding:"4px 10px",borderRadius:6}}>New Chat</button>}
+          <button onClick={()=>setOpen(false)} style={{background:"none",border:"none",color:"#fff",fontSize:20,cursor:"pointer",lineHeight:1}}>×</button>
+        </div>
       </div>
 
       {!started?(
@@ -935,7 +958,7 @@ function AccountSettings({user, onBack, onLogout}){
   const ls={display:"block",color:C.lt,fontSize:13,fontWeight:600,marginBottom:6};
 
   return(
-    <div style={{minHeight:"100vh",background:C.bg,color:C.txt}}>
+    <div className="page-in" style={{minHeight:"100vh",background:C.bg,color:C.txt}}>
       {/* Header */}
       <div style={{display:"flex",alignItems:"center",gap:10,padding:"14px 16px",borderBottom:`1px solid ${C.brd}`,background:C.card}}>
         <button onClick={onBack} style={{background:"none",border:"none",color:C.mut,fontSize:24,cursor:"pointer",lineHeight:1,minWidth:44,minHeight:44,display:"flex",alignItems:"center",justifyContent:"center"}}>←</button>
@@ -2045,7 +2068,7 @@ function CreateJob({user, onBack, onCreated}){
   }
 
   return(
-    <div style={{minHeight:"100vh",background:C.bg,color:C.txt}}>
+    <div className="page-in" style={{minHeight:"100vh",background:C.bg,color:C.txt}}>
       <div style={{display:"flex",alignItems:"center",gap:10,padding:"14px 16px",borderBottom:`1px solid ${C.brd}`,background:C.card}}>
         <button onClick={onBack} style={{background:"none",border:"none",color:C.mut,fontSize:24,cursor:"pointer",lineHeight:1,minWidth:44,minHeight:44,display:"flex",alignItems:"center",justifyContent:"center"}}>←</button>
         <span style={{fontWeight:700,fontSize:17}}>New Job</span>
@@ -2344,7 +2367,7 @@ function CreateJob({user, onBack, onCreated}){
 /* ── Archived Jobs ── */
 function ArchivedJobs({jobs, onBack, onSelect}){
   return(
-    <div style={{minHeight:"100vh",background:C.bg,color:C.txt}}>
+    <div className="page-in" style={{minHeight:"100vh",background:C.bg,color:C.txt}}>
       <div style={{display:"flex",alignItems:"center",gap:10,padding:"14px 16px",borderBottom:`1px solid ${C.brd}`,background:C.card}}>
         <button onClick={onBack} style={{background:"none",border:"none",color:C.mut,fontSize:24,cursor:"pointer",lineHeight:1,minWidth:44,minHeight:44,display:"flex",alignItems:"center",justifyContent:"center"}}>←</button>
         <span style={{fontWeight:700,fontSize:17}}>Archived Jobs</span>
@@ -3389,7 +3412,7 @@ function WorkLogEditor({job, user, onBack, reportDate}){
   }
 
   return(
-    <div style={{minHeight:"100vh",background:C.bg,color:C.txt}}>
+    <div className="page-in" style={{minHeight:"100vh",background:C.bg,color:C.txt}}>
       {submitting&&(
         <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.85)",zIndex:300,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:16}}>
           <div style={{width:48,height:48,border:"3px solid "+C.brd,borderTopColor:C.org,borderRadius:"50%",animation:"spin 1s linear infinite"}}/>
@@ -5050,7 +5073,7 @@ function ReportEditor({job, user, onBack, reportDate}){
   }
 
   return(
-    <div style={{minHeight:"100vh",background:C.bg,color:C.txt}}>
+    <div className="page-in" style={{minHeight:"100vh",background:C.bg,color:C.txt}}>
       {/* Submitting overlay */}
       {submitting&&(
         <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.85)",zIndex:300,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:16}}>
@@ -5469,7 +5492,7 @@ function JobDetail({job, user, onBack, onDeleted}){
   if(loading)return(<div style={{minHeight:"100vh",background:C.bg,display:"flex",alignItems:"center",justifyContent:"center"}}><p style={{color:C.mut}}>Loading...</p></div>);
 
   return(
-    <div style={{minHeight:"100vh",background:C.bg,color:C.txt}}>
+    <div className="page-in" style={{minHeight:"100vh",background:C.bg,color:C.txt}}>
       {jdToast&&<div style={{position:"fixed",top:60,left:"50%",transform:"translateX(-50%)",background:C.card,border:`1px solid ${C.ok}`,borderRadius:10,padding:"10px 20px",fontSize:14,fontWeight:600,color:C.ok,zIndex:9999}}>{jdToast}</div>}
       {/* Header */}
       <div style={{display:"flex",alignItems:"center",gap:12,padding:"14px 16px",borderBottom:`1px solid ${C.brd}`,background:C.card}}>
@@ -5982,7 +6005,7 @@ function TrainingCenter({onBack}){
   }
 
   return(
-    <div style={{minHeight:"100vh",background:C.bg,color:C.txt}}>
+    <div className="page-in" style={{minHeight:"100vh",background:C.bg,color:C.txt}}>
       <div style={{display:"flex",alignItems:"center",gap:10,padding:"14px 16px",borderBottom:`1px solid ${C.brd}`,background:C.card}}>
         <button onClick={onBack} style={{background:"none",border:"none",color:C.mut,fontSize:24,cursor:"pointer",lineHeight:1,minWidth:44,minHeight:44,display:"flex",alignItems:"center",justifyContent:"center"}}>←</button>
         <span style={{fontWeight:700,fontSize:17}}>Training Center</span>
@@ -6086,7 +6109,7 @@ function Dashboard({user, onLogout}){
 
   const doShare=async()=>{const url=window.location.href;if(navigator.share){try{await navigator.share({title:"My Daily Reports",text:"Voice-to-PDF jobsite reports",url});}catch(e){}}else{try{await navigator.clipboard.writeText(url);alert("Link copied!");}catch(e){alert("Could not copy link.");}}};
 
-  if(showAcct)return<AccountSettings user={user} onBack={()=>setShowAcct(false)} onLogout={onLogout}/>;
+  if(showAcct)return<AccountSettings user={user} onBack={()=>{setShowAcct(false);/* refresh logo in case it changed */db.getProfile(user.id).then(p=>{if(p?.company_id){const l=db.getCompanyLogo(p.company_id);setDashLogoUrl(l||null);}}).catch(()=>{});}} onLogout={onLogout}/>;
   if(showNew)return<CreateJob user={user} onBack={()=>setShowNew(false)} onCreated={()=>{setShowNew(false);load();}}/>;
   if(showArch)return<ArchivedJobs jobs={arch} onBack={()=>setShowArch(false)} onSelect={(j)=>{selectJob(j);setShowArch(false);}}/>;
   if(showTrain)return<TrainingCenter onBack={()=>setShowTrain(false)}/>;
