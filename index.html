@@ -3026,19 +3026,26 @@ function WorkLogEditor({job, user, onBack, reportDate}){
       if(!text||!text.trim()){return;}
       // Split into lines, each non-empty line becomes a bullet
       const rawLines=text.split("\n").filter(l=>l.trim());
-      const bulletChar="•  ";
-      const bulletW=font.widthOfTextAtSize(bulletChar,10);
-      const contentW=CW-24-bulletW; // 12px left pad + bullet width + 12px right pad
-      // Build wrapped lines with bullet markers
-      const wrapLines=[]; // {text, isBulletStart}
-      rawLines.forEach(line=>{
+      const fontSize=11;
+      const lineHeight=16; // spacing within a wrapped bullet
+      const bulletGap=10; // extra space between separate bullets
+      const bulletChar="•";
+      const bulletIndent=24; // left indent for bullet character
+      const textIndent=36; // left indent for text (after bullet)
+      const bulletW=font.widthOfTextAtSize(bulletChar,fontSize);
+      const contentW=CW-textIndent-12; // text indent + right pad
+      // Build wrapped lines with bullet markers and gap markers
+      const wrapLines=[]; // {text, bullet:bool, gapBefore:bool}
+      rawLines.forEach((line,idx)=>{
         const clean=line.replace(/^[\-\•\*]\s*/,"").trim();
         if(!clean)return;
         const words=clean.split(" ");let wl="";let first=true;
-        words.forEach(w=>{const t=wl?wl+" "+w:w;if(font.widthOfTextAtSize(t,10)>contentW&&wl){wrapLines.push({text:wl,bullet:first});first=false;wl=w;}else wl=t;});
-        if(wl)wrapLines.push({text:wl,bullet:first});
+        words.forEach(w=>{const t=wl?wl+" "+w:w;if(font.widthOfTextAtSize(t,fontSize)>contentW&&wl){wrapLines.push({text:wl,bullet:first,gapBefore:first&&wrapLines.length>0});first=false;wl=w;}else wl=t;});
+        if(wl)wrapLines.push({text:wl,bullet:first,gapBefore:first&&wrapLines.length>0});
       });
-      const boxH=wrapLines.length*14+20;
+      // Calculate box height: each line + bullet gaps
+      let boxH=16; // top+bottom padding
+      wrapLines.forEach(ln=>{boxH+=lineHeight;if(ln.gapBefore)boxH+=bulletGap;});
       const totalNeeded=36+boxH+6;
       ensureSpace(Math.min(totalNeeded,H-M-30));
       page.drawRectangle({x:M,y:y-30,width:CW,height:30,color:rgb(.45,.45,.45)});
@@ -3048,9 +3055,10 @@ function WorkLogEditor({job, user, onBack, reportDate}){
       page.drawRectangle({x:M,y:y-boxH,width:CW,height:boxH,borderColor:rgb(.85,.85,.85),borderWidth:.5,color:rgb(1,1,1)});
       let ty=y-14;
       wrapLines.forEach(ln=>{
-        if(ln.bullet)page.drawText(bulletChar,{x:M+12,y:ty,size:10,font,color:rgb(.2,.2,.2)});
-        page.drawText(ln.text,{x:M+12+bulletW,y:ty,size:10,font,color:rgb(.2,.2,.2)});
-        ty-=14;
+        if(ln.gapBefore)ty-=bulletGap;
+        if(ln.bullet)page.drawText(bulletChar,{x:M+bulletIndent,y:ty,size:fontSize,font,color:rgb(.2,.2,.2)});
+        page.drawText(ln.text,{x:M+textIndent,y:ty,size:fontSize,font,color:rgb(.2,.2,.2)});
+        ty-=lineHeight;
       });
       y-=boxH+6;
     };
@@ -3737,6 +3745,7 @@ function WorkLogEditor({job, user, onBack, reportDate}){
               <button onClick={emailToTeam} disabled={emailing} style={{width:"100%",padding:"14px 0",background:C.org,border:"none",borderRadius:10,color:"#fff",fontSize:15,fontWeight:700,cursor:emailing?"default":"pointer",opacity:emailing?0.7:1}}>
                 {emailing?"Sending...":"Email to Project Team"}
               </button>
+              {emailing&&<div style={{fontSize:11,color:C.mut,textAlign:"center",marginTop:4}}>Emails may take up to 5 minutes to arrive. Do not resend.</div>}
               <button onClick={()=>{setSubmitSuccess(null);onBack();}} style={{width:"100%",padding:"12px 0",background:"transparent",border:`1px solid ${C.brd}`,borderRadius:10,color:C.mut,fontSize:14,fontWeight:600,cursor:"pointer"}}>
                 Done
               </button>
@@ -5130,7 +5139,8 @@ function ReportEditor({job, user, onBack, reportDate}){
               <div style={{textAlign:"left"}}>
                 <div>{emailing?"Sending...":"Email to Project Team"}</div>
                 <div style={{fontSize:11,fontWeight:400,opacity:0.8}}>
-                  {teamCount>0
+                  {emailing?"Emails may take up to 5 minutes to arrive. Do not resend."
+                    :teamCount>0
                     ?`Send to ${teamCount+1} recipient${teamCount+1>1?"s":""} (you + ${teamCount} team)`
                     :user.email?"Send to "+user.email:"No team emails configured"}
                 </div>
