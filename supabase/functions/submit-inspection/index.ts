@@ -119,15 +119,16 @@ serve(async (req) => {
       // For blocking specials: also check ALL projects
       const { data: existing } = await supabase
         .from("inspection_requests")
-        .select("id, inspection_time, duration, status, inspection_types, special_type, flexible_display")
+        .select("id, inspection_time, duration, status, inspection_types, flexible_display")
         .eq("inspection_date", inspectionDate)
-        .not("status", "in", '("cancelled","deleted")');
+        .neq("status", "cancelled")
+        .neq("status", "deleted");
 
       if (existing && existing.length > 0) {
         const conflict = existing.find((r: any) => {
           const rTypes = r.inspection_types || [];
           const rIsIOR = rTypes.includes("IOR");
-          const rIsBlockingSpecial = BLOCKING_SPECIAL_TYPES.some((t: string) => rTypes.includes(t) || r.special_type === t);
+          const rIsBlockingSpecial = BLOCKING_SPECIAL_TYPES.some((t: string) => rTypes.includes(t));
           // Only conflict against other blocking types
           if (!rIsIOR && !rIsBlockingSpecial) return false;
           // Flexible existing requests block all day
