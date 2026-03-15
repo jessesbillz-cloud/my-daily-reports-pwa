@@ -523,6 +523,35 @@ function CompaniesTab({hGet,h}){
             <button className="btn btn-danger btn-sm" onClick={()=>deleteTpl(t)}>Delete</button>
           </div>
         ))}
+        <div style={{borderTop:"1px solid #333",marginTop:12,paddingTop:12}}>
+          <h4 style={{fontSize:13,color:"#888",marginBottom:8}}>Upload Template</h4>
+          <input type="file" accept=".pdf,.docx" id="coTplFile" style={{marginBottom:8,fontSize:13}}/>
+          <div className="row" style={{gap:8}}>
+            <input className="inp" style={{flex:1,marginBottom:0}} id="coTplName" placeholder="Template name..."/>
+            <button className="btn btn-primary btn-sm" onClick={async()=>{
+              const fileInput=document.getElementById("coTplFile");
+              const nameInput=document.getElementById("coTplName");
+              const file=fileInput?.files?.[0];
+              const tplName=nameInput?.value?.trim();
+              if(!file){alert("Select a file first");return;}
+              if(!tplName){alert("Enter a template name");return;}
+              try{
+                const ext=file.name.split(".").pop().toLowerCase();
+                const u8=new Uint8Array(await file.arrayBuffer());
+                const storagePath=selCo.id+"/"+Date.now()+"_"+file.name;
+                const ct=ext==="pdf"?"application/pdf":"application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+                let upR=await fetch(SB_URL+"/storage/v1/object/company-templates/"+storagePath,{method:"POST",headers:{"apikey":SB_KEY,"Authorization":"Bearer "+session.access_token,"Content-Type":ct},body:new Blob([u8],{type:ct})});
+                if(!upR.ok)upR=await fetch(SB_URL+"/storage/v1/object/company-templates/"+storagePath,{method:"PUT",headers:{"apikey":SB_KEY,"Authorization":"Bearer "+session.access_token,"Content-Type":ct},body:new Blob([u8],{type:ct})});
+                if(!upR.ok)throw new Error("Upload failed: "+upR.status);
+                const saveR=await fetch(SB_URL+"/rest/v1/company_templates",{method:"POST",headers:{...h(),"Prefer":"return=representation"},body:JSON.stringify({company_id:selCo.id,template_name:tplName,file_name:file.name,file_type:ext,storage_path:"company-templates/"+storagePath,field_config:null,mode:"template"})});
+                if(!saveR.ok)throw new Error("Insert failed: "+await saveR.text());
+                alert("Template uploaded!");
+                fileInput.value="";nameInput.value="";
+                selectCo(selCo);
+              }catch(e){alert("Error: "+e.message);}
+            }}>Upload</button>
+          </div>
+        </div>
       </div>
     </div>
   );
