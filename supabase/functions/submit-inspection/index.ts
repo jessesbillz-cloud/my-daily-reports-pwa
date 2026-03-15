@@ -26,6 +26,10 @@ serve(async (req) => {
     const locationDetail = (formData.get("location_detail") as string) || "";
     const inspectionIdentifier = (formData.get("inspection_identifier") as string) || "";
     const emailRecipientsRaw = (formData.get("email_recipients") as string) || "[]";
+    const requesterEmail = (formData.get("requester_email") as string) || "";
+    const requesterName = (formData.get("requester_name") as string) || "";
+    const requesterCompany = (formData.get("requester_company") as string) || "";
+    const specialType = (formData.get("special_type") as string) || "";
 
     if (!project || !inspectionDate || !inspectionTime || !submittedBy) {
       return new Response(JSON.stringify({ success: false, error: "Missing required fields" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
@@ -99,6 +103,45 @@ serve(async (req) => {
       } catch (e) { console.error("Job address lookup:", e); }
     }
 
+    // Server-side conflict detection
+    // Rules: IOR blocks across ALL projects. Special only blocks if type is Concrete, Shotcrete, or Grout.
+    // Other special types (Soils, Material ID, Bolting, etc.) do NOT block.
+    const BLOCKING_SPECIAL_TYPES = ["Concrete", "Shotcrete", "Grout"];
+    const isIOR = inspectionTypes.includes("IOR");
+    const isBlockingSpecial = BLOCKING_SPECIAL_TYPES.some(t => inspectionTypes.includes(t) || specialType === t);
+    const incomingBlocks = isIOR || isBlockingSpecial;
+
+    if (incomingBlocks && flexibleDisplay !== "flexible") {
+      const reqStart = parseInt(actualTime.split(":")[0]) * 60 + parseInt(actualTime.split(":")[1]);
+      const reqEnd = reqStart + duration;
+
+      // For IOR: check ALL projects for IOR + blocking-special conflicts on this date
+      // For blocking specials: also check ALL projects
+      const { data: existing } = await supabase
+        .from("inspection_requests")
+        .select("id, inspection_time, duration, status, inspection_types, special_type, flexible_display")
+        .eq("inspection_date", inspectionDate)
+        .not("status", "in", '("cancelled","deleted")');
+
+      if (existing && existing.length > 0) {
+        const conflict = existing.find((r: any) => {
+          const rTypes = r.inspection_types || [];
+          const rIsIOR = rTypes.includes("IOR");
+          const rIsBlockingSpecial = BLOCKING_SPECIAL_TYPES.some((t: string) => rTypes.includes(t) || r.special_type === t);
+          // Only conflict against other blocking types
+          if (!rIsIOR && !rIsBlockingSpecial) return false;
+          // Flexible existing requests block all day
+          if (r.flexible_display === "flexible") return true;
+          const rStart = parseInt((r.inspection_time || "08:00").split(":")[0]) * 60 + parseInt((r.inspection_time || "08:00").split(":")[1]);
+          const rEnd = rStart + (parseInt(r.duration) || 60);
+          return reqStart < rEnd && reqEnd > rStart;
+        });
+        if (conflict) {
+          return new Response(JSON.stringify({ success: false, error: `Time conflict: an existing request already covers ${actualTime} on ${inspectionDate}` }), { status: 409, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+        }
+      }
+    }
+
     const insertData: Record<string, any> = {
       project, inspection_date: inspectionDate, inspection_time: actualTime,
       inspection_types: inspectionTypes, duration, submitted_by: submittedBy,
@@ -107,6 +150,10 @@ serve(async (req) => {
       flexible_display: flexibleDisplay, status: "pending", requested_date: inspectionDate,
     };
     if (ownerId) insertData.user_id = ownerId;
+    if (requesterEmail) insertData.requester_email = requesterEmail;
+    if (requesterName) insertData.requester_name = requesterName;
+    if (requesterCompany) insertData.requester_company = requesterCompany;
+    if (specialType) insertData.special_type = specialType;
 
     const { data: inserted, error: insertError } = await supabase.from("inspection_requests").insert(insertData).select().single();
     if (insertError) {

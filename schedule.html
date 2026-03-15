@@ -447,10 +447,11 @@ function loadMD(){
         fetch(base+'&inspection_types=cs.%7BRegular%7D',hdrs).then(function(r){return r.json();}),
         fetch(base+'&project=eq.'+encodeURIComponent(PROJ)+'&inspection_types=cs.%7BSpecial%7D',hdrs).then(function(r){return r.json();}),
         fetch(base+'&inspection_types=cs.%7BConcrete%7D',hdrs).then(function(r){return r.json();}),
-        fetch(base+'&inspection_types=cs.%7BGrout%7D',hdrs).then(function(r){return r.json();})
+        fetch(base+'&inspection_types=cs.%7BGrout%7D',hdrs).then(function(r){return r.json();}),
+        fetch(base+'&inspection_types=cs.%7BShotcrete%7D',hdrs).then(function(r){return r.json();})
     ]).then(function(res){
         mD={};var seen={};
-        res[0].concat(res[1]).concat(res[2]).concat(res[3]).forEach(function(v){
+        res[0].concat(res[1]).concat(res[2]).concat(res[3]).concat(res[4]).forEach(function(v){
             if(seen[v.id])return;seen[v.id]=true;
             if(!mD[v.inspection_date])mD[v.inspection_date]=[];
             mD[v.inspection_date].push(v);
@@ -656,10 +657,25 @@ function submitIR(){
     allFiles.forEach(function(file,index){fd.append('file_'+index,file);});
     fd.append('project',PROJ); fd.append('gc',cleanName);
     fd.append('inspection_date',d); fd.append('inspection_time',t);
-    fd.append('inspection_types',JSON.stringify([inspType])); fd.append('duration',inspDur);
+    var typesArr=[inspType];
+    var specialVal='';
+    if(inspType==='Special'){
+        specialVal=document.getElementById('specialType').value;
+        if(specialVal) typesArr.push(specialVal);
+    }
+    fd.append('inspection_types',JSON.stringify(typesArr)); fd.append('duration',inspDur);
+    if(specialVal) fd.append('special_type',specialVal);
     fd.append('submitted_by',nm); fd.append('notes',document.getElementById('iNotes').value);
     fd.append('subcontractor','');
     fd.append('location_detail','');
+    // Look up requester email from contacts
+    var matchedContact=savedContacts.find(function(c){return c.name===nm;});
+    if(matchedContact&&matchedContact.email){
+        fd.append('requester_email',matchedContact.email);
+        fd.append('requester_name',matchedContact.name);
+        if(matchedContact.company) fd.append('requester_company',matchedContact.company);
+        if(emails.indexOf(matchedContact.email)===-1) emails.push(matchedContact.email);
+    }
     if(emails.length>0) fd.append('email_recipients',JSON.stringify(emails));
     var idnt=document.getElementById('iIdentifier').value.trim();
     if(idnt) fd.append('inspection_identifier',idnt);

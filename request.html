@@ -445,11 +445,13 @@ function loadMD(){
         // Concrete inspections across ALL projects — these block
         fetch(base+'&inspection_types=cs.%7BConcrete%7D',hdrs).then(function(r){return r.json();}),
         // Grout inspections across ALL projects — these block
-        fetch(base+'&inspection_types=cs.%7BGrout%7D',hdrs).then(function(r){return r.json();})
+        fetch(base+'&inspection_types=cs.%7BGrout%7D',hdrs).then(function(r){return r.json();}),
+        // Shotcrete inspections across ALL projects — these block
+        fetch(base+'&inspection_types=cs.%7BShotcrete%7D',hdrs).then(function(r){return r.json();})
     ]).then(function(res){
         mD={};var seen={};
         bookedSlots={};
-        res[0].concat(res[1]).concat(res[2]).concat(res[3]).forEach(function(v){
+        res[0].concat(res[1]).concat(res[2]).concat(res[3]).concat(res[4]).forEach(function(v){
             if(seen[v.id])return;seen[v.id]=true;
             if(!mD[v.inspection_date])mD[v.inspection_date]=[];
             mD[v.inspection_date].push(v);
@@ -458,8 +460,9 @@ function loadMD(){
             var isIOR=types.indexOf('IOR')>=0;
             var isConcrete=types.indexOf('Concrete')>=0;
             var isGrout=types.indexOf('Grout')>=0;
-            // IOR always blocks its time slot. Special only blocks for Concrete or Grout.
-            if(isIOR||isConcrete||isGrout){
+            var isShotcrete=types.indexOf('Shotcrete')>=0;
+            // IOR always blocks. Special only blocks for Concrete, Grout, or Shotcrete.
+            if(isIOR||isConcrete||isGrout||isShotcrete){
                 var startMin=timeToMin(v.inspection_time||'');
                 var durMin=parseInt(v.duration)||60;
                 // Flexible time or missing time: treat as all-day block
@@ -537,10 +540,35 @@ function submitIR(){
     allFiles.forEach(function(file,index){fd.append('file_'+index,file);});
     fd.append('project',PROJ); fd.append('gc',cleanName);
     fd.append('inspection_date',d); fd.append('inspection_time',t);
-    fd.append('inspection_types',JSON.stringify([inspType])); fd.append('duration',inspDur);
+    var typesArr=[inspType];
+    var specialVal='';
+    if(inspType==='Special'){
+        specialVal=document.getElementById('specialType').value;
+        if(specialVal) typesArr.push(specialVal);
+    }
+    fd.append('inspection_types',JSON.stringify(typesArr)); fd.append('duration',inspDur);
+    if(specialVal) fd.append('special_type',specialVal);
     fd.append('submitted_by',nm); fd.append('notes',document.getElementById('iNotes').value);
     fd.append('subcontractor','');
     fd.append('location_detail','');
+    // Look up requester email from contacts
+    var matchedContact=savedContacts.find(function(c){return c.name===nm;});
+    if(matchedContact&&matchedContact.email){
+        fd.append('requester_email',matchedContact.email);
+        fd.append('requester_name',matchedContact.name);
+        if(matchedContact.company) fd.append('requester_company',matchedContact.company);
+        // Also add requester to email recipients so they get the notification
+        if(emails.indexOf(matchedContact.email)===-1) emails.push(matchedContact.email);
+    } else if(newName){
+        var newEmail=document.getElementById('iNewEmail').value.trim();
+        if(newEmail){
+            fd.append('requester_email',newEmail);
+            fd.append('requester_name',newName);
+            var newCompany=document.getElementById('iNewCompany').value.trim();
+            if(newCompany) fd.append('requester_company',newCompany);
+            if(emails.indexOf(newEmail)===-1) emails.push(newEmail);
+        }
+    }
     if(emails.length>0) fd.append('email_recipients',JSON.stringify(emails));
     var idnt=document.getElementById('iIdentifier').value.trim();
     if(idnt) fd.append('inspection_identifier',idnt);
