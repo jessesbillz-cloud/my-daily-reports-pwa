@@ -663,8 +663,33 @@ const db = {
     if(!r.ok){const e=await r.json().catch(()=>({}));throw new Error(e.message||"Company creation failed");}
     const txt=await r.text();try{return JSON.parse(txt)[0];}catch(_){return null;}
   },
+  // Upload a company template — uploads PDF to company-templates bucket + creates record
+  async uploadCompanyTemplate(companyId,file){
+    const slug=companyId.substring(0,8);
+    const safeName=file.name.replace(/[^a-zA-Z0-9._-]/g,"_");
+    const storagePath=`${slug}/${Date.now()}_${safeName}`;
+    // Upload to company-templates bucket
+    let upR=await fetch(`${SB_URL}/storage/v1/object/company-templates/${storagePath}`,{
+      method:"POST",headers:{apikey:SB_KEY,Authorization:`Bearer ${AUTH_TOKEN||SB_KEY}`,"Content-Type":file.type||"application/pdf"},body:file
+    });
+    if(!upR.ok){upR=await fetch(`${SB_URL}/storage/v1/object/company-templates/${storagePath}`,{
+      method:"PUT",headers:{apikey:SB_KEY,Authorization:`Bearer ${AUTH_TOKEN||SB_KEY}`,"Content-Type":file.type||"application/pdf"},body:file
+    });}
+    if(!upR.ok){const e=await upR.text();throw new Error("Storage upload failed: "+e);}
+    // Create company_templates record
+    const tplName=file.name.replace(/\.[^.]+$/,"").replace(/_/g," ");
+    const r=await fetch(`${SB_URL}/rest/v1/company_templates`,{method:"POST",headers:{...this._h(),"Prefer":"return=representation"},body:JSON.stringify({
+      company_id:companyId,template_name:tplName,file_name:file.name,file_type:file.name.split(".").pop()||"pdf",storage_path:`company-templates/${storagePath}`,mode:"template"
+    })});
+    if(!r.ok){const e=await r.json().catch(()=>({}));throw new Error(e.message||"Failed to save template record");}
+    return(await r.json())[0];
+  },
+  // Delete a company template — remove record (storage file stays for safety)
+  async deleteCompanyTemplate(templateId){
+    const r=await fetch(`${SB_URL}/rest/v1/company_templates?id=eq.${templateId}`,{method:"DELETE",headers:this._h()});
+    if(!r.ok){const e=await r.json().catch(()=>({}));throw new Error(e.message||"Delete failed");}
+  },
   // Get company templates
-  async getCompanyTemplates(companyId){
     const r=await fetch(`${SB_URL}/rest/v1/company_templates?company_id=eq.${companyId}&select=*&order=created_at.desc`,{headers:this._h()});
     if(!r.ok)return[];
     const all=await r.json();
@@ -738,6 +763,9 @@ function AccountSettings({user, onBack, onLogout}){
   const [uploadingLogo,setUploadingLogo]=useState(false);
   const logoInputRef=useRef(null);
   const [companyRole,setCompanyRole]=useState("member");
+  const [companyTemplates,setCompanyTemplates]=useState([]);
+  const [uploadingTpl,setUploadingTpl]=useState(false);
+  const tplInputRef=useRef(null);
   const [ntfyTopic,setNtfyTopic]=useState("");
   const [emailCount,setEmailCount]=useState(null); // {month, count, alert_sent}
 
@@ -765,6 +793,7 @@ function AccountSettings({user, onBack, onLogout}){
             // Load logo from localStorage
             const savedLogo=db.getCompanyLogo(p.company_id);
             if(savedLogo)setCompanyLogoUrl(savedLogo);
+            try{const tpls=await db.getCompanyTemplates(p.company_id);setCompanyTemplates(tpls);}catch(e){}
           }
           if(p.timezone)setTimezone(p.timezone);
           if(p.slug)setSlug(p.slug);
@@ -795,6 +824,9 @@ function AccountSettings({user, onBack, onLogout}){
       try{const matches=await db.searchCompanies(val.trim());setCompanyMatches(matches);}catch(e){setCompanyMatches([]);}
     },400);
   };
+  const loadCompanyTemplates=async(companyId)=>{
+    try{const tpls=await db.getCompanyTemplates(companyId);setCompanyTemplates(tpls);}catch(e){setCompanyTemplates([]);}
+  };
   const selectCompany=(company)=>{
     setSelectedCompany(company);
     setCompanyName(company.name);
@@ -802,12 +834,14 @@ function AccountSettings({user, onBack, onLogout}){
     // Load logo from localStorage for this company
     const savedLogo=db.getCompanyLogo(company.id);
     setCompanyLogoUrl(savedLogo);
+    loadCompanyTemplates(company.id);
   };
   const clearCompany=()=>{
     setSelectedCompany(null);
     setCompanyName("");
     setCompanyMatches([]);
     setCompanyLogoUrl(null);
+    setCompanyTemplates([]);
   };
   const handleLogoUpload=async(e)=>{
     const file=e.target.files?.[0];
@@ -824,6 +858,28 @@ function AccountSettings({user, onBack, onLogout}){
       flash("Company logo saved");
     }catch(err){flash("Logo save failed: "+err.message,"err");}
     finally{setUploadingLogo(false);if(logoInputRef.current)logoInputRef.current.value="";}
+  };
+  const handleTplUpload=async(e)=>{
+    const file=e.target.files?.[0];
+    if(!file)return;
+    if(!selectedCompany){flash("Select a company first","err");if(tplInputRef.current)tplInputRef.current.value="";return;}
+    if(!file.name.toLowerCase().endsWith(".pdf")){flash("Only PDF templates supported","err");if(tplInputRef.current)tplInputRef.current.value="";return;}
+    if(file.size>20*1024*1024){flash("File must be under 20MB","err");if(tplInputRef.current)tplInputRef.current.value="";return;}
+    setUploadingTpl(true);
+    try{
+      const saved=await db.uploadCompanyTemplate(selectedCompany.id,file);
+      flash("Template uploaded — employees will see it when creating jobs");
+      loadCompanyTemplates(selectedCompany.id);
+    }catch(err){flash("Upload failed: "+err.message,"err");}
+    finally{setUploadingTpl(false);if(tplInputRef.current)tplInputRef.current.value="";}
+  };
+  const handleDeleteTpl=async(tpl)=>{
+    if(!confirm(`Remove "${tpl.template_name}" from company templates?`))return;
+    try{
+      await db.deleteCompanyTemplate(tpl.id);
+      flash("Template removed");
+      loadCompanyTemplates(selectedCompany.id);
+    }catch(err){flash("Delete failed: "+err.message,"err");}
   };
 
   const saveProfile=async()=>{
@@ -951,7 +1007,6 @@ function AccountSettings({user, onBack, onLogout}){
                   {selectedCompany&&(
                     <div style={{fontSize:11,color:companyRole==="admin"?C.org:C.mut,marginTop:4}}>
                       Role: <strong>{companyRole==="admin"?"Admin":"Member"}</strong>
-                      {companyRole==="member"&&" — Templates are managed by your company admin"}
                     </div>
                   )}
                   <div style={{fontSize:11,color:C.mut,marginTop:2}}>Emails appear as: <strong style={{color:C.txt}}>{companyName||selectedCompany?.name||"Your Company"} &lt;reports@mydailyreports.org&gt;</strong></div>
@@ -974,6 +1029,32 @@ function AccountSettings({user, onBack, onLogout}){
                         <div style={{fontSize:11,color:C.mut,marginTop:4}}>Appears on work log report headers</div>
                       </div>
                     </div>
+                  </div>
+                )}
+
+                {selectedCompany&&(
+                  <div style={{marginBottom:16}}>
+                    <label style={ls}>Company Templates</label>
+                    <div style={{fontSize:11,color:C.mut,marginBottom:8}}>Upload PDF templates for all {selectedCompany.name} employees</div>
+                    {companyTemplates.length>0&&(
+                      <div style={{marginBottom:8}}>
+                        {companyTemplates.map(t=>(
+                          <div key={t.id} style={{display:"flex",alignItems:"center",gap:8,padding:"8px 10px",background:C.inp,border:`1px solid ${C.brd}`,borderRadius:8,marginBottom:4}}>
+                            <span style={{fontSize:18}}>📄</span>
+                            <div style={{flex:1,minWidth:0}}>
+                              <div style={{fontSize:13,fontWeight:600,color:C.txt,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{t.template_name}</div>
+                              <div style={{fontSize:11,color:C.mut}}>{t.file_name}</div>
+                            </div>
+                            <button onClick={()=>handleDeleteTpl(t)} style={{background:"none",border:"none",color:C.mut,cursor:"pointer",fontSize:14,padding:"2px 6px"}}>✕</button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    <input ref={tplInputRef} type="file" accept=".pdf" onChange={handleTplUpload} style={{display:"none"}}/>
+                    <button onClick={()=>tplInputRef.current?.click()} disabled={uploadingTpl} style={{padding:"8px 16px",background:C.inp,border:`1px solid ${C.brd}`,borderRadius:8,color:C.txt,fontSize:13,fontWeight:600,cursor:"pointer"}}>
+                      {uploadingTpl?"Uploading...":"Upload Template PDF"}
+                    </button>
+                    <div style={{fontSize:11,color:C.mut,marginTop:4}}>Employees see these when they select {selectedCompany.name} on Create Job</div>
                   </div>
                 )}
 
