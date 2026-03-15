@@ -5866,7 +5866,20 @@ const GUIDES=[
   {icon:"—",color:C.ok,title:"Template Reports",sub:"Fill in a PDF template with daily entries",steps:[
     {icon:"▶",title:"Start a Report",body:"From the job dashboard, tap \"Start Today's Report\". Locked fields are pre-filled. Auto-date shows today. Auto-# increments from your last report.",tip:"One report per day per job. Working copies can be edited anytime."},
     {icon:"✏",title:"Fill In Fields",body:"Editable fields are ready for your daily entries — notes, weather, hours, observations. Locked fields (project name, contractor, etc.) are already filled in.",tip:null},
-    {icon:"🎤",title:"Voice Dictation",body:"Tap any text field, then tap the mic on your keyboard. Speak naturally — your phone's built-in dictation does the rest. No extra setup needed.",tip:"Take notes throughout the day as things happen. Come back later and everything's saved."},
+    {icon:"🎤",title:"Voice Dictation",body:"Tap any text field, then tap the mic on your keyboard. Speak naturally — your phone's built-in dictation does the rest. No extra setup needed.",tip:"Take notes throughout the day as things happen. Come back later and everything's saved.",
+      illustration:{type:"form",rows:[
+        {label:'Say "period"',value:".",good:true,note:"Inserts a period at the end of your sentence"},
+        {label:'Say "comma"',value:",",good:true,note:"Inserts a comma"},
+        {label:'Say "new line"',value:"↵",good:true,note:"Starts a new line — each line becomes a bullet point in your report"},
+        {label:'Say "new paragraph"',value:"↵↵",good:true,note:"Adds a blank line between sections"},
+      ]}},
+    {icon:"💡",title:"Voice Dictation Tips",body:"Your phone's dictation understands punctuation commands. Say them naturally as you talk and they'll appear as punctuation, not words. Each new line in Notes becomes a bullet point on the PDF.",tip:"Say \"new line\" between items to get clean bullet points. Example: \"Poured footings for grid A new line Set rebar for grid B new line Backfill east side complete\"",
+      illustration:{type:"form",rows:[
+        {label:'Say "question mark"',value:"?",good:true,note:"Inserts a question mark"},
+        {label:'Say "exclamation point"',value:"!",good:true,note:"Inserts an exclamation point"},
+        {label:'Say "colon"',value:":",good:true,note:"Inserts a colon"},
+        {label:'Say "dash"',value:"—",good:true,note:"Inserts a dash"},
+      ]}},
     {icon:"📷",title:"Photos & AI",body:"Add photos to your report with the Photo or Library buttons. If AI Descriptions is enabled in Job Settings, tap the orange AI button on any photo to auto-generate a description that goes straight into your notes field.",tip:"AI descriptions are limited to 25 per job per day. Great for quick documentation of site conditions."},
     {icon:"—",title:"Save & Submit",body:"Tap \"Save Working Copy\" to save progress. Tap \"Submit\" when done — the app generates a PDF using your template with your entries overlaid and emails it to your team. Need a fresh start? Delete the working copy from the submit screen.",tip:null},
     {icon:"🖥",title:"Desktop Editing",body:"On a desktop or laptop, tap \"View Report\" to see your PDF with editable fields overlaid directly on the template. Click any field to type right on the document — what you see is what gets submitted. Changes sync back to the form automatically.",tip:"Great for office users who prefer editing on a full-size screen. Fields are highlighted with orange borders so you can see exactly where your entries go."},
