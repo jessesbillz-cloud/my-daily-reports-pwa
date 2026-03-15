@@ -797,7 +797,7 @@ function AccountSettings({user, onBack, onLogout}){
   const [companyTemplates,setCompanyTemplates]=useState([]);
   const [uploadingTpl,setUploadingTpl]=useState(false);
   const tplInputRef=useRef(null);
-  const [ntfyTopic,setNtfyTopic]=useState(""); const [pushEnabled,setPushEnabled]=useState(false); const [pushLoading,setPushLoading]=useState(false);
+  const [ntfyTopic,setNtfyTopic]=useState("");
   const [emailCount,setEmailCount]=useState(null); // {month, count, alert_sent}
 
   const TZ_OPTIONS = [
@@ -829,7 +829,7 @@ function AccountSettings({user, onBack, onLogout}){
           if(p.timezone)setTimezone(p.timezone);
           if(p.slug)setSlug(p.slug);
           if(p.company_role)setCompanyRole(p.company_role);
-          if(p.ntfy_topic)setNtfyTopic(p.ntfy_topic); if(p.push_subscription)setPushEnabled(true);
+          if(p.ntfy_topic)setNtfyTopic(p.ntfy_topic);
         }
         // Load email send counter for current month
         try{
@@ -1131,7 +1131,7 @@ function AccountSettings({user, onBack, onLogout}){
                   Notifications
                 </div>
                 <div style={{fontSize:13,color:C.mut,lineHeight:1.6,marginBottom:14}}>
-                  Email reminders are sent based on your per-job reminder settings. Push notifications deliver real-time scheduling alerts directly to your device.
+                  Email reminders are sent based on your per-job reminder settings. Push notifications use ntfy for real-time scheduling alerts.
                 </div>
                 <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"12px 0",borderTop:`1px solid ${C.brd}`}}>
                   <div><div style={{fontSize:14,fontWeight:600,color:C.lt}}>Email Reminders</div><div style={{fontSize:11,color:C.mut}}>Configured per-job in job settings</div></div>
@@ -1159,14 +1159,15 @@ function AccountSettings({user, onBack, onLogout}){
                   </div>
                 )}
                 <div style={{padding:"14px 0 0",borderTop:`1px solid ${C.brd}`,marginTop:12}}>
-                  <div style={{fontSize:14,fontWeight:600,color:C.lt,marginBottom:8}}>Push Notifications</div>
+                  <div style={{fontSize:14,fontWeight:600,color:C.lt,marginBottom:8}}>Push Notifications (ntfy)</div>
                   <div style={{fontSize:12,color:C.mut,lineHeight:1.6,marginBottom:10}}>
-                    Get instant push notifications on your phone when scheduling requests come in. No extra apps needed.
+                    Get instant push notifications on your phone when scheduling requests come in. Install the free <a href="https://ntfy.sh" target="_blank" rel="noopener" style={{color:C.org}}>ntfy app</a> on your phone, then subscribe to your topic below.
                   </div>
-                  <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
-                    <div><div style={{fontSize:13,fontWeight:600,color:pushEnabled?C.ok:C.lt}}>{pushEnabled?"Notifications Enabled":"Notifications Off"}</div><div style={{fontSize:11,color:C.mut}}>{pushEnabled?"You will receive alerts for new requests":"Tap to enable push alerts"}</div></div>
-                    <button onClick={async()=>{if(pushEnabled){setPushEnabled(false);try{const reg=await navigator.serviceWorker.ready;const sub=await reg.pushManager.getSubscription();if(sub)await sub.unsubscribe();await fetch(SB_URL+"/rest/v1/profiles?id=eq."+user.id,{method:"PATCH",headers:{"Content-Type":"application/json",apikey:SB_KEY,Authorization:"Bearer "+(AUTH_TOKEN||SB_KEY)},body:JSON.stringify({push_subscription:null})});flash("Push notifications disabled");}catch(e){flash("Error: "+e.message,"err");}return;}setPushLoading(true);try{const perm=await Notification.requestPermission();if(perm!=="granted"){flash("Permission denied — check browser settings","err");setPushLoading(false);return;}const reg=await navigator.serviceWorker.ready;const sub=await reg.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:"BGrSijJatannNokQU0QyNpxDi47RhIFVkbj1DYhFGwRaFU3OwbzVjzxn1DUCFtGZO9Uj8caxFzBiQ8N7KNh-SOA"});const subJson=sub.toJSON();await fetch(SB_URL+"/rest/v1/profiles?id=eq."+user.id,{method:"PATCH",headers:{"Content-Type":"application/json",apikey:SB_KEY,Authorization:"Bearer "+(AUTH_TOKEN||SB_KEY)},body:JSON.stringify({push_subscription:subJson})});setPushEnabled(true);flash("Push notifications enabled!");}catch(e){flash("Error: "+e.message,"err");}finally{setPushLoading(false);}}} disabled={pushLoading} style={{padding:"10px 20px",borderRadius:8,border:"none",fontWeight:700,fontSize:13,cursor:pushLoading?"wait":"pointer",background:pushEnabled?C.err:C.ok,color:"#fff",opacity:pushLoading?0.6:1}}>{pushLoading?"...":(pushEnabled?"Disable":"Enable")}</button>
+                  <div style={{display:"flex",gap:8,alignItems:"center"}}>
+                    <input type="text" value={ntfyTopic} onChange={e=>setNtfyTopic(e.target.value.replace(/[^a-zA-Z0-9_-]/g,""))} placeholder={"mdr-"+(slug||"your-slug")} style={{flex:1,padding:"10px 12px",background:C.inp,border:`1px solid ${C.brd}`,borderRadius:8,color:C.txt,fontSize:13}}/>
+                    {ntfyTopic&&<button onClick={()=>{navigator.clipboard?.writeText("https://ntfy.sh/"+ntfyTopic);flash("Copied subscribe link");}} style={{padding:"10px 14px",background:C.inp,border:`1px solid ${C.brd}`,borderRadius:8,color:C.lt,fontSize:12,fontWeight:600,cursor:"pointer",whiteSpace:"nowrap"}}>Copy Link</button>}
                   </div>
+                  {ntfyTopic&&<div style={{fontSize:11,color:C.mut,marginTop:6}}>Subscribe URL: <span style={{color:C.lt}}>ntfy.sh/{ntfyTopic}</span></div>}
                 </div>
               </div>
             </div>
@@ -1222,7 +1223,7 @@ function AccountSettings({user, onBack, onLogout}){
                           </button>
                         </div>
                         <div style={{fontSize:11,color:C.mut,marginTop:8,lineHeight:1.5}}>
-                          PayPal and Venmo available at checkout. For Zelle or crypto, email support@mydailyreports.org
+                          PayPal and Venmo available at checkout. For Zelle or crypto, email jessesbillz@gmail.com
                         </div>
                       </div>
                     )}
@@ -6484,7 +6485,7 @@ function Dashboard({user, onLogout}){
               <strong style={{color:C.lt}}>PayPal / Venmo:</strong> Available at checkout (select PayPal as payment method)
             </div>
             <div style={{fontSize:12,color:C.mut,lineHeight:1.6,marginTop:6}}>
-              <strong style={{color:C.lt}}>Zelle:</strong> Send $19.99/mo or $199/yr to <span style={{color:C.org}}>support@mydailyreports.org</span> — we'll activate your account within 24 hours
+              <strong style={{color:C.lt}}>Zelle:</strong> Send $19.99/mo or $199/yr to <span style={{color:C.org}}>jessesbillz@gmail.com</span> — we'll activate your account within 24 hours
             </div>
             <div style={{fontSize:12,color:C.mut,lineHeight:1.6,marginTop:6}}>
               <strong style={{color:C.lt}}>Crypto:</strong> <a href="mailto:support@mydailyreports.org?subject=Crypto%20Payment%20Inquiry" style={{color:C.org}}>Contact us</a> for cryptocurrency payment options

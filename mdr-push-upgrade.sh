@@ -1,3 +1,135 @@
+#!/bin/bash
+set -e
+cd ~/Documents/my-daily-reports-pwa
+
+# ── Backups ──
+cp index.html index.html.bak
+cp sw.js sw.js.bak
+cp supabase/functions/submit-inspection/index.ts supabase/functions/submit-inspection/index.ts.bak
+echo "✅ Backups created"
+
+# ── 1. Write new sw.js ──
+cat > sw.js << 'SWEOF'
+const CACHE_NAME = 'mdr-v135';
+const CACHE_URLS = [
+  '/icon-192.png',
+  '/icon-512.png',
+  'https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js',
+  'https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js',
+  'https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.9/babel.min.js',
+  'https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js',
+  'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js',
+  'https://cdn.jsdelivr.net/npm/mammoth@1.6.0/mammoth.browser.min.js'
+];
+self.addEventListener('install', e => {
+  e.waitUntil(caches.open(CACHE_NAME).then(cache => cache.addAll(CACHE_URLS)).then(() => self.skipWaiting()));
+});
+self.addEventListener('activate', e => {
+  e.waitUntil(caches.keys().then(keys => Promise.all(keys.filter(k => k !== CACHE_NAME).map(k => caches.delete(k)))).then(() => self.clients.claim()));
+});
+self.addEventListener('push', e => {
+  let data = { title: 'My Daily Reports', body: 'New notification' };
+  try { if (e.data) data = e.data.json(); } catch (err) { if (e.data) data.body = e.data.text(); }
+  e.waitUntil(self.registration.showNotification(data.title || 'My Daily Reports', {
+    body: data.body || '', icon: '/icon-192.png', badge: '/icon-192.png',
+    tag: data.tag || 'mdr-notification', data: data.url || '/', vibrate: [200, 100, 200],
+  }));
+});
+self.addEventListener('notificationclick', e => {
+  e.notification.close();
+  const url = e.notification.data || '/';
+  e.waitUntil(clients.matchAll({ type: 'window', includeUncontrolled: true }).then(wins => {
+    for (const w of wins) { if (w.url.includes('mydailyreports') && 'focus' in w) return w.focus(); }
+    return clients.openWindow(url);
+  }));
+});
+self.addEventListener('fetch', e => {
+  const url = new URL(e.request.url);
+  if (e.request.mode === 'navigate' || url.pathname.endsWith('.html') || url.pathname === '/') {
+    e.respondWith(fetch(e.request).then(resp => { const clone = resp.clone(); caches.open(CACHE_NAME).then(cache => cache.put(e.request, clone)); return resp; }).catch(() => caches.match(e.request)));
+    return;
+  }
+  if (url.hostname.includes('supabase') || url.pathname.startsWith('/functions/')) { e.respondWith(fetch(e.request)); return; }
+  e.respondWith(caches.match(e.request).then(cached => {
+    if (cached) return cached;
+    return fetch(e.request).then(resp => { if (resp.ok) { const clone = resp.clone(); caches.open(CACHE_NAME).then(cache => cache.put(e.request, clone)); } return resp; });
+  }));
+});
+SWEOF
+echo "✅ sw.js written"
+
+# ── 2. Fix emails in index.html ──
+sed -i '' 's/jessesbillz@gmail.com/support@mydailyreports.org/g' index.html
+echo "✅ Email references fixed"
+
+# ── 3. Patch index.html with python (all push notification changes) ──
+python3 << 'PYEOF'
+with open("index.html", "r") as f:
+    c = f.read()
+
+changes = 0
+
+# A. Add push state vars
+old = 'const [ntfyTopic,setNtfyTopic]=useState("");'
+new = 'const [ntfyTopic,setNtfyTopic]=useState(""); const [pushEnabled,setPushEnabled]=useState(false); const [pushLoading,setPushLoading]=useState(false);'
+if old in c:
+    c = c.replace(old, new)
+    changes += 1
+
+# B. Add push check on profile load
+old = 'if(p.ntfy_topic)setNtfyTopic(p.ntfy_topic);'
+new = 'if(p.ntfy_topic)setNtfyTopic(p.ntfy_topic); if(p.push_subscription)setPushEnabled(true);'
+if old in c:
+    c = c.replace(old, new)
+    changes += 1
+
+# C. Update notification description
+old = 'Email reminders are sent based on your per-job reminder settings. Push notifications use ntfy for real-time scheduling alerts.'
+new = 'Email reminders are sent based on your per-job reminder settings. Push notifications deliver real-time scheduling alerts directly to your device.'
+if old in c:
+    c = c.replace(old, new)
+    changes += 1
+
+# D. Replace ntfy header
+old = 'Push Notifications (ntfy)'
+new = 'Push Notifications'
+if old in c:
+    c = c.replace(old, new)
+    changes += 1
+
+# E. Replace ntfy description
+old = 'Get instant push notifications on your phone when scheduling requests come in. Install the free <a href="https://ntfy.sh" target="_blank" rel="noopener" style={{color:C.org}}>ntfy app</a> on your phone, then subscribe to your topic below.'
+new = 'Get instant push notifications on your phone when scheduling requests come in. No extra apps needed.'
+if old in c:
+    c = c.replace(old, new)
+    changes += 1
+
+# F. Replace the ntfy input/button/url with push toggle
+old_ui = '''<div style={{display:"flex",gap:8,alignItems:"center"}}>
+                    <input type="text" value={ntfyTopic} onChange={e=>setNtfyTopic(e.target.value.replace(/[^a-zA-Z0-9_-]/g,""))} placeholder={"mdr-"+(slug||"your-slug")} style={{flex:1,padding:"10px 12px",background:C.inp,border:`1px solid ${C.brd}`,borderRadius:8,color:C.txt,fontSize:13}}/>
+                    {ntfyTopic&&<button onClick={()=>{navigator.clipboard?.writeText("https://ntfy.sh/"+ntfyTopic);flash("Copied subscribe link");}} style={{padding:"10px 14px",background:C.inp,border:`1px solid ${C.brd}`,borderRadius:8,color:C.lt,fontSize:12,fontWeight:600,cursor:"pointer",whiteSpace:"nowrap"}}>Copy Link</button>}
+                  </div>
+                  {ntfyTopic&&<div style={{fontSize:11,color:C.mut,marginTop:6}}>Subscribe URL: <span style={{color:C.lt}}>ntfy.sh/{ntfyTopic}</span></div>}'''
+
+new_ui = '''<div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+                    <div><div style={{fontSize:13,fontWeight:600,color:pushEnabled?C.ok:C.lt}}>{pushEnabled?"Notifications Enabled":"Notifications Off"}</div><div style={{fontSize:11,color:C.mut}}>{pushEnabled?"You will receive alerts for new requests":"Tap to enable push alerts"}</div></div>
+                    <button onClick={async()=>{if(pushEnabled){setPushEnabled(false);try{const reg=await navigator.serviceWorker.ready;const sub=await reg.pushManager.getSubscription();if(sub)await sub.unsubscribe();await fetch(SB_URL+"/rest/v1/profiles?id=eq."+user.id,{method:"PATCH",headers:{"Content-Type":"application/json",apikey:SB_KEY,Authorization:"Bearer "+(AUTH_TOKEN||SB_KEY)},body:JSON.stringify({push_subscription:null})});flash("Push notifications disabled");}catch(e){flash("Error: "+e.message,"err");}return;}setPushLoading(true);try{const perm=await Notification.requestPermission();if(perm!=="granted"){flash("Permission denied — check browser settings","err");setPushLoading(false);return;}const reg=await navigator.serviceWorker.ready;const sub=await reg.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:"BGrSijJatannNokQU0QyNpxDi47RhIFVkbj1DYhFGwRaFU3OwbzVjzxn1DUCFtGZO9Uj8caxFzBiQ8N7KNh-SOA"});const subJson=sub.toJSON();await fetch(SB_URL+"/rest/v1/profiles?id=eq."+user.id,{method:"PATCH",headers:{"Content-Type":"application/json",apikey:SB_KEY,Authorization:"Bearer "+(AUTH_TOKEN||SB_KEY)},body:JSON.stringify({push_subscription:subJson})});setPushEnabled(true);flash("Push notifications enabled!");}catch(e){flash("Error: "+e.message,"err");}finally{setPushLoading(false);}}} disabled={pushLoading} style={{padding:"10px 20px",borderRadius:8,border:"none",fontWeight:700,fontSize:13,cursor:pushLoading?"wait":"pointer",background:pushEnabled?C.err:C.ok,color:"#fff",opacity:pushLoading?0.6:1}}>{pushLoading?"...":(pushEnabled?"Disable":"Enable")}</button>
+                  </div>'''
+
+if old_ui in c:
+    c = c.replace(old_ui, new_ui)
+    changes += 1
+else:
+    print("⚠️  Could not find ntfy input UI block — may need manual check")
+
+with open("index.html", "w") as f:
+    f.write(c)
+
+print(f"✅ index.html patched ({changes} changes applied)")
+PYEOF
+
+# ── 4. Write updated submit-inspection Edge Function ──
+cat > supabase/functions/submit-inspection/index.ts << 'EFEOF'
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
@@ -161,3 +293,19 @@ serve(async (req) => {
     return new Response(JSON.stringify({ success: false, error: error.message }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
   }
 });
+EFEOF
+echo "✅ submit-inspection Edge Function written"
+
+echo ""
+echo "═══════════════════════════════════════"
+echo "ALL DONE. Now run these 3 commands:"
+echo ""
+echo "1. Add the database column (paste in Supabase SQL Editor):"
+echo "   ALTER TABLE profiles ADD COLUMN IF NOT EXISTS push_subscription jsonb DEFAULT NULL;"
+echo ""
+echo "2. Deploy the app:"
+echo "   git add -A && git commit -m 'Web push + email fix' && git push --force"
+echo ""
+echo "3. Deploy the Edge Function:"
+echo "   supabase functions deploy submit-inspection --project-ref wluvkmpncafugdbunlkw"
+echo "═══════════════════════════════════════"

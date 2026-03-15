@@ -1,4 +1,4 @@
-const CACHE_NAME = 'mdr-v134';
+const CACHE_NAME = 'mdr-v135';
 const CACHE_URLS = [
   '/icon-192.png',
   '/icon-512.png',
@@ -9,60 +9,37 @@ const CACHE_URLS = [
   'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js',
   'https://cdn.jsdelivr.net/npm/mammoth@1.6.0/mammoth.browser.min.js'
 ];
-
-// Install — pre-cache CDN libraries (they never change)
 self.addEventListener('install', e => {
-  e.waitUntil(
-    caches.open(CACHE_NAME)
-      .then(cache => cache.addAll(CACHE_URLS))
-      .then(() => self.skipWaiting())
-  );
+  e.waitUntil(caches.open(CACHE_NAME).then(cache => cache.addAll(CACHE_URLS)).then(() => self.skipWaiting()));
 });
-
-// Activate — clean old caches, take control immediately
 self.addEventListener('activate', e => {
-  e.waitUntil(
-    caches.keys().then(keys =>
-      Promise.all(keys.filter(k => k !== CACHE_NAME).map(k => caches.delete(k)))
-    ).then(() => self.clients.claim())
-  );
+  e.waitUntil(caches.keys().then(keys => Promise.all(keys.filter(k => k !== CACHE_NAME).map(k => caches.delete(k)))).then(() => self.clients.claim()));
 });
-
-// Fetch — NETWORK-FIRST for index.html and API calls, CACHE-FIRST for CDN/static assets
+self.addEventListener('push', e => {
+  let data = { title: 'My Daily Reports', body: 'New notification' };
+  try { if (e.data) data = e.data.json(); } catch (err) { if (e.data) data.body = e.data.text(); }
+  e.waitUntil(self.registration.showNotification(data.title || 'My Daily Reports', {
+    body: data.body || '', icon: '/icon-192.png', badge: '/icon-192.png',
+    tag: data.tag || 'mdr-notification', data: data.url || '/', vibrate: [200, 100, 200],
+  }));
+});
+self.addEventListener('notificationclick', e => {
+  e.notification.close();
+  const url = e.notification.data || '/';
+  e.waitUntil(clients.matchAll({ type: 'window', includeUncontrolled: true }).then(wins => {
+    for (const w of wins) { if (w.url.includes('mydailyreports') && 'focus' in w) return w.focus(); }
+    return clients.openWindow(url);
+  }));
+});
 self.addEventListener('fetch', e => {
   const url = new URL(e.request.url);
-
-  // Network-first for HTML pages (index.html) — always get the latest
   if (e.request.mode === 'navigate' || url.pathname.endsWith('.html') || url.pathname === '/') {
-    e.respondWith(
-      fetch(e.request)
-        .then(resp => {
-          const clone = resp.clone();
-          caches.open(CACHE_NAME).then(cache => cache.put(e.request, clone));
-          return resp;
-        })
-        .catch(() => caches.match(e.request))
-    );
+    e.respondWith(fetch(e.request).then(resp => { const clone = resp.clone(); caches.open(CACHE_NAME).then(cache => cache.put(e.request, clone)); return resp; }).catch(() => caches.match(e.request)));
     return;
   }
-
-  // Network-first for API/Supabase calls — never cache these
-  if (url.hostname.includes('supabase') || url.pathname.startsWith('/functions/')) {
-    e.respondWith(fetch(e.request));
-    return;
-  }
-
-  // Cache-first for CDN libraries and static assets (icons, etc.)
-  e.respondWith(
-    caches.match(e.request).then(cached => {
-      if (cached) return cached;
-      return fetch(e.request).then(resp => {
-        if (resp.ok) {
-          const clone = resp.clone();
-          caches.open(CACHE_NAME).then(cache => cache.put(e.request, clone));
-        }
-        return resp;
-      });
-    })
-  );
+  if (url.hostname.includes('supabase') || url.pathname.startsWith('/functions/')) { e.respondWith(fetch(e.request)); return; }
+  e.respondWith(caches.match(e.request).then(cached => {
+    if (cached) return cached;
+    return fetch(e.request).then(resp => { if (resp.ok) { const clone = resp.clone(); caches.open(CACHE_NAME).then(cache => cache.put(e.request, clone)); } return resp; });
+  }));
 });

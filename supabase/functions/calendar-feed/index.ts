@@ -16,10 +16,8 @@ function escapeICS(text: string): string {
 }
 
 function formatICSDate(dateStr: string, timeStr?: string): string {
-  // dateStr = "YYYY-MM-DD", timeStr = "HH:MM" or "HH:MM:SS"
   const d = dateStr.replace(/-/g, "");
   if (timeStr) {
-    // Handle both "HH:MM" and "HH:MM:SS" formats
     const parts = timeStr.split(":");
     const t = parts[0] + parts[1] + "00";
     return d + "T" + t;
@@ -57,8 +55,6 @@ serve(async (req) => {
     let requests: any[] = [];
 
     if (project) {
-      // ── PROJECT-BASED QUERY (used by schedule.html) ──
-      // Fetches all non-cancelled inspection requests for a specific project
       calendarName = `${project.replace(/-/g, " ")} — Schedule`;
 
       const { data, error } = await supabase
@@ -78,7 +74,6 @@ serve(async (req) => {
 
       requests = data || [];
     } else {
-      // ── USER-BASED QUERY (used by main app / slug-based calendars) ──
       let resolvedUserId = userId;
 
       if (slug && !userId) {
@@ -126,7 +121,8 @@ serve(async (req) => {
       requests = data || [];
     }
 
-    // Build iCalendar
+    const TZ = "America/Los_Angeles";
+
     const lines: string[] = [
       "BEGIN:VCALENDAR",
       "VERSION:2.0",
@@ -134,7 +130,24 @@ serve(async (req) => {
       `X-WR-CALNAME:${escapeICS(calendarName)}`,
       "CALSCALE:GREGORIAN",
       "METHOD:PUBLISH",
-      `X-WR-TIMEZONE:America/Los_Angeles`,
+      `X-WR-TIMEZONE:${TZ}`,
+      "BEGIN:VTIMEZONE",
+      `TZID:${TZ}`,
+      "BEGIN:STANDARD",
+      "DTSTART:19701101T020000",
+      "RRULE:FREQ=YEARLY;BYMONTH=11;BYDAY=1SU",
+      "TZOFFSETFROM:-0700",
+      "TZOFFSETTO:-0800",
+      "TZNAME:PST",
+      "END:STANDARD",
+      "BEGIN:DAYLIGHT",
+      "DTSTART:19700308T020000",
+      "RRULE:FREQ=YEARLY;BYMONTH=3;BYDAY=2SU",
+      "TZOFFSETFROM:-0800",
+      "TZOFFSETTO:-0700",
+      "TZNAME:PDT",
+      "END:DAYLIGHT",
+      "END:VTIMEZONE",
     ];
 
     const now = new Date()
@@ -143,7 +156,6 @@ serve(async (req) => {
       .replace(/\.\d{3}/, "");
 
     for (const r of requests) {
-      // Support both column naming conventions
       const dateField = r.inspection_date || r.requested_date;
       if (!dateField) continue;
 
@@ -151,7 +163,6 @@ serve(async (req) => {
       const projectName = r.project || r.jobs?.name || "Job";
       const siteAddr = r.location_detail || r.jobs?.site_address || "";
 
-      // Support both inspection_type (singular) and inspection_types (array)
       const inspType =
         r.inspection_type || (r.inspection_types || [])[0] || "Visit";
       const specialType = r.special_type ? ` — ${r.special_type}` : "";
@@ -161,7 +172,6 @@ serve(async (req) => {
         r.status === "scheduled" || r.status === "confirmed" ? "✅ " : "⏳ ";
       const duration = parseInt(r.duration) || 60;
 
-      // Check if flexible or has a real time
       const isFlexible = r.flexible_display === "flexible";
       const hasTime = !!timeField && !isFlexible;
 
@@ -171,17 +181,15 @@ serve(async (req) => {
 
       if (hasTime) {
         const dtStart = formatICSDate(dateField, timeField);
-        lines.push(`DTSTART:${dtStart}`);
+        lines.push(`DTSTART;TZID=${TZ}:${dtStart}`);
 
-        // Calculate end time
         const timeParts = timeField.split(":").map(Number);
         const totalMin = timeParts[0] * 60 + timeParts[1] + duration;
         const endH = String(Math.floor(totalMin / 60)).padStart(2, "0");
         const endM = String(totalMin % 60).padStart(2, "0");
         const dtEnd = formatICSDate(dateField, `${endH}:${endM}`);
-        lines.push(`DTEND:${dtEnd}`);
+        lines.push(`DTEND;TZID=${TZ}:${dtEnd}`);
       } else {
-        // All-day event (flexible time or no time)
         const dtStart = formatICSDate(dateField);
         lines.push(`DTSTART;VALUE=DATE:${dtStart}`);
 
@@ -193,7 +201,6 @@ serve(async (req) => {
 
       lines.push(`SUMMARY:${escapeICS(statusEmoji + summary)}`);
 
-      // Description
       const descParts: string[] = [];
       descParts.push(`Status: ${r.status || "pending"}`);
       if (r.submitted_by) descParts.push(`Submitted by: ${r.submitted_by}`);
@@ -213,7 +220,6 @@ serve(async (req) => {
         lines.push(`LOCATION:${escapeICS(siteAddr)}`);
       }
 
-      // Color hint via categories
       if (r.status === "scheduled" || r.status === "confirmed") {
         lines.push("CATEGORIES:Confirmed");
       } else {
