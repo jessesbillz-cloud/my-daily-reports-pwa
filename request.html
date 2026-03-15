@@ -573,35 +573,59 @@ function submitIR(){
     var idnt=document.getElementById('iIdentifier').value.trim();
     if(idnt) fd.append('inspection_identifier',idnt);
     fetch(SB+'/functions/v1/submit-inspection',{method:'POST',headers:{'Authorization':'Bearer '+AK,'apikey':AK},body:fd})
-    .then(function(r){return r.json();}).then(function(data){
+    .then(function(r){
+        return r.json().then(function(data){ data._status=r.status; return data; });
+    }).then(function(data){
         if(data.success){ document.getElementById('requestView').style.display='none'; document.getElementById('successView').style.display='block'; loadMD(); }
+        else if(data._status===409){
+            // Scheduling conflict — friendly message, keep form intact
+            var w=document.getElementById('dateWarning');
+            w.textContent='⚠️ Scheduling conflict: this time slot is already booked on '+d+'. Please select a different time or date.';
+            w.style.display='block';
+            w.style.cssText='display:block;color:#ef4444;font-size:13px;font-weight:600;margin-bottom:12px;padding:12px;background:#2a1515;border:1px solid #ef4444;border-radius:8px;text-align:center;';
+            document.getElementById('iTime').focus();
+            btn.disabled=false; btn.textContent='Submit Scheduling Request';
+        }
         else { alert('Error: '+data.error); btn.disabled=false; btn.textContent='Submit Scheduling Request'; }
     });
 }
+function renderContacts(rows){
+    savedContacts=rows||[];
+    var sel=document.getElementById('iName');
+    var first=sel.options[0].outerHTML;
+    var second=sel.options[1].outerHTML;
+    sel.innerHTML=first+second;
+    savedContacts.forEach(function(c){
+        var o=document.createElement('option');
+        o.value=c.name;
+        o.textContent=c.name+(c.company?' ('+c.company+')':'');
+        sel.appendChild(o);
+    });
+    var container=document.getElementById('emailListContainer');
+    container.innerHTML='';
+    savedContacts.forEach(function(c){
+        if(!c.email)return;
+        var lbl=document.createElement('label');
+        lbl.className='email-row';
+        lbl.innerHTML='<input type="checkbox" value="'+c.email+'" class="emailCheck">'+c.name+(c.company?' ('+c.company+')':'');
+        container.appendChild(lbl);
+    });
+}
 function loadContacts(){
+    var cacheKey='mdr_contacts_'+PROJ;
     fetch(SB+'/rest/v1/contacts?project=eq.'+encodeURIComponent(PROJ)+'&order=name.asc',{headers:{'apikey':AK,'Authorization':'Bearer '+AK}})
     .then(function(r){return r.json();}).then(function(rows){
-        savedContacts=rows||[];
-        var sel=document.getElementById('iName');
-        var first=sel.options[0].outerHTML;
-        var second=sel.options[1].outerHTML;
-        sel.innerHTML=first+second;
-        savedContacts.forEach(function(c){
-            var o=document.createElement('option');
-            o.value=c.name;
-            o.textContent=c.name+(c.company?' ('+c.company+')':'');
-            sel.appendChild(o);
-        });
-        var container=document.getElementById('emailListContainer');
-        container.innerHTML='';
-        savedContacts.forEach(function(c){
-            if(!c.email)return;
-            var lbl=document.createElement('label');
-            lbl.className='email-row';
-            lbl.innerHTML='<input type="checkbox" value="'+c.email+'" class="emailCheck">'+c.name+(c.company?' ('+c.company+')':'');
-            container.appendChild(lbl);
-        });
-    }).catch(function(){});
+        if(rows&&rows.length>0){
+            try{localStorage.setItem(cacheKey,JSON.stringify(rows));}catch(e){}
+        }
+        renderContacts(rows);
+    }).catch(function(){
+        // DB fetch failed — load from cache so contacts still appear
+        try{
+            var cached=localStorage.getItem(cacheKey);
+            if(cached) renderContacts(JSON.parse(cached));
+        }catch(e){}
+    });
 }
 function resetForm(){ location.reload(); }
 loadContacts();

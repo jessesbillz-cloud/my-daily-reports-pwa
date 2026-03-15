@@ -145,6 +145,7 @@ details[open] .collapsible-summary::after { content: '−'; }
 <div id="filePreviewGrid" class="file-list-container"></div>
 <label class="field-label">Date *</label>
 <input type="date" id="iDate" class="field-input">
+<div id="dateWarning" style="display:none;color:#ef4444;font-size:12px;font-weight:600;margin-top:-10px;margin-bottom:10px;"></div>
 <label class="field-label">Time *</label>
 <select id="iTime" class="field-input">
 <option value="">Select time</option>
@@ -681,10 +682,17 @@ function submitIR(){
     if(idnt) fd.append('inspection_identifier',idnt);
     fetch(SB+'/functions/v1/submit-inspection',{method:'POST',headers:{'Authorization':'Bearer '+AK,'apikey':AK},body:fd})
     .then(function(r){
-        if(!r.ok) throw new Error('Server returned '+r.status);
-        return r.json();
+        return r.json().then(function(data){ data._status=r.status; return data; });
     }).then(function(data){
         if(data.success){ document.getElementById('requestView').style.display='none'; document.getElementById('successView').style.display='block'; }
+        else if(data._status===409){
+            var w=document.getElementById('dateWarning');
+            w.textContent='⚠️ Scheduling conflict: this time slot is already booked on '+d+'. Please select a different time or date.';
+            w.style.display='block';
+            w.style.cssText='display:block;color:#ef4444;font-size:13px;font-weight:600;margin-bottom:12px;padding:12px;background:#2a1515;border:1px solid #ef4444;border-radius:8px;text-align:center;';
+            document.getElementById('iTime').focus();
+            btn.disabled=false; btn.textContent='Submit Scheduling Request';
+        }
         else { alert('Error: '+(data.error||'Unknown error')); btn.disabled=false; btn.textContent='Submit Scheduling Request'; }
     }).catch(function(err){
         alert('Submit failed: '+err.message+'. Please try again.');
@@ -692,12 +700,26 @@ function submitIR(){
     });
 }
 function loadContacts(){
+    var cacheKey='mdr_contacts_'+PROJ;
     fetch(SB+'/rest/v1/contacts?project=eq.'+encodeURIComponent(PROJ)+'&order=name.asc',{headers:{'apikey':AK,'Authorization':'Bearer '+AK}})
     .then(function(r){return r.json();}).then(function(rows){
+        if(rows&&rows.length>0){
+            try{localStorage.setItem(cacheKey,JSON.stringify(rows));}catch(e){}
+        }
         savedContacts=rows||[];
         renderTeamList();
         refreshDropdownAndEmails();
-    }).catch(function(){});
+    }).catch(function(){
+        // DB fetch failed — load from cache
+        try{
+            var cached=localStorage.getItem(cacheKey);
+            if(cached){
+                savedContacts=JSON.parse(cached);
+                renderTeamList();
+                refreshDropdownAndEmails();
+            }
+        }catch(e){}
+    });
 }
 function resetForm(){ location.reload(); }
 loadContacts();
