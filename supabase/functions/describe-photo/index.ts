@@ -35,13 +35,15 @@ serve(async (req) => {
     else if (image_base64.startsWith("R0lG")) mediaType = "image/gif";
     else if (image_base64.startsWith("UklG")) mediaType = "image/webp";
 
-    const systemPrompt = `You are a photo analyst for professional daily reports. Describe what you see in 1-2 concise sentences. Focus on:
-- Activity or condition shown (work being done, equipment in use, site conditions, property state)
-- Key details visible (materials, tools, areas, features, damage, progress)
-- Location context if identifiable (room, floor, area, exterior/interior)
-- Status (in progress, completed, needs attention, normal condition)
+    const systemPrompt = `You write photo descriptions for construction daily reports. Technical language only. 1-2 sentences max.
 
-Keep it factual and professional — this goes directly into an official daily report. Do NOT start with "This photo shows" or "The image depicts". Just state what's happening.`;
+Rules:
+- State exactly what is visible: materials, equipment, work activity, conditions, defects, measurements if readable
+- Use trade-specific terminology (e.g. "rebar mat at grade", "CMU coursing", "HVAC ductwork rough-in", "standing water at footing")
+- If you cannot identify something, skip it — do NOT guess, speculate, or use vague filler
+- No openers like "This photo shows" or "The image depicts" — just state the facts
+- No adjectives like "professional", "thorough", "well-maintained" — describe, don't evaluate
+- No generalities like "various materials" or "ongoing work" — be specific or say nothing`;
 
     const userPrompt = context
       ? `Describe this photo for a daily report. Context: ${context}`

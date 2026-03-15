@@ -3016,29 +3016,35 @@ function WorkLogEditor({job, user, onBack, reportDate}){
 
     // ── Helper: draw a MDR-style text section ──
     const drawTextSection=(title,text)=>{
-      if(!text||!text.trim()){
-        // Skip empty sections entirely — no wasted space
-        return;
-      }
-      // Pre-wrap text to calculate total height needed (header + content)
-      const wrapLines=[];
-      text.split("\n").forEach(para=>{
-        if(!para.trim()){wrapLines.push("");return;}
-        const words=para.split(" ");let wl="";
-        words.forEach(w=>{const t=wl?wl+" "+w:w;if(font.widthOfTextAtSize(t,10)>CW-20&&wl){wrapLines.push(wl);wl=w;}else wl=t;});
-        if(wl)wrapLines.push(wl);
+      if(!text||!text.trim()){return;}
+      // Split into lines, each non-empty line becomes a bullet
+      const rawLines=text.split("\n").filter(l=>l.trim());
+      const bulletChar="•  ";
+      const bulletW=font.widthOfTextAtSize(bulletChar,10);
+      const contentW=CW-24-bulletW; // 12px left pad + bullet width + 12px right pad
+      // Build wrapped lines with bullet markers
+      const wrapLines=[]; // {text, isBulletStart}
+      rawLines.forEach(line=>{
+        const clean=line.replace(/^[\-\•\*]\s*/,"").trim();
+        if(!clean)return;
+        const words=clean.split(" ");let wl="";let first=true;
+        words.forEach(w=>{const t=wl?wl+" "+w:w;if(font.widthOfTextAtSize(t,10)>contentW&&wl){wrapLines.push({text:wl,bullet:first});first=false;wl=w;}else wl=t;});
+        if(wl)wrapLines.push({text:wl,bullet:first});
       });
       const boxH=wrapLines.length*14+20;
-      const totalNeeded=36+boxH+6; // header(30+6gap) + content box + bottom gap
-      ensureSpace(Math.min(totalNeeded,H-M-30)); // keep header+content together (clamp to page height)
+      const totalNeeded=36+boxH+6;
+      ensureSpace(Math.min(totalNeeded,H-M-30));
       page.drawRectangle({x:M,y:y-30,width:CW,height:30,color:rgb(.45,.45,.45)});
       page.drawText(title,{x:M+(CW-fontB.widthOfTextAtSize(title,14))/2,y:y-22,size:14,font:fontB,color:rgb(.92,.57,.17)});
       y-=36;
-      // Draw border box around content
       ensureSpace(boxH);
       page.drawRectangle({x:M,y:y-boxH,width:CW,height:boxH,borderColor:rgb(.85,.85,.85),borderWidth:.5,color:rgb(1,1,1)});
       let ty=y-14;
-      wrapLines.forEach(ln=>{page.drawText(ln,{x:M+12,y:ty,size:10,font,color:rgb(.2,.2,.2)});ty-=14;});
+      wrapLines.forEach(ln=>{
+        if(ln.bullet)page.drawText(bulletChar,{x:M+12,y:ty,size:10,font,color:rgb(.2,.2,.2)});
+        page.drawText(ln.text,{x:M+12+bulletW,y:ty,size:10,font,color:rgb(.2,.2,.2)});
+        ty-=14;
+      });
       y-=boxH+6;
     };
 
