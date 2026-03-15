@@ -3789,6 +3789,8 @@ function ReportEditor({job, user, onBack, reportDate}){
   const [lockVals,setLockVals]=useState(()=>{const v={};initLock.forEach(f=>{v[f.name]=f.value||"";});return v;});
   const [loadingDraft,setLoadingDraft]=useState(true);
   const [draftId,setDraftId]=useState(null);
+  const [editFilename,setEditFilename]=useState(""); // editable filename shown in header
+  const [filenameEdited,setFilenameEdited]=useState(false); // user manually changed it
 
   // Smart date formatter — matches the format from the original template value
   // Uses the report date context (today or a specific past date being edited)
@@ -3930,7 +3932,34 @@ function ReportEditor({job, user, onBack, reportDate}){
           }
         }
       }catch(e){console.error("Load report error:",e);}
-      finally{setLoadingDraft(false);}
+      finally{
+        // Compute preview filename
+        try{
+          const conv=job.field_config?.filenameConvention||{};
+          const padding=conv.numberPadding||0;
+          const numStr=padding>0?String(nextReportNum).padStart(padding,"0"):String(nextReportNum);
+          const now=reportDate?new Date(reportDate+"T12:00:00"):new Date();
+          const fmtMM=now.toLocaleDateString("en-US",{month:"2-digit",timeZone:tz});
+          const fmtDD=now.toLocaleDateString("en-US",{day:"2-digit",timeZone:tz});
+          const fmtYYYY=now.toLocaleDateString("en-US",{year:"numeric",timeZone:tz});
+          const monNames=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+          const monthIdx=now.toLocaleDateString("en-US",{month:"numeric",timeZone:tz})-1;
+          const fmtMon=monNames[monthIdx]||"";
+          const fmtDay=String(parseInt(fmtDD));
+          const fnP=conv.pattern||job.report_filename_pattern||job.name||"Report";
+          let fn=fnP.replace(/\.[^.]+$/,"");
+          const hasDate=fn.includes("{date}")||fn.includes("{year}");
+          const hasNum=fn.includes("{report_number}");
+          fn=fn.replace(/\{report_number\}/g,numStr);
+          fn=fn.replace(/\{date\}/g,conv.dateFormat?conv.dateFormat.replace(/YYYY/g,fmtYYYY).replace(/MM/g,fmtMM).replace(/DD/g,fmtDD).replace(/Month/g,(["January","February","March","April","May","June","July","August","September","October","November","December"][monthIdx]||"")).replace(/Mon/g,fmtMon):now.toLocaleDateString("en-US",{timeZone:tz}));
+          fn=fn.replace(/\{year\}/g,fmtYYYY);
+          fn=fn.replace(/\{project\}/g,(job.name||"").replace(/\s+/g,"_"));
+          if(!hasDate){const litRx=/(?:January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[\s_]+\d{1,2}[,\s_]+\d{4}/;const ds=fmtMon+" "+fmtDay+"_"+fmtYYYY;if(litRx.test(fn))fn=fn.replace(litRx,ds);else fn+="_"+ds;}
+          if(!hasNum){const rp=fn.replace(/_(\d+)(?=_)/,()=>"_"+numStr);if(rp===fn)fn=numStr+"_"+fn;else fn=rp;}
+          setEditFilename(fn);
+        }catch(fnErr){setEditFilename(job.name||"Report");}
+        setLoadingDraft(false);
+      }
     })();
   },[]);
 
@@ -4361,24 +4390,41 @@ function ReportEditor({job, user, onBack, reportDate}){
           if(/^\d{2}-\d{2}-\d{4}$/.test(f))return fmtMM+"-"+fmtDD+"-"+fmtYYYY;
           return now.toLocaleDateString("en-US",{timeZone:tz});
         };
-        const fnPattern=conv.pattern||job.report_filename_pattern||job.name||"Report";
-        let baseName=fnPattern.replace(/\.[^.]+$/,"");
-        const hasDateToken=baseName.includes("{date}")||baseName.includes("{year}");
-        const hasNumToken=baseName.includes("{report_number}");
-        baseName=baseName.replace(/\{report_number\}/g,rptNum);
-        baseName=baseName.replace(/\{date\}/g,formatDate(conv.dateFormat));
-        baseName=baseName.replace(/\{year\}/g,fmtYYYY);
-        baseName=baseName.replace(/\{project\}/g,(job.name||"").replace(/\s+/g,"_"));
-        if(!hasDateToken){
-          const litDateRx=/(?:January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[\s_]+\d{1,2}[,\s_]+\d{4}/;
-          const newDateStr=fmtMon+" "+fmtDay+"_"+fmtYYYY;
-          if(litDateRx.test(baseName)){baseName=baseName.replace(litDateRx,newDateStr);}
-          else{baseName+="_"+newDateStr;}
-        }
-        if(!hasNumToken){
-          const replaced=baseName.replace(/_(\d+)(?=_)/,()=>"_"+rptNum);
-          if(replaced===baseName)baseName=rptNum+"_"+baseName;
-          else baseName=replaced;
+        // Build filename — use user-edited filename if they changed it
+        let baseName;
+        if(filenameEdited&&editFilename.trim()){
+          baseName=editFilename.trim().replace(/\.(pdf|docx?)$/i,"");
+          try{
+            let learned=baseName;
+            const dateVariants=[fmtMon+" "+fmtDay+"_"+fmtYYYY,fmtMon+" "+fmtDay+", "+fmtYYYY,fmtMon+" "+fmtDay+" "+fmtYYYY,fmtMM+"/"+fmtDD+"/"+fmtYYYY,fmtMM+"-"+fmtDD+"-"+fmtYYYY,fmtYYYY+"-"+fmtMM+"-"+fmtDD];
+            for(const dv of dateVariants){if(learned.includes(dv)){learned=learned.replace(dv,"{date}");break;}}
+            if(learned.includes(rptNum))learned=learned.replace(rptNum,"{report_number}");
+            const oldPattern=conv.pattern||job.report_filename_pattern||"";
+            if(learned!==oldPattern&&learned!==baseName){
+              const newConv={...conv,pattern:learned};
+              db.updateJobFieldConfig(job.id,{...job.field_config,filenameConvention:newConv}).catch(e=>console.error("Pattern save:",e));
+            }
+          }catch(learnErr){}
+        }else{
+          const fnPattern=conv.pattern||job.report_filename_pattern||job.name||"Report";
+          baseName=fnPattern.replace(/\.[^.]+$/,"");
+          const hasDateToken=baseName.includes("{date}")||baseName.includes("{year}");
+          const hasNumToken=baseName.includes("{report_number}");
+          baseName=baseName.replace(/\{report_number\}/g,rptNum);
+          baseName=baseName.replace(/\{date\}/g,formatDate(conv.dateFormat));
+          baseName=baseName.replace(/\{year\}/g,fmtYYYY);
+          baseName=baseName.replace(/\{project\}/g,(job.name||"").replace(/\s+/g,"_"));
+          if(!hasDateToken){
+            const litDateRx=/(?:January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[\s_]+\d{1,2}[,\s_]+\d{4}/;
+            const newDateStr=fmtMon+" "+fmtDay+"_"+fmtYYYY;
+            if(litDateRx.test(baseName)){baseName=baseName.replace(litDateRx,newDateStr);}
+            else{baseName+="_"+newDateStr;}
+          }
+          if(!hasNumToken){
+            const replaced=baseName.replace(/_(\d+)(?=_)/,()=>"_"+rptNum);
+            if(replaced===baseName)baseName=rptNum+"_"+baseName;
+            else baseName=replaced;
+          }
         }
         const docxFilename=baseName+".docx";
         // Upload file first, THEN save report record (ensures file exists before marking submitted)
@@ -4841,28 +4887,46 @@ function ReportEditor({job, user, onBack, reportDate}){
         if(/^\d{2}-\d{2}-\d{4}$/.test(f))return fmtMM+"-"+fmtDD+"-"+fmtYYYY;
         return now.toLocaleDateString("en-US",{timeZone:tz});
       };
-      // Build filename from the stored pattern (which the user may have edited)
-      const pattern=conv.pattern||job.report_filename_pattern||job.name||"Report";
-      let baseName=pattern.replace(/\.[^.]+$/,"");
-      const hasDateToken=baseName.includes("{date}")||baseName.includes("{year}");
-      const hasNumToken=baseName.includes("{report_number}");
-      baseName=baseName.replace(/\{report_number\}/g,rptNum);
-      const dateStr=formatDate(conv.dateFormat);
-      baseName=baseName.replace(/\{date\}/g,dateStr);
-      baseName=baseName.replace(/\{year\}/g,fmtYYYY);
-      baseName=baseName.replace(/\{project\}/g,(job.name||"").replace(/\s+/g,"_"));
-      // If pattern had no date/number tokens (raw filename), force-append to ensure uniqueness
-      if(!hasDateToken){
-        const litDateRx=/(?:January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[\s_]+\d{1,2}[,\s_]+\d{4}/;
-        const newDateStr=fmtMon+" "+fmtDay+"_"+fmtYYYY;
-        if(litDateRx.test(baseName)){baseName=baseName.replace(litDateRx,newDateStr);}
-        else{baseName+="_"+newDateStr;}
-      }
-      if(!hasNumToken){
-        // Try to replace existing number between underscores, otherwise prepend number after first segment
-        const replaced=baseName.replace(/_(\d+)(?=_)/,()=>"_"+rptNum);
-        if(replaced===baseName)baseName=rptNum+"_"+baseName; // no match found — prepend
-        else baseName=replaced;
+      // Build filename — use user-edited filename if they changed it, otherwise compute from pattern
+      let baseName;
+      if(filenameEdited&&editFilename.trim()){
+        baseName=editFilename.trim().replace(/\.pdf$/i,"");
+        // Learn: reverse-engineer a pattern from user's edit for future reports
+        try{
+          let learned=baseName;
+          // Replace today's date with {date} token
+          const dateVariants=[fmtMon+" "+fmtDay+"_"+fmtYYYY,fmtMon+" "+fmtDay+", "+fmtYYYY,fmtMon+" "+fmtDay+" "+fmtYYYY,fmtMM+"/"+fmtDD+"/"+fmtYYYY,fmtMM+"-"+fmtDD+"-"+fmtYYYY,fmtYYYY+"-"+fmtMM+"-"+fmtDD];
+          for(const dv of dateVariants){if(learned.includes(dv)){learned=learned.replace(dv,"{date}");break;}}
+          // Replace report number with {report_number} token
+          if(learned.includes(rptNum))learned=learned.replace(rptNum,"{report_number}");
+          // Save learned pattern back to job if it differs
+          const oldPattern=conv.pattern||job.report_filename_pattern||"";
+          if(learned!==oldPattern&&learned!==baseName){
+            const newConv={...conv,pattern:learned};
+            db.updateJobFieldConfig(job.id,{...job.field_config,filenameConvention:newConv}).catch(e=>console.error("Pattern save:",e));
+          }
+        }catch(learnErr){console.error("Pattern learn:",learnErr);}
+      }else{
+        const pattern=conv.pattern||job.report_filename_pattern||job.name||"Report";
+        baseName=pattern.replace(/\.[^.]+$/,"");
+        const hasDateToken=baseName.includes("{date}")||baseName.includes("{year}");
+        const hasNumToken=baseName.includes("{report_number}");
+        baseName=baseName.replace(/\{report_number\}/g,rptNum);
+        const dateStr=formatDate(conv.dateFormat);
+        baseName=baseName.replace(/\{date\}/g,dateStr);
+        baseName=baseName.replace(/\{year\}/g,fmtYYYY);
+        baseName=baseName.replace(/\{project\}/g,(job.name||"").replace(/\s+/g,"_"));
+        if(!hasDateToken){
+          const litDateRx=/(?:January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[\s_]+\d{1,2}[,\s_]+\d{4}/;
+          const newDateStr=fmtMon+" "+fmtDay+"_"+fmtYYYY;
+          if(litDateRx.test(baseName)){baseName=baseName.replace(litDateRx,newDateStr);}
+          else{baseName+="_"+newDateStr;}
+        }
+        if(!hasNumToken){
+          const replaced=baseName.replace(/_(\d+)(?=_)/,()=>"_"+rptNum);
+          if(replaced===baseName)baseName=rptNum+"_"+baseName;
+          else baseName=replaced;
+        }
       }
       const pdfFilename=baseName+".pdf";
 
@@ -5110,7 +5174,14 @@ function ReportEditor({job, user, onBack, reportDate}){
 
       <div style={{maxWidth:600,margin:"0 auto",padding:"20px 20px 140px"}}>
         <div style={{fontSize:14,color:C.mut,marginBottom:6,textAlign:"center"}}>{todayDisplay}</div>
-        <div style={{fontSize:11,color:C.mut,textAlign:"center",marginBottom:20}}>Editable anytime • {tz.split("/").pop().replace(/_/g," ")}</div>
+        <div style={{fontSize:11,color:C.mut,textAlign:"center",marginBottom:8}}>Editable anytime • {tz.split("/").pop().replace(/_/g," ")}</div>
+        {editFilename&&(
+          <div style={{marginBottom:16,padding:"8px 12px",background:C.inp,border:`1px solid ${C.brd}`,borderRadius:8,display:"flex",alignItems:"center",gap:8}}>
+            <span style={{fontSize:11,color:C.mut,whiteSpace:"nowrap"}}>📄</span>
+            <input type="text" value={editFilename} onChange={e=>{setEditFilename(e.target.value);setFilenameEdited(true);}} style={{flex:1,background:"transparent",border:"none",color:C.lt,fontSize:13,fontWeight:500,outline:"none",padding:0}} placeholder="Report filename"/>
+            <span style={{fontSize:11,color:C.mut}}>.pdf</span>
+          </div>
+        )}
 
         {/* ── Locked Fields (collapsible) ── */}
         {lockFields.length>0&&(
