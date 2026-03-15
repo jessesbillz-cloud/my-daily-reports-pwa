@@ -3930,6 +3930,7 @@ function ReportEditor({job, user, onBack, reportDate}){
   const busyRef=useRef(false); // prevent View+Submit overlap
   const [viewingReport,setViewingReport]=useState(null); // array of page image data URLs
   const [viewDocxHtml,setViewDocxHtml]=useState(null); // HTML string for DOCX preview
+  const [editablePreview,setEditablePreview]=useState(null); // {pages:[{imgUrl,w,h}],fields:[...]} for desktop interactive edit
   const [submitSuccess,setSubmitSuccess]=useState(null); // {pdfBlob, pdfFilename, teamEmails} after submit
   const [toast,setToast]=useState("");
 
@@ -4055,17 +4056,29 @@ function ReportEditor({job, user, onBack, reportDate}){
       const pjDoc=await window.pdfjsLib.getDocument({data:tplBytes}).promise;
       const previewPages=[];
       const scale=2;
+      const isDesktop=window.innerWidth>=768;
+      const cleanPages=[];// for desktop editable preview
       for(let pi=1;pi<=pjDoc.numPages;pi++){
         const pg=await pjDoc.getPage(pi);
         const vp=pg.getViewport({scale});
+        const vp1=pg.getViewport({scale:1});
         const cvs=document.createElement("canvas");cvs.width=vp.width;cvs.height=vp.height;
         const ctx=cvs.getContext("2d");
         await pg.render({canvasContext:ctx,viewport:vp}).promise;
-        // Draw field values on this page
-        const pageH=pg.getViewport({scale:1}).height;
+        if(isDesktop){
+          // Store clean page (no overlays) for editable preview
+          cleanPages.push({imgUrl:cvs.toDataURL("image/jpeg",0.92),w:vp1.width,h:vp1.height});
+        }
+        // Draw field values on this page (flat preview)
+        const pageH=vp1.height;
         drawFieldsOnCanvas(ctx,allFields,pi,scale,pageH);
         previewPages.push(cvs.toDataURL("image/jpeg",0.92));
         cvs.width=0;cvs.height=0;
+      }
+      if(isDesktop&&cleanPages.length>0){
+        setEditablePreview({pages:cleanPages,fields:allFields});
+      }else{
+        setEditablePreview(null);
       }
       // Render photos as additional preview pages — paginate to match PDF output
       if(photos.length>0){
@@ -4820,18 +4833,55 @@ function ReportEditor({job, user, onBack, reportDate}){
   // ── View Report Screen (canvas-rendered preview of template + field values) ──
   if(viewingReport){
     const isDocxPreview=viewingReport[0]==="__docx_html__"&&viewDocxHtml;
+    const useEditable=editablePreview&&!isDocxPreview;
+    // Helper: update a field value from the editable preview overlay
+    const handlePreviewFieldChange=(fieldName,newVal,isLocked)=>{
+      if(isLocked){setLockVal(fieldName,newVal);}
+      else{setVal(fieldName,newVal);}
+    };
     return(
       <div style={{minHeight:"100vh",background:C.bg,color:C.txt,display:"flex",flexDirection:"column"}}>
         <div style={{display:"flex",alignItems:"center",gap:10,padding:"12px 16px",borderBottom:`1px solid ${C.brd}`,background:C.card}}>
-          <button onClick={()=>{setViewingReport(null);setViewDocxHtml(null);}} style={{background:"none",border:"none",color:C.mut,fontSize:24,cursor:"pointer",padding:"8px 12px",lineHeight:1,borderRadius:8,minWidth:44,minHeight:44,display:"flex",alignItems:"center",justifyContent:"center"}}>←</button>
+          <button onClick={()=>{setViewingReport(null);setViewDocxHtml(null);setEditablePreview(null);}} style={{background:"none",border:"none",color:C.mut,fontSize:24,cursor:"pointer",padding:"8px 12px",lineHeight:1,borderRadius:8,minWidth:44,minHeight:44,display:"flex",alignItems:"center",justifyContent:"center"}}>←</button>
           <div style={{flex:1}}>
-            <div style={{fontWeight:700,fontSize:17}}>Report Preview</div>
-            <div style={{fontSize:12,color:C.mut}}>This is how your report will look</div>
+            <div style={{fontWeight:700,fontSize:17}}>{useEditable?"Edit on Preview":"Report Preview"}</div>
+            <div style={{fontSize:12,color:C.mut}}>{useEditable?"Click any field to edit directly on the PDF":"This is how your report will look"}</div>
           </div>
         </div>
-        <div style={{flex:1,overflow:"auto",WebkitOverflowScrolling:"touch",padding:"12px 16px"}}>
+        <div style={{flex:1,overflow:"auto",WebkitOverflowScrolling:"touch",padding:"12px 16px",maxWidth:useEditable?900:"none",margin:useEditable?"0 auto":"0"}}>
           {isDocxPreview?(
             <div style={{background:"#fff",borderRadius:4,padding:"24px 20px",boxShadow:"0 1px 6px rgba(0,0,0,0.4)",color:"#222",fontSize:14,lineHeight:1.6}} dangerouslySetInnerHTML={{__html:viewDocxHtml}}/>
+          ):useEditable?(
+            editablePreview.pages.map((pg,pi)=>{
+              const pageNum=pi+1;
+              const pageFields=editablePreview.fields.filter(f=>(f.page||1)===pageNum&&f.x!=null&&f.y!=null);
+              return(
+                <div key={pi} style={{position:"relative",marginBottom:16,borderRadius:4,overflow:"hidden",boxShadow:"0 2px 12px rgba(0,0,0,0.5)"}}>
+                  <img src={pg.imgUrl} style={{width:"100%",display:"block"}} alt={"Page "+(pi+1)}/>
+                  {pageFields.map((f,fi)=>{
+                    const isLocked=lockFields.some(lf=>lf.name===f.name);
+                    const isAuto=f.autoFill==="date"||f.autoFill==="increment";
+                    const isSig=(f.name||"").toLowerCase().includes("signature")||(f.autoFill==="name"&&(f.name||"").toLowerCase().includes("inspector"));
+                    const leftPct=(f.x/pg.w*100);
+                    const topPct=(f.y/pg.h*100);
+                    const wPct=((f.w||100)/pg.w*100);
+                    const hPct=f.multiline?Math.max(((f.h||30)/pg.h*100),6):((f.fontSize||10)*1.8/pg.h*100);
+                    const fSizePct=((f.fontSize||10)/pg.h*100);
+                    const curVal=isLocked?(lockVals[f.name]||f.value||""):(vals[f.name]||"");
+                    if(isSig)return(
+                      <div key={fi} style={{position:"absolute",left:leftPct+"%",top:topPct+"%",width:wPct+"%",fontSize:"clamp(8px,"+fSizePct+"vw,13px)",color:"#1a1a1a",fontStyle:"italic",fontFamily:"Georgia,serif",pointerEvents:"none",lineHeight:1.3}}>
+                        {curVal&&<>Signed by {curVal}</>}
+                      </div>
+                    );
+                    return f.multiline?(
+                      <textarea key={fi} value={curVal} onChange={e=>handlePreviewFieldChange(f.name,e.target.value,isLocked)} readOnly={isAuto} placeholder={f.name} style={{position:"absolute",left:leftPct+"%",top:topPct+"%",width:wPct+"%",height:hPct+"%",minHeight:24,background:isAuto?"rgba(90,143,192,0.08)":"rgba(255,255,255,0.85)",border:"1px solid "+(isAuto?"rgba(90,143,192,0.3)":"rgba(232,116,42,0.4)"),borderRadius:2,padding:"2px 3px",fontSize:"clamp(8px,"+fSizePct+"vw,13px)",fontFamily:"Georgia,Cambria,serif",color:"#000",resize:"none",outline:"none",cursor:isAuto?"default":"text",lineHeight:1.4,overflow:"hidden"}}/>
+                    ):(
+                      <input key={fi} type="text" value={curVal} onChange={e=>handlePreviewFieldChange(f.name,e.target.value,isLocked)} readOnly={isAuto} placeholder={f.name} style={{position:"absolute",left:leftPct+"%",top:topPct+"%",width:wPct+"%",height:"auto",background:isAuto?"rgba(90,143,192,0.08)":"rgba(255,255,255,0.85)",border:"1px solid "+(isAuto?"rgba(90,143,192,0.3)":"rgba(232,116,42,0.4)"),borderRadius:2,padding:"1px 3px",fontSize:"clamp(8px,"+fSizePct+"vw,13px)",fontFamily:"Georgia,Cambria,serif",color:"#000",outline:"none",cursor:isAuto?"default":"text"}}/>
+                    );
+                  })}
+                </div>
+              );
+            })
           ):(
             viewingReport.map((dataUrl,i)=>(
               <div key={i} style={{marginBottom:12,borderRadius:4,overflow:"hidden",boxShadow:"0 1px 6px rgba(0,0,0,0.4)"}}>
@@ -4840,14 +4890,14 @@ function ReportEditor({job, user, onBack, reportDate}){
             ))
           )}
         </div>
-        <div style={{position:"fixed",bottom:0,left:0,right:0,padding:"14px 20px",borderTop:`1px solid ${C.brd}`,background:C.card,zIndex:100,display:"flex",gap:10}}>
-          <button onClick={()=>{setViewingReport(null);setViewDocxHtml(null);}} style={{padding:"14px 16px",background:C.card,border:`1px solid ${C.brd}`,borderRadius:10,color:C.mut,fontSize:15,fontWeight:700,cursor:"pointer"}}>
+        <div style={{position:"fixed",bottom:0,left:0,right:0,padding:"14px 20px",borderTop:`1px solid ${C.brd}`,background:C.card,zIndex:100,display:"flex",gap:10,maxWidth:useEditable?900:"none",margin:useEditable?"0 auto":"0"}}>
+          <button onClick={()=>{setViewingReport(null);setViewDocxHtml(null);setEditablePreview(null);}} style={{padding:"14px 16px",background:C.card,border:`1px solid ${C.brd}`,borderRadius:10,color:C.mut,fontSize:15,fontWeight:700,cursor:"pointer"}}>
             ←
           </button>
-          <button onClick={async()=>{await saveWorking();setViewingReport(null);setViewDocxHtml(null);onBack();}} disabled={saving} style={{flex:1,padding:"14px 0",background:C.card,border:`1px solid ${C.brd}`,borderRadius:10,color:C.txt,fontSize:15,fontWeight:700,cursor:"pointer",opacity:saving?0.5:1}}>
+          <button onClick={async()=>{await saveWorking();setViewingReport(null);setViewDocxHtml(null);setEditablePreview(null);onBack();}} disabled={saving} style={{flex:1,padding:"14px 0",background:C.card,border:`1px solid ${C.brd}`,borderRadius:10,color:C.txt,fontSize:15,fontWeight:700,cursor:"pointer",opacity:saving?0.5:1}}>
             {saving?"Saving...":"Save & Exit"}
           </button>
-          <button onClick={()=>{setViewingReport(null);setViewDocxHtml(null);submitReport();}} disabled={submitting} className="btn-o" style={{flex:1,padding:"14px 0",background:C.org,border:"none",borderRadius:10,color:"#fff",fontSize:15,fontWeight:700,cursor:submitting?"default":"pointer",opacity:submitting?0.6:1}}>
+          <button onClick={()=>{setViewingReport(null);setViewDocxHtml(null);setEditablePreview(null);submitReport();}} disabled={submitting} className="btn-o" style={{flex:1,padding:"14px 0",background:C.org,border:"none",borderRadius:10,color:"#fff",fontSize:15,fontWeight:700,cursor:submitting?"default":"pointer",opacity:submitting?0.6:1}}>
             {submitting?"Submitting...":"Submit"}
           </button>
         </div>
@@ -5694,13 +5744,14 @@ const GUIDES=[
     {icon:"🎤",title:"Voice Dictation",body:"Tap any text field, then tap the mic on your keyboard. Speak naturally — your phone's built-in dictation does the rest. No extra setup needed.",tip:"Take notes throughout the day as things happen. Come back later and everything's saved."},
     {icon:"📷",title:"Photos & AI",body:"Add photos to your report with the Photo or Library buttons. If AI Descriptions is enabled in Job Settings, tap the orange AI button on any photo to auto-generate a description that goes straight into your notes field.",tip:"AI descriptions are limited to 25 per job per day. Great for quick documentation of site conditions."},
     {icon:"—",title:"Save & Submit",body:"Tap \"Save Working Copy\" to save progress. Tap \"Submit\" when done — the app generates a PDF using your template with your entries overlaid and emails it to your team. Need a fresh start? Delete the working copy from the submit screen.",tip:null},
+    {icon:"🖥",title:"Desktop Editing",body:"On a desktop or laptop, tap \"View Report\" to see your PDF with editable fields overlaid directly on the template. Click any field to type right on the document — what you see is what gets submitted. Changes sync back to the form automatically.",tip:"Great for office users who prefer editing on a full-size screen. Fields are highlighted with orange borders so you can see exactly where your entries go."},
   ]},
   {icon:"▬",color:C.org,title:"Work Log Reports",sub:"Track contractors, hours, and daily activity",steps:[
     {icon:"+",title:"Add Contractors",body:"Tap \"+ Add Contractor\" and enter their name. Add a work description, hours, and quantity (number of people). Use your keyboard mic to dictate descriptions.",tip:null},
     {icon:"🔒",title:"Save Contractors",body:"Expand a contractor and choose \"Name + Work\" or \"Name Only\" under Carry Over to keep them on tomorrow's report. Hours and photos always reset.",tip:"Use \"Name + Work\" for crews doing the same task every day. Use \"Name Only\" when the work changes daily."},
     {icon:"📷",title:"Photos",body:"Each contractor has Photo and Library buttons at the bottom of their card. Take a photo with your camera or pick from your library. Photos are grouped by contractor in the report. If AI Descriptions is enabled in Job Settings, tap the orange AI button on any photo to auto-generate a description.",tip:"AI descriptions are limited to 25 per job per day. Context shots, close-ups of issues, and progress photos make the best documentation."},
     {icon:"—",title:"Custom Sections",body:"Need to track something extra? Tap \"+ Add Category\" to create new sections like Materials or Equipment. In the Survey, tap \"+ Add Concern\" to add custom questions.",tip:null},
-    {icon:"✓",title:"Preview & Submit",body:"Tap \"View Report\" to preview the PDF. Weather, work logs, notes, survey — it's all there. Hit \"Submit Report\" to generate and email the final PDF.",tip:null},
+    {icon:"✓",title:"Preview & Submit",body:"Tap \"View Report\" to preview the PDF. Weather, work logs, notes, survey — it's all there. Hit \"Submit Report\" to generate and email the final PDF. On desktop, template fields are editable directly on the preview.",tip:null},
   ]},
   {icon:"→",color:"#a855f7",title:"Exporting & Sharing",sub:"Generate PDFs and email reports",steps:[
     {icon:"—",title:"PDF Generation",body:"The submit button generates a professional PDF with your daily entries. Template reports overlay your data onto the original PDF. Work logs build a clean report from scratch.",tip:"Report numbers are sequential: #1, #2, #3 — based on submissions, not calendar days."},
@@ -5732,13 +5783,13 @@ const GUIDES=[
         {label:"Standing Note:",value:"Available for daily communication...",good:true,note:"Lock this — stays the same every report"},
         {label:"Notes:",value:"",good:true,note:"Blank — your daily notes go here"},
       ]}},
-    {icon:"✓",title:"Best Practices & Help",body:"Single-page PDF, standard letter size (8.5\" x 11\"). Fillable PDFs with form fields give the best results. If detection doesn't look right, try uploading again or email your template to jessesbillz@gmail.com and we'll set it up for you.",tip:"One template per job — reused for every report.",
+    {icon:"✓",title:"Best Practices & Help",body:"Single-page PDF, standard letter size (8.5\" x 11\"). Fillable PDFs with form fields give the best results. If detection doesn't look right, try uploading again or email your template to support@mydailyreports.org and we'll set it up for you.",tip:"One template per job — reused for every report.",
       illustration:{type:"checklist",items:[
         {text:"PDF format (fillable PDFs work best)",ok:true},
         {text:"Single page, letter size",ok:true},
         {text:"Clear out old dates and numbers",ok:true},
         {text:"Signature lines — ignored automatically",ok:true},
-        {text:"Need help? Email jessesbillz@gmail.com",ok:true},
+        {text:"Need help? Email support@mydailyreports.org",ok:true},
       ]}},
   ]},
   {icon:"⚙",color:C.mut,title:"Settings",sub:"Account, timezone, and preferences",steps:[
@@ -6078,7 +6129,7 @@ function Dashboard({user, onLogout}){
 
         <LegalSection icon="—" number={13} title="Contact Information">
           <LP>If you have questions about these Terms of Service, please contact us:</LP>
-          <LB items={["Email: jessesbillz@gmail.com","In-app: Profile → Help & Support"]}/>
+          <LB items={["Email: support@mydailyreports.org","In-app: Profile → Help & Support"]}/>
         </LegalSection>
 
         <div style={{textAlign:"center",padding:"16px 0 32px"}}>
@@ -6137,7 +6188,7 @@ function Dashboard({user, onLogout}){
         <LegalSection icon="→" number={6} title="Your Privacy Rights">
           <LP>Depending on your location, you may have the right to:</LP>
           <LB items={["Access: Request a copy of your personal data","Correction: Request correction of inaccurate data","Deletion: Request deletion of your personal data","Export: Download your data in a portable format","Opt-out: Unsubscribe from marketing communications"]} boldPrefixes={["Access:","Correction:","Deletion:","Export:","Opt-out:"]}/>
-          <LP>To exercise these rights, contact us at jessesbillz@gmail.com or use the in-app settings.</LP>
+          <LP>To exercise these rights, contact us at support@mydailyreports.org or use the in-app settings.</LP>
         </LegalSection>
 
         <LegalSection icon="—" number={7} title="International Data Transfers">
@@ -6157,7 +6208,7 @@ function Dashboard({user, onLogout}){
         <LegalSection icon="—" number={10} title="Contact Us">
           <LP>If you have questions about this Privacy Policy or our data practices, please contact us:</LP>
           <LB items={["Email: privacy@mydailyreports.app","In-app: Profile → Help & Support"]}/>
-          <LP>For data protection inquiries from the EU, you may also contact our Data Protection Officer at jessesbillz@gmail.com.</LP>
+          <LP>For data protection inquiries from the EU, you may also contact our Data Protection Officer at support@mydailyreports.org.</LP>
         </LegalSection>
 
         <div style={{textAlign:"center",padding:"16px 0 32px"}}>
@@ -6218,14 +6269,14 @@ function Dashboard({user, onLogout}){
               <strong style={{color:C.lt}}>Zelle:</strong> Send $19.99/mo or $199/yr to <span style={{color:C.org}}>jessesbillz@gmail.com</span> — we'll activate your account within 24 hours
             </div>
             <div style={{fontSize:12,color:C.mut,lineHeight:1.6,marginTop:6}}>
-              <strong style={{color:C.lt}}>Crypto:</strong> <a href="mailto:jessesbillz@gmail.com?subject=Crypto%20Payment%20Inquiry" style={{color:C.org}}>Contact us</a> for cryptocurrency payment options
+              <strong style={{color:C.lt}}>Crypto:</strong> <a href="mailto:support@mydailyreports.org?subject=Crypto%20Payment%20Inquiry" style={{color:C.org}}>Contact us</a> for cryptocurrency payment options
             </div>
           </div>
 
           <div style={{fontSize:13,fontWeight:700,color:C.lt,marginBottom:8}}>Enterprise</div>
           <div style={{fontSize:12,color:C.mut,lineHeight:1.6,marginBottom:16}}>
             Unlimited jobs, unlimited AI, company-wide templates, dedicated support, and custom integrations.{" "}
-            <a href="mailto:jessesbillz@gmail.com?subject=Enterprise%20Inquiry" style={{color:C.org}}>Contact us</a>
+            <a href="mailto:support@mydailyreports.org?subject=Enterprise%20Inquiry" style={{color:C.org}}>Contact us</a>
           </div>
 
           <button onClick={()=>{authLogout();window.location.reload();}} style={{padding:"10px 20px",background:"none",border:`1px solid ${C.brd}`,borderRadius:8,color:C.mut,fontSize:13,cursor:"pointer"}}>
@@ -6788,7 +6839,7 @@ function SetupWizard({user, inviteCompany, onComplete}){
             </div>
             <div style={cardS}>
               <div style={{fontSize:14,fontWeight:700,color:C.blu,marginBottom:8}}>Not Looking Right?</div>
-              <p style={{fontSize:13,color:C.lt,lineHeight:1.6}}>If the fields don't look right after upload, try again or send your template to jessesbillz@gmail.com and we'll set it up for you.</p>
+              <p style={{fontSize:13,color:C.lt,lineHeight:1.6}}>If the fields don't look right after upload, try again or send your template to support@mydailyreports.org and we'll set it up for you.</p>
             </div>
             <div style={{fontSize:12,color:C.mut,textAlign:"center",marginTop:4}}>For detailed walkthroughs, visit the Training Center on the dashboard.</div>
           </div>
@@ -6824,7 +6875,7 @@ function SetupWizard({user, inviteCompany, onComplete}){
               {key:"bestPractices",icon:"📐",title:"Need Help?",bullets:[
                 "Single-page PDF works best, standard letter size (8.5\" x 11\")",
                 "Fillable PDFs with form fields give the most accurate results",
-                "If detection doesn't look right, try uploading again or email your template to jessesbillz@gmail.com and we'll get it set up for you",
+                "If detection doesn't look right, try uploading again or email your template to support@mydailyreports.org and we'll get it set up for you",
                 "One template per job — reused for every report",
               ]},
             ].map(section=>{
@@ -7026,10 +7077,10 @@ function LoginScreen({onAuth}){
         <div style={{marginTop:28,padding:"18px 16px",background:"rgba(232,116,42,0.06)",border:"1px solid rgba(232,116,42,0.2)",borderRadius:12,textAlign:"center"}}>
           <div style={{fontSize:14,fontWeight:700,color:C.txt,marginBottom:6}}>New to digital daily reports?</div>
           <div style={{fontSize:13,color:C.lt,lineHeight:1.6,marginBottom:12}}>Send us your PDF or Word template and we'll set it up for you — configured, tested, and ready for your whole team.</div>
-          <a href="mailto:jessesbillz@gmail.com?subject=Template%20Setup%20Request&body=Hi%2C%20I'd%20like%20help%20setting%20up%20my%20report%20template.%20I've%20attached%20it%20to%20this%20email." style={{display:"inline-block",padding:"10px 20px",background:C.org,color:"#fff",borderRadius:8,fontSize:13,fontWeight:700,textDecoration:"none"}}>
+          <a href="mailto:support@mydailyreports.org?subject=Template%20Setup%20Request&body=Hi%2C%20I'd%20like%20help%20setting%20up%20my%20report%20template.%20I've%20attached%20it%20to%20this%20email." style={{display:"inline-block",padding:"10px 20px",background:C.org,color:"#fff",borderRadius:8,fontSize:13,fontWeight:700,textDecoration:"none"}}>
             Send Us Your Template
           </a>
-          <div style={{fontSize:11,color:C.mut,marginTop:8}}>jessesbillz@gmail.com</div>
+          <div style={{fontSize:11,color:C.mut,marginTop:8}}>support@mydailyreports.org</div>
         </div>
       </div>
     </div>
