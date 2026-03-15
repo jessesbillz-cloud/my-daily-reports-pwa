@@ -5652,6 +5652,11 @@ function JobDetail({job, user, onBack, onDeleted}){
               </div>
               <span style={{fontSize:11,color:C.mut,fontWeight:600}}>{SL[job.schedule]||job.schedule||"As Needed"}</span>
             </button>
+            <button onClick={async()=>{const newVal=!job.is_archived;try{await fetch(`${SB_URL}/rest/v1/jobs?id=eq.${job.id}`,{method:"PATCH",headers:{"apikey":SB_KEY,"Authorization":"Bearer "+(AUTH_TOKEN||SB_KEY),"Content-Type":"application/json","Prefer":"return=minimal"},body:JSON.stringify({is_archived:newVal})});job.is_archived=newVal;showToast(newVal?"Job archived":"Job restored");if(newVal&&onBack)onBack();}catch(e){showToast("Failed to archive");}}} style={{width:"100%",display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,padding:"14px 18px",background:"none",border:"none",borderBottom:`1px solid ${C.brd}`,cursor:"pointer",textAlign:"left"}}>
+              <div style={{display:"flex",alignItems:"center",gap:10}}>
+                <span style={{fontSize:16}}>📦</span><span style={{fontSize:14,fontWeight:600,color:C.lt}}>{job.is_archived?"Restore from Archive":"Archive This Job"}</span>
+              </div>
+            </button>
             <div style={{padding:"14px 18px",borderTop:`1px solid #5c2023`}}>
               {!showDel?(
                 <button onClick={()=>setShowDel(true)} style={{width:"100%",padding:"10px 16px",background:"transparent",border:"1px solid #5c2023",borderRadius:8,color:C.err,fontSize:13,fontWeight:600,cursor:"pointer"}}>Delete This Job</button>
