@@ -1636,10 +1636,17 @@ function CreateJob({user, onBack, onCreated}){
     setJobSelectedCompany(company);
     setJobCompanyName(company.name);
     setJobCompanyMatches([]);
-    // Fetch company templates
+    // Fetch company templates and copy to user's saved templates
     try{
       const tpls=await db.getCompanyTemplates(company.id);
       setJobCompanyTemplates(tpls);
+      if(tpls.length){
+        try{await db.copyCompanyTemplatesDB(user.id,company.id);}catch(e){
+          try{await db.copyCompanyTemplatesToUser(tpls,user.id);}catch(e2){console.error("Template copy fallback:",e2);}
+        }
+        // Refresh saved templates list so they appear immediately
+        try{const updated=await db.getSavedTemplates(user.id);setSavedTpls(updated);}catch(e){}
+      }
     }catch(e){setJobCompanyTemplates([]);}
   };
 
