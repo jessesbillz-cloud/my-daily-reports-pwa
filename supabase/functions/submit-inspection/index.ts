@@ -103,15 +103,17 @@ serve(async (req) => {
     let ownerId = "";
     let ownerEmail = "";
     let ownerNtfyTopic = "";
+    let ownerCompanyName = "";
     try {
       const { data: profile } = await supabase
         .from("profiles")
-        .select("id, ntfy_topic")
+        .select("id, ntfy_topic, company_name")
         .eq("slug", project)
         .single();
       if (profile) {
         ownerId = profile.id;
         ownerNtfyTopic = profile.ntfy_topic || "";
+        ownerCompanyName = profile.company_name || "";
         const { data: authUser } = await supabase.auth.admin.getUserById(
           profile.id
         );
@@ -119,6 +121,33 @@ serve(async (req) => {
       }
     } catch (e) {
       console.error("Owner lookup failed:", e);
+    }
+
+    // Fallback: if slug lookup failed, try finding owner via jobs table
+    if (!ownerId) {
+      try {
+        const { data: jobs } = await supabase
+          .from("jobs")
+          .select("user_id")
+          .ilike("job_name", project.replace(/-/g, " "))
+          .limit(1);
+        if (jobs && jobs.length > 0) {
+          ownerId = jobs[0].user_id;
+          const { data: profile } = await supabase
+            .from("profiles")
+            .select("ntfy_topic, company_name")
+            .eq("id", ownerId)
+            .single();
+          if (profile) {
+            ownerNtfyTopic = profile.ntfy_topic || "";
+            ownerCompanyName = profile.company_name || "";
+          }
+          const { data: authUser } = await supabase.auth.admin.getUserById(ownerId);
+          if (authUser?.user?.email) ownerEmail = authUser.user.email;
+        }
+      } catch (e) {
+        console.error("Fallback owner lookup failed:", e);
+      }
     }
 
     // Look up the job's site address so it populates in calendar events
@@ -282,7 +311,7 @@ serve(async (req) => {
               Authorization: `Bearer ${RESEND_API_KEY}`,
             },
             body: JSON.stringify({
-              from: `My Daily Reports <${FROM_EMAIL}>`,
+              from: `${ownerCompanyName || "My Daily Reports"} <${FROM_EMAIL}>`,
               to: allRecipients,
               subject: `Scheduling Request: ${project.replace(/-/g, " ")} — ${typeLabel} on ${inspectionDate}`,
               html: emailHtml,

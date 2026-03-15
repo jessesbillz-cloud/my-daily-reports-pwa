@@ -56,14 +56,16 @@ serve(async (req) => {
     // Look up the job owner's email + ntfy topic via profile slug
     let ownerEmail = "";
     let ownerNtfyTopic = "";
+    let ownerCompanyName = "";
     try {
       const { data: profile } = await supabase
         .from("profiles")
-        .select("id, ntfy_topic")
+        .select("id, ntfy_topic, company_name")
         .eq("slug", existing.project)
         .single();
       if (profile) {
         ownerNtfyTopic = profile.ntfy_topic || "";
+        ownerCompanyName = profile.company_name || "";
         const { data: authUser } = await supabase.auth.admin.getUserById(
           profile.id
         );
@@ -71,6 +73,25 @@ serve(async (req) => {
       }
     } catch (e) {
       console.error("Owner lookup failed:", e);
+    }
+
+    // Fallback: if slug lookup failed, try via user_id on the request itself
+    if (!ownerEmail && existing.user_id) {
+      try {
+        const { data: profile } = await supabase
+          .from("profiles")
+          .select("ntfy_topic, company_name")
+          .eq("id", existing.user_id)
+          .single();
+        if (profile) {
+          ownerNtfyTopic = profile.ntfy_topic || "";
+          ownerCompanyName = profile.company_name || "";
+        }
+        const { data: authUser } = await supabase.auth.admin.getUserById(existing.user_id);
+        if (authUser?.user?.email) ownerEmail = authUser.user.email;
+      } catch (e) {
+        console.error("Fallback owner lookup failed:", e);
+      }
     }
 
     // Build full recipient list: saved recipients + owner email
@@ -138,7 +159,7 @@ serve(async (req) => {
             Authorization: `Bearer ${RESEND_API_KEY}`,
           },
           body: JSON.stringify({
-            from: `My Daily Reports <${FROM_EMAIL}>`,
+            from: `${ownerCompanyName || "My Daily Reports"} <${FROM_EMAIL}>`,
             to: recipients,
             subject,
             html,
