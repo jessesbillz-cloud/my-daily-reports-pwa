@@ -99,54 +99,58 @@ serve(async (req) => {
       fileUrls.push(publicUrl);
     }
 
-    // Look up the job owner via profile slug so we can link the request to them
+    // Look up the job owner — the project param is the job name slugified, NOT the profile slug
+    // So we find the owner through the jobs table first, then get their profile
     let ownerId = "";
     let ownerEmail = "";
     let ownerNtfyTopic = "";
     let ownerCompanyName = "";
+
+    // Primary lookup: find job by matching slugified name
     try {
-      const { data: profile } = await supabase
-        .from("profiles")
-        .select("id, ntfy_topic, company_name")
-        .eq("slug", project)
-        .single();
-      if (profile) {
-        ownerId = profile.id;
-        ownerNtfyTopic = profile.ntfy_topic || "";
-        ownerCompanyName = profile.company_name || "";
-        const { data: authUser } = await supabase.auth.admin.getUserById(
-          profile.id
-        );
-        if (authUser?.user?.email) ownerEmail = authUser.user.email;
+      const { data: allJobs } = await supabase
+        .from("jobs")
+        .select("user_id, name")
+        .limit(200);
+      const projectLower = project.toLowerCase();
+      const matchedJob = (allJobs || []).find(
+        (j: any) => (j.name || "").toLowerCase().replace(/[^a-z0-9]+/g, "-") === projectLower
+      );
+      if (matchedJob) {
+        ownerId = matchedJob.user_id;
       }
     } catch (e) {
-      console.error("Owner lookup failed:", e);
+      console.error("Job lookup failed:", e);
     }
 
-    // Fallback: if slug lookup failed, try finding owner via jobs table
+    // Fallback: try profile slug match (in case project param happens to match)
     if (!ownerId) {
       try {
-        const { data: jobs } = await supabase
-          .from("jobs")
-          .select("user_id")
-          .ilike("job_name", project.replace(/-/g, " "))
-          .limit(1);
-        if (jobs && jobs.length > 0) {
-          ownerId = jobs[0].user_id;
-          const { data: profile } = await supabase
-            .from("profiles")
-            .select("ntfy_topic, company_name")
-            .eq("id", ownerId)
-            .single();
-          if (profile) {
-            ownerNtfyTopic = profile.ntfy_topic || "";
-            ownerCompanyName = profile.company_name || "";
-          }
-          const { data: authUser } = await supabase.auth.admin.getUserById(ownerId);
-          if (authUser?.user?.email) ownerEmail = authUser.user.email;
+        const { data: profile } = await supabase
+          .from("profiles")
+          .select("id")
+          .eq("slug", project)
+          .single();
+        if (profile) ownerId = profile.id;
+      } catch (e) {}
+    }
+
+    // Now get owner details from profile + auth
+    if (ownerId) {
+      try {
+        const { data: profile } = await supabase
+          .from("profiles")
+          .select("ntfy_topic, company_name")
+          .eq("id", ownerId)
+          .single();
+        if (profile) {
+          ownerNtfyTopic = profile.ntfy_topic || "";
+          ownerCompanyName = profile.company_name || "";
         }
+        const { data: authUser } = await supabase.auth.admin.getUserById(ownerId);
+        if (authUser?.user?.email) ownerEmail = authUser.user.email;
       } catch (e) {
-        console.error("Fallback owner lookup failed:", e);
+        console.error("Owner profile lookup failed:", e);
       }
     }
 

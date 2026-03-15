@@ -600,18 +600,25 @@ const db = {
     }
     const d=await r.json();return d[0]||null;
   },
-  // Download template file bytes with caching
+  // Download template file bytes with caching — handles both company-templates (public) and report-source-docs (private)
   async downloadTemplateBytes(storagePath){
     if(this._tplBytesCache[storagePath]){
       try{return this._tplBytesCache[storagePath].slice(0).buffer;}
       catch(e){delete this._tplBytesCache[storagePath];} // detached — re-download
     }
-    let r=await fetch(`${SB_URL}/storage/v1/object/report-source-docs/${storagePath}`,{
-      headers:{apikey:SB_KEY,Authorization:`Bearer ${AUTH_TOKEN||SB_KEY}`}
-    });
-    if(r.status===401||r.status===403){
-      const refreshed=await refreshAuthToken();
-      if(refreshed)r=await fetch(`${SB_URL}/storage/v1/object/report-source-docs/${storagePath}`,{headers:{apikey:SB_KEY,Authorization:`Bearer ${AUTH_TOKEN||SB_KEY}`}});
+    const isCompany=storagePath.startsWith("company-templates/");
+    let r;
+    if(isCompany){
+      const path=storagePath.replace("company-templates/","");
+      r=await fetch(`${SB_URL}/storage/v1/object/public/company-templates/${path}`);
+    }else{
+      r=await fetch(`${SB_URL}/storage/v1/object/report-source-docs/${storagePath}`,{
+        headers:{apikey:SB_KEY,Authorization:`Bearer ${AUTH_TOKEN||SB_KEY}`}
+      });
+      if(r.status===401||r.status===403){
+        const refreshed=await refreshAuthToken();
+        if(refreshed)r=await fetch(`${SB_URL}/storage/v1/object/report-source-docs/${storagePath}`,{headers:{apikey:SB_KEY,Authorization:`Bearer ${AUTH_TOKEN||SB_KEY}`}});
+      }
     }
     if(!r.ok)throw new Error("Could not download template ("+r.status+"). Try signing out and back in.");
     const buf=await r.arrayBuffer();
@@ -1753,7 +1760,7 @@ function CreateJob({user, onBack, onCreated}){
       console.log("[parseFields] Step 2: calling edge function, payload size:",JSON.stringify(payload).length);
       const resp=await fetch(`${SB_URL}/functions/v1/parse-template`,{
         method:"POST",
-        headers:{"Content-Type":"application/json","Authorization":"Bearer "+SB_KEY,"apikey":SB_KEY},
+        headers:{"Content-Type":"application/json","Authorization":"Bearer "+(AUTH_TOKEN||SB_KEY),"apikey":SB_KEY},
         body:JSON.stringify(payload)
       });
       console.log("[parseFields] Edge function responded:",resp.status);
@@ -1805,7 +1812,7 @@ function CreateJob({user, onBack, onCreated}){
       const b64=btoa(binary);
       const resp=await fetch(`${SB_URL}/functions/v1/parse-template`,{
         method:"POST",
-        headers:{"Content-Type":"application/json","Authorization":"Bearer "+SB_KEY,"apikey":SB_KEY},
+        headers:{"Content-Type":"application/json","Authorization":"Bearer "+(AUTH_TOKEN||SB_KEY),"apikey":SB_KEY},
         body:JSON.stringify({docx_base64:b64,file_name:fileName})
       });
       if(!resp.ok){const errText=await resp.text();throw new Error("Parse API "+resp.status+": "+errText);}
@@ -4145,7 +4152,7 @@ function ReportEditor({job, user, onBack, reportDate}){
         // Call generate-docx to fill template with field values
         const genResp=await fetch(`${SB_URL}/functions/v1/generate-docx`,{
           method:"POST",
-          headers:{"Content-Type":"application/json","Authorization":"Bearer "+SB_KEY,"apikey":SB_KEY},
+          headers:{"Content-Type":"application/json","Authorization":"Bearer "+(AUTH_TOKEN||SB_KEY),"apikey":SB_KEY},
           body:JSON.stringify({docx_base64:tplB64,field_values:fieldValues})
         });
         if(!genResp.ok)throw new Error("Generate preview failed: "+(await genResp.text()));
@@ -4314,7 +4321,7 @@ function ReportEditor({job, user, onBack, reportDate}){
         // Call generate-docx edge function
         const genResp=await fetch(`${SB_URL}/functions/v1/generate-docx`,{
           method:"POST",
-          headers:{"Content-Type":"application/json","Authorization":"Bearer "+SB_KEY,"apikey":SB_KEY},
+          headers:{"Content-Type":"application/json","Authorization":"Bearer "+(AUTH_TOKEN||SB_KEY),"apikey":SB_KEY},
           body:JSON.stringify({docx_base64:tplB64,field_values:fieldValues})
         });
         if(!genResp.ok)throw new Error("Generate DOCX failed: "+(await genResp.text()));
@@ -5284,7 +5291,7 @@ function JobDetail({job, user, onBack, onDeleted}){
       const buf=await tplResp.arrayBuffer();
       // Extract real text positions client-side with pdf.js
       const textItems=await extractPdfTextStructure(new Uint8Array(buf));
-      const resp=await fetch(`${SB_URL}/functions/v1/parse-template`,{method:"POST",headers:{"Content-Type":"application/json",Authorization:`Bearer ${SB_KEY}`,apikey:SB_KEY},body:JSON.stringify({text_items:textItems,file_name:tpl.original_filename||"template.pdf"})});
+      const resp=await fetch(`${SB_URL}/functions/v1/parse-template`,{method:"POST",headers:{"Content-Type":"application/json",Authorization:`Bearer ${AUTH_TOKEN||SB_KEY}`,apikey:SB_KEY},body:JSON.stringify({text_items:textItems,file_name:tpl.original_filename||"template.pdf"})});
       if(!resp.ok)throw new Error("AI parsing failed.");
       const parsed=await resp.json();
       if(parsed.error)throw new Error(parsed.error);
@@ -6600,12 +6607,14 @@ function Dashboard({user, onLogout}){
                                 // Get company name for dynamic sender
                                 const prof=await db.getProfile(user.id).catch(()=>null);
                                 const confirmSender=prof?.company_name||"My Daily Reports";
-                                fetch(`${SB_URL}/functions/v1/send-report`,{
-                                  method:"POST",headers:{"Content-Type":"application/json",Authorization:`Bearer ${SB_KEY}`,apikey:SB_KEY},
+                                await refreshAuthToken();
+                                const confirmR=await fetch(`${SB_URL}/functions/v1/send-report`,{
+                                  method:"POST",headers:{"Content-Type":"application/json",Authorization:`Bearer ${AUTH_TOKEN||SB_KEY}`,apikey:SB_KEY},
                                   body:JSON.stringify({to:[rq.requester_email],sender_name:confirmSender,subject:`Visit Confirmed — ${rq.jobs?.name||"Job"} on ${reqDate}`,
                                     html_body:`<div style="font-family:-apple-system,sans-serif;max-width:600px;margin:0 auto;"><div style="background:#22c55e;padding:20px 24px;border-radius:8px 8px 0 0;"><h1 style="color:#fff;margin:0;font-size:20px;">Visit Confirmed</h1></div><div style="background:#f9f9f9;padding:24px;border:1px solid #e0e0e0;border-top:none;border-radius:0 0 8px 8px;"><p style="color:#333;font-size:16px;line-height:1.6;margin:0 0 8px;">Hi ${rq.requester_name||"there"},</p><p style="color:#333;font-size:15px;line-height:1.6;margin:0 0 16px;">Your scheduling request for <strong>${rq.jobs?.name||"the job"}</strong> has been confirmed by ${inspectorName} for <strong>${reqDate}</strong>.</p><p style="color:#555;font-size:14px;margin:0;">Type: ${rq.inspection_type||"General Visit"}</p></div><p style="color:#999;font-size:11px;text-align:center;margin-top:16px;">Sent via My Daily Reports &bull; mydailyreports.com</p></div>`
                                   })
-                                }).catch(emailErr=>console.error("Confirmation email error:",emailErr));
+                                });
+                                if(!confirmR.ok)console.error("Confirmation email failed:",confirmR.status);
                               }
                               await loadRequests();
                             }catch(er){alert("Error: "+er.message);}}} style={{flex:1,padding:"7px 0",fontSize:12,fontWeight:700,borderRadius:6,background:"#22c55e",border:"none",color:"#fff",cursor:"pointer"}}>

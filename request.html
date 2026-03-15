@@ -226,13 +226,13 @@ details[open] .collapsible-summary::after { content: '−'; }
 <button onclick="resetForm()" style="background:none; border:2px solid #5a8fc0; color:#5a8fc0; padding:10px 20px; border-radius:8px; margin-top:20px; cursor:pointer;">Submit Another</button>
 </div>
 <script>
-var SB='https://ckpffcpfkusltgirayxx.supabase.co';
+var SB='https://wluvkmpncafugdbunlkw.supabase.co';
 var params=new URLSearchParams(window.location.search);
 var PROJ=params.get('project')||'Demo';
 var cleanName=PROJ.replace(/-/g,' ');
 document.getElementById('projectSubtitle').textContent=cleanName;
 document.title=cleanName+' - Scheduling Request';
-var AK='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNrcGZmY3Bma3VzbHRnaXJheXh4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzE5ODg1NDQsImV4cCI6MjA4NzU2NDU0NH0.2xvQtO98q_0-tt3FtLx_yPwVMCA0UP9GBbjIK3dVLQw';
+var AK='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndsdXZrbXBuY2FmdWdkYnVubGt3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzIzMDU1MTUsImV4cCI6MjA4Nzg4MTUxNX0.HZpQ2xVGpf4EQ0BVDmIEuPqW5T_eNG5OqBNAqT03rH8';
 var isAdmin=params.get('admin')==='true';
 var allFiles=[], inspType='', inspDur='', cM=new Date().getMonth(), cY=new Date().getFullYear(), mD={};
 var savedContacts=[];
