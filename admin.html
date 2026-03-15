@@ -710,17 +710,20 @@ function TemplatesTab({hGet,h,session}){
 
   const lookupUser=async()=>{
     if(!userEmail.trim())return;
+    const emailLower=userEmail.toLowerCase().trim();
     try{
-      const r=await fetch(`${SB_URL}/rest/v1/profiles?email=eq.${encodeURIComponent(userEmail.trim())}&select=id,full_name,email&limit=1`,{headers:hGet()});
+      // Check profiles first (by email column)
+      const r=await fetch(`${SB_URL}/rest/v1/profiles?email=eq.${encodeURIComponent(emailLower)}&select=id,full_name,email&limit=1`,{headers:hGet()});
       const data=await r.json();
-      if(!data||!data[0]){
-        // Try auth admin API
-        const ar=await fetch(`${SB_URL}/auth/v1/admin/users?page=1&per_page=50`,{headers:{"apikey":SB_KEY,"Authorization":"Bearer "+session.access_token}});
-        if(ar.ok){const ad=await ar.json();const u=(ad.users||ad).find(u=>u.email?.toLowerCase()===userEmail.toLowerCase().trim());if(u){setUserId(u.id);setUserName(u.user_metadata?.full_name||u.email);return;}}
-        alert("User not found");return;
-      }
-      setUserId(data[0].id);
-      setUserName(data[0].full_name||data[0].email);
+      if(data&&data[0]){setUserId(data[0].id);setUserName(data[0].full_name||data[0].email);return;}
+      // Check profiles by slug (in case they search by name)
+      const sr=await fetch(`${SB_URL}/rest/v1/profiles?or=(full_name.ilike.*${encodeURIComponent(emailLower)}*,slug.ilike.*${encodeURIComponent(emailLower)}*)&select=id,full_name,email&limit=1`,{headers:hGet()});
+      const sd=await sr.json();
+      if(sd&&sd[0]){setUserId(sd[0].id);setUserName(sd[0].full_name||sd[0].email||"User");return;}
+      // Fall back to auth admin API (searches actual login email)
+      const ar=await fetch(`${SB_URL}/auth/v1/admin/users?page=1&per_page=50`,{headers:{"apikey":SB_KEY,"Authorization":"Bearer "+session.access_token}});
+      if(ar.ok){const ad=await ar.json();const u=(ad.users||ad).find(u=>u.email?.toLowerCase()===emailLower);if(u){setUserId(u.id);setUserName(u.user_metadata?.full_name||u.email);return;}}
+      alert("User not found");
     }catch(e){alert(e.message);}
   };
 
