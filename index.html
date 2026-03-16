@@ -757,16 +757,43 @@ const db = {
     if(!r.ok){const e=await r.json().catch(()=>({}));throw new Error(e.message||"copy_company_templates failed");}
     return await r.json(); // returns count of templates copied
   },
-  // Company logo — stored as base64 data URL in localStorage (simple, no bucket/RLS issues)
-  saveCompanyLogo(companyId,dataUrl){
-    try{localStorage.setItem("mdr_logo_"+companyId,dataUrl);}catch(e){console.warn("[logo] localStorage full:",e);}
+  // Company logo — upload to Supabase storage, save path in companies.logo_url
+  async uploadCompanyLogo(companyId,file){
+    const slug=companyId.substring(0,8);
+    const ext=file.name.split(".").pop()||"png";
+    const storagePath=`${slug}/logo.${ext}`;
+    // Upload to company-templates bucket under logos prefix
+    let upR=await fetch(`${SB_URL}/storage/v1/object/company-templates/${storagePath}`,{
+      method:"POST",headers:{apikey:SB_KEY,Authorization:`Bearer ${AUTH_TOKEN||SB_KEY}`,"Content-Type":file.type},body:file
+    });
+    if(!upR.ok){upR=await fetch(`${SB_URL}/storage/v1/object/company-templates/${storagePath}`,{
+      method:"PUT",headers:{apikey:SB_KEY,Authorization:`Bearer ${AUTH_TOKEN||SB_KEY}`,"Content-Type":file.type},body:file
+    });}
+    if(!upR.ok)throw new Error("Logo upload failed ("+upR.status+")");
+    // Build public URL and save to companies table
+    const logoUrl=`${SB_URL}/storage/v1/object/public/company-templates/${storagePath}`;
+    await fetch(`${SB_URL}/rest/v1/companies?id=eq.${companyId}`,{method:"PATCH",headers:this._h(),body:JSON.stringify({logo_url:logoUrl})});
+    // Also cache locally for instant display
+    try{localStorage.setItem("mdr_logo_"+companyId,logoUrl);}catch(e){}
+    return logoUrl;
   },
   getCompanyLogo(companyId){
+    // Check localStorage cache first for instant display
     try{return localStorage.getItem("mdr_logo_"+companyId)||null;}catch(e){return null;}
+  },
+  async getCompanyLogoUrl(companyId){
+    // Try localStorage first, then fetch from companies table
+    const cached=this.getCompanyLogo(companyId);
+    if(cached)return cached;
+    try{
+      const r=await fetch(`${SB_URL}/rest/v1/companies?id=eq.${companyId}&select=logo_url&limit=1`,{headers:this._h()});
+      if(r.ok){const d=await r.json();const url=d[0]?.logo_url;if(url){try{localStorage.setItem("mdr_logo_"+companyId,url);}catch(e){}return url;}}
+    }catch(e){}
+    return null;
   },
   // Get company record by ID
   async getCompany(companyId){
-    const r=await fetch(`${SB_URL}/rest/v1/companies?id=eq.${companyId}&select=id,name,logo_path&limit=1`,{headers:this._h()});
+    const r=await fetch(`${SB_URL}/rest/v1/companies?id=eq.${companyId}&select=id,name,logo_url&limit=1`,{headers:this._h()});
     if(!r.ok)return null;
     const d=await r.json();return d[0]||null;
   },
@@ -822,9 +849,9 @@ function AccountSettings({user, onBack, onLogout}){
           if(p.company_name)setCompanyName(p.company_name);
           if(p.company_id){
             setSelectedCompany({id:p.company_id,name:p.company_name||""});
-            // Load logo from localStorage
-            const savedLogo=db.getCompanyLogo(p.company_id);
-            if(savedLogo)setCompanyLogoUrl(savedLogo);
+            // Load logo — try localStorage cache first, then fetch from Supabase
+            const logoUrl=await db.getCompanyLogoUrl(p.company_id);
+            if(logoUrl)setCompanyLogoUrl(logoUrl);
             try{const tpls=await db.getCompanyTemplates(p.company_id);setCompanyTemplates(tpls);}catch(e){}
           }
           if(p.timezone)setTimezone(p.timezone);
@@ -859,13 +886,13 @@ function AccountSettings({user, onBack, onLogout}){
   const loadCompanyTemplates=async(companyId)=>{
     try{const tpls=await db.getCompanyTemplates(companyId);setCompanyTemplates(tpls);}catch(e){setCompanyTemplates([]);}
   };
-  const selectCompany=(company)=>{
+  const selectCompany=async(company)=>{
     setSelectedCompany(company);
     setCompanyName(company.name);
     setCompanyMatches([]);
-    // Load logo from localStorage for this company
-    const savedLogo=db.getCompanyLogo(company.id);
-    setCompanyLogoUrl(savedLogo);
+    // Load logo from Supabase (with localStorage cache)
+    const logoUrl=await db.getCompanyLogoUrl(company.id);
+    setCompanyLogoUrl(logoUrl);
     loadCompanyTemplates(company.id);
   };
   const clearCompany=()=>{
@@ -883,10 +910,8 @@ function AccountSettings({user, onBack, onLogout}){
     if(file.size>2*1024*1024){flash("Logo must be under 2MB","err");return;}
     setUploadingLogo(true);
     try{
-      // Convert to data URL and store locally — no bucket/RLS needed
-      const dataUrl=await new Promise((res,rej)=>{const fr=new FileReader();fr.onload=()=>res(fr.result);fr.onerror=rej;fr.readAsDataURL(file);});
-      db.saveCompanyLogo(selectedCompany.id,dataUrl);
-      setCompanyLogoUrl(dataUrl);
+      const logoUrl=await db.uploadCompanyLogo(selectedCompany.id,file);
+      setCompanyLogoUrl(logoUrl);
       flash("Company logo saved");
     }catch(err){flash("Logo save failed: "+err.message,"err");}
     finally{setUploadingLogo(false);if(logoInputRef.current)logoInputRef.current.value="";}
@@ -2759,14 +2784,22 @@ function WorkLogEditor({job, user, onBack, reportDate}){
       try{const prof=await db.getProfile(user.id);if(prof?.company_id&&prof.company_id!==job.company_id)companyIds.push(prof.company_id);}catch(e){}
       for(const cid of companyIds){
         if(!cid||logoBytes)continue;
-        const localLogo=db.getCompanyLogo(cid);
-        if(localLogo&&localLogo.startsWith("data:image")){
+        const logoUrl=await db.getCompanyLogoUrl(cid);
+        if(logoUrl){
           try{
-            const b64=localLogo.split(",")[1];
-            const bin=atob(b64);
-            const arr=new Uint8Array(bin.length);for(let i=0;i<bin.length;i++)arr[i]=bin.charCodeAt(i);
-            logoBytes=arr;
-            isJpg=!localLogo.includes("image/png");
+            if(logoUrl.startsWith("data:image")){
+              const b64=logoUrl.split(",")[1];
+              const bin=atob(b64);
+              const arr=new Uint8Array(bin.length);for(let i=0;i<bin.length;i++)arr[i]=bin.charCodeAt(i);
+              logoBytes=arr;
+              isJpg=!logoUrl.includes("image/png");
+            }else{
+              const resp=await fetch(logoUrl);
+              if(resp.ok){
+                logoBytes=new Uint8Array(await resp.arrayBuffer());
+                isJpg=logoUrl.toLowerCase().endsWith(".jpg")||logoUrl.toLowerCase().endsWith(".jpeg")||resp.headers.get("content-type")?.includes("jpeg");
+              }
+            }
           }catch(e){console.error("Logo decode:",e);}
         }
       }
@@ -6122,7 +6155,7 @@ function Dashboard({user, onLogout}){
   };
   // Quick refresh — only update report statuses (used on back navigation to avoid full reload)
   const refreshStatuses=async()=>{try{const ids=jobs.filter(j=>!j.is_archived).map(j=>j.id);if(ids.length)setRpts(await db.todayRpts(ids));}catch(e){}};
-  const load=async()=>{setLoading(true);try{const a=await db.jobs(user.id);setJobs(a);const ids=a.filter(j=>!j.is_archived).map(j=>j.id);if(ids.length)setRpts(await db.todayRpts(ids));const p=await db.getProfile(user.id);if(p?.slug)setProfileSlug(p.slug);if(p?.company_id){const savedLogo=db.getCompanyLogo(p.company_id);if(savedLogo)setDashLogoUrl(savedLogo);}
+  const load=async()=>{setLoading(true);try{const a=await db.jobs(user.id);setJobs(a);const ids=a.filter(j=>!j.is_archived).map(j=>j.id);if(ids.length)setRpts(await db.todayRpts(ids));const p=await db.getProfile(user.id);if(p?.slug)setProfileSlug(p.slug);if(p?.company_id){db.getCompanyLogoUrl(p.company_id).then(url=>{if(url)setDashLogoUrl(url);}).catch(()=>{});}
     // Check subscription status
     if(p){
       const ss=p.subscription_status||"trialing";
@@ -6152,7 +6185,7 @@ function Dashboard({user, onLogout}){
 
   const doShare=async()=>{const url=window.location.href;if(navigator.share){try{await navigator.share({title:"My Daily Reports",text:"Voice-to-PDF jobsite reports",url});}catch(e){}}else{try{await navigator.clipboard.writeText(url);alert("Link copied!");}catch(e){alert("Could not copy link.");}}};
 
-  if(showAcct)return<AccountSettings user={user} onBack={()=>{setShowAcct(false);/* refresh logo in case it changed */db.getProfile(user.id).then(p=>{if(p?.company_id){const l=db.getCompanyLogo(p.company_id);setDashLogoUrl(l||null);}}).catch(()=>{});}} onLogout={onLogout}/>;
+  if(showAcct)return<AccountSettings user={user} onBack={()=>{setShowAcct(false);/* refresh logo in case it changed */db.getProfile(user.id).then(async p=>{if(p?.company_id){const l=await db.getCompanyLogoUrl(p.company_id);setDashLogoUrl(l||null);}}).catch(()=>{});}} onLogout={onLogout}/>;
   if(showNew)return<CreateJob user={user} onBack={()=>setShowNew(false)} onCreated={()=>{setShowNew(false);load();}}/>;
   if(showArch)return<ArchivedJobs jobs={arch} onBack={()=>setShowArch(false)} onSelect={(j)=>{selectJob(j);setShowArch(false);}}/>;
   if(showTrain)return<TrainingCenter onBack={()=>setShowTrain(false)}/>;
