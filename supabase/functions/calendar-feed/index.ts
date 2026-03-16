@@ -202,18 +202,18 @@ serve(async (req) => {
       lines.push(`SUMMARY:${escapeICS(statusEmoji + summary)}`);
 
       const descParts: string[] = [];
-      descParts.push(`Status: ${r.status || "pending"}`);
-      if (r.submitted_by) descParts.push(`Submitted by: ${r.submitted_by}`);
-      if (r.requester_name)
-        descParts.push(`Requested by: ${r.requester_name}`);
-      if (r.requester_email) descParts.push(`Email: ${r.requester_email}`);
-      if (r.requester_company)
-        descParts.push(`Company: ${r.requester_company}`);
       if (r.inspection_identifier)
         descParts.push(`Request #: ${r.inspection_identifier}`);
+      if (r.requester_name || r.requester_company) {
+        const who = [r.requester_name, r.requester_company].filter(Boolean).join(" — ");
+        descParts.push(`Requested by: ${who}`);
+      }
       if (r.subcontractor) descParts.push(`Subcontractor: ${r.subcontractor}`);
-      if (r.notes) descParts.push(`Notes: ${r.notes}`);
+      if (r.special_type) descParts.push(`Type: ${r.special_type}`);
+      descParts.push(`Status: ${r.status || "pending"}`);
+      descParts.push(`Duration: ${duration} min`);
       if (isFlexible) descParts.push("Time: Flexible — anytime today");
+      if (r.notes) descParts.push(`Notes: ${r.notes}`);
       lines.push(`DESCRIPTION:${escapeICS(descParts.join("\n"))}`);
 
       if (siteAddr) {
