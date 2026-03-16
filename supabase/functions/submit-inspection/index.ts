@@ -68,7 +68,7 @@ serve(async (req) => {
 
     try {
       const { data: allJobs } = await supabase.from("jobs").select("user_id, name").limit(200);
-      const projectLower = project.toLowerCase();
+      const projectLower = project.toLowerCase().replace(/[^a-z0-9]+/g, "-");
       const matchedJob = (allJobs || []).find((j: any) => (j.name || "").toLowerCase().replace(/[^a-z0-9]+/g, "-") === projectLower);
       if (matchedJob) ownerId = matchedJob.user_id;
     } catch (e) { console.error("Job lookup failed:", e); }
