@@ -171,7 +171,7 @@ details[open] .collapsible-summary::after { content: '−'; }
 <label class="field-label">Inspection Type *</label>
 <div class="type-btns">
 <div class="type-btn" id="btnSpecial" onclick="setType('Special')">Special</div>
-<div class="type-btn" id="btnRegular" onclick="setType('IOR')">IOR</div>
+<div class="type-btn" id="btnRegular" onclick="setType('Regular')">Regular</div>
 </div>
 <div class="special-sub" id="specialSub">
 <label class="field-label">Special Inspection Type *</label>
@@ -236,7 +236,7 @@ var AK='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Ind
 var isAdmin=params.get('admin')==='true';
 var allFiles=[], inspType='', inspDur='', cM=new Date().getMonth(), cY=new Date().getFullYear(), mD={};
 var savedContacts=[];
-// Booked time slots per date: { "2026-03-10": [{start:480,end:600,type:"IOR"}, ...] }
+// Booked time slots per date: { "2026-03-10": [{start:480,end:600,type:"Regular"}, ...] }
 // Times stored as minutes from midnight (e.g. 8:00 AM = 480)
 var bookedSlots={};
 function handleFileSelection(input) {
@@ -364,7 +364,7 @@ function showDay(d){
             if(e.project===PROJ){
                 html+='<div class="evt-actions">';
                 html+='<button class="btn-edit" onclick="editInsp(\''+e.id+'\',\''+e.inspection_date+'\',\''+e.inspection_time.substring(0,5)+'\')">Edit</button>';
-                html+='<button class="btn-cancel" onclick="cancelInsp(\''+e.id+'\',\''+e.project+'\',\'IOR\',\''+e.inspection_date+'\',\''+e.inspection_time.substring(0,5)+'\')">Cancel</button>';
+                html+='<button class="btn-cancel" onclick="cancelInsp(\''+e.id+'\',\''+e.project+'\',\'Regular\',\''+e.inspection_date+'\',\''+e.inspection_time.substring(0,5)+'\')">Cancel</button>';
                 if(isAdmin && e.status!=='scheduled') html+='<button class="btn-scheduled" onclick="scheduleInsp(\''+e.id+'\')">Scheduled</button>';
                 html+='</div>';
             }
@@ -432,15 +432,14 @@ document.getElementById('requestView').style.display=t==='request'?'block':'none
 function changeMonth(dir){ cM+=dir; if(cM>11){cM=0;cY++;} if(cM<0){cM=11;cY--;} renderCal(); loadMD(); }
 function ds(y,m,d){return y+'-'+String(m+1).padStart(2,'0')+'-'+String(d).padStart(2,'0');}
 function loadMD(){
-    // Fetch BLOCKING inspections: IOR (any project), Concrete (any project), Grout (any project)
-    // Special inspections do NOT block EXCEPT Concrete and Grout
-    // Also fetch this project's own events (any type) for display
-    var base=SB+'/rest/v1/inspection_requests?or=(status.neq.cancelled,status.is.null)';
+    // Fetch BLOCKING inspections: Regular (any project), Concrete, Grout, Shotcrete (any project)
+    // Special inspections do NOT block EXCEPT Concrete, Grout, and Shotcrete
+    var base=SB+'/rest/v1/inspection_requests?and=(status.neq.cancelled,status.neq.deleted)';
     var hdrs={headers:{'apikey':AK,'Authorization':'Bearer '+AK}};
     Promise.all([
-        // IOR inspections across ALL projects — these block the calendar
-        fetch(base+'&inspection_types=cs.%7BIOR%7D',hdrs).then(function(r){return r.json();}),
-        // This project's own Special inspections — shown on calendar but only Concrete/Grout block
+        // Regular inspections across ALL projects — these block the calendar
+        fetch(base+'&inspection_types=cs.%7BRegular%7D',hdrs).then(function(r){return r.json();}),
+        // This project's own Special inspections — shown on calendar but only Concrete/Grout/Shotcrete block
         fetch(base+'&project=eq.'+encodeURIComponent(PROJ)+'&inspection_types=cs.%7BSpecial%7D',hdrs).then(function(r){return r.json();}),
         // Concrete inspections across ALL projects — these block
         fetch(base+'&inspection_types=cs.%7BConcrete%7D',hdrs).then(function(r){return r.json();}),
@@ -457,12 +456,12 @@ function loadMD(){
             mD[v.inspection_date].push(v);
             // Determine if this event BLOCKS a time slot
             var types=v.inspection_types||[];
-            var isIOR=types.indexOf('IOR')>=0;
+            var isRegular=types.indexOf('Regular')>=0;
             var isConcrete=types.indexOf('Concrete')>=0;
             var isGrout=types.indexOf('Grout')>=0;
             var isShotcrete=types.indexOf('Shotcrete')>=0;
-            // IOR always blocks. Special only blocks for Concrete, Grout, or Shotcrete.
-            if(isIOR||isConcrete||isGrout||isShotcrete){
+            // Regular always blocks. Special only blocks for Concrete, Grout, or Shotcrete.
+            if(isRegular||isConcrete||isGrout||isShotcrete){
                 var startMin=timeToMin(v.inspection_time||'');
                 var durMin=parseInt(v.duration)||60;
                 // Flexible time or missing time: treat as all-day block
@@ -508,7 +507,7 @@ function renderCal(){
         g.appendChild(c);
     }
 }
-function setType(t){inspType=t;document.getElementById('btnSpecial').classList.toggle('active',t==='Special');document.getElementById('btnRegular').classList.toggle('active',t==='IOR');document.getElementById('specialSub').classList.toggle('show',t==='Special');if(t!=='Special')document.getElementById('specialType').selectedIndex=0;checkDateAvailability();}
+function setType(t){inspType=t;document.getElementById('btnSpecial').classList.toggle('active',t==='Special');document.getElementById('btnRegular').classList.toggle('active',t==='Regular');document.getElementById('specialSub').classList.toggle('show',t==='Special');if(t!=='Special')document.getElementById('specialType').selectedIndex=0;checkDateAvailability();}
 function setDur(d){inspDur=d;document.querySelectorAll('.dur-btn').forEach(function(b){b.classList.remove('active');});event.target.classList.add('active');checkDateAvailability();}
 function scheduleInsp(id){
 fetch(SB+'/rest/v1/inspection_requests?id=eq.'+id,{method:'PATCH',headers:{'apikey':AK,'Authorization':'Bearer '+AK,'Content-Type':'application/json'},body:JSON.stringify({status:'scheduled'})})
@@ -519,6 +518,8 @@ function submitIR(){
     var newName=document.getElementById('iNewName').value.trim();
     if((!nm||nm==='other')&&newName){ nm=newName; }
     if(!nm||allFiles.length===0||!d||!t||!inspType||!inspDur){alert('Missing required fields.'); return;}
+    // Persist selected submitter name
+    try{localStorage.setItem('mdr_last_submitter_'+PROJ,nm);}catch(e){}
     // Double-booking check: verify time slot is open
     var reqStartMin=timeToMin(t);
     var reqDurMin=parseInt(inspDur)||60;
@@ -601,6 +602,15 @@ function renderContacts(rows){
         o.textContent=c.name+(c.company?' ('+c.company+')':'');
         sel.appendChild(o);
     });
+    // Restore last selected submitter from localStorage
+    try{
+        var lastSubmitter=localStorage.getItem('mdr_last_submitter_'+PROJ);
+        if(lastSubmitter){
+            for(var i=0;i<sel.options.length;i++){
+                if(sel.options[i].value===lastSubmitter){sel.selectedIndex=i;break;}
+            }
+        }
+    }catch(e){}
     var container=document.getElementById('emailListContainer');
     container.innerHTML='';
     savedContacts.forEach(function(c){

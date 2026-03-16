@@ -104,18 +104,18 @@ serve(async (req) => {
     }
 
     // Server-side conflict detection
-    // Rules: IOR blocks across ALL projects. Special only blocks if type is Concrete, Shotcrete, or Grout.
+    // Rules: Regular blocks across ALL projects. Special only blocks if type is Concrete, Shotcrete, or Grout.
     // Other special types (Soils, Material ID, Bolting, etc.) do NOT block.
     const BLOCKING_SPECIAL_TYPES = ["Concrete", "Shotcrete", "Grout"];
-    const isIOR = inspectionTypes.includes("IOR");
+    const isRegular = inspectionTypes.includes("Regular");
     const isBlockingSpecial = BLOCKING_SPECIAL_TYPES.some(t => inspectionTypes.includes(t) || specialType === t);
-    const incomingBlocks = isIOR || isBlockingSpecial;
+    const incomingBlocks = isRegular || isBlockingSpecial;
 
     if (incomingBlocks && flexibleDisplay !== "flexible") {
       const reqStart = parseInt(actualTime.split(":")[0]) * 60 + parseInt(actualTime.split(":")[1]);
       const reqEnd = reqStart + duration;
 
-      // For IOR: check ALL projects for IOR + blocking-special conflicts on this date
+      // For Regular: check ALL projects for Regular + blocking-special conflicts on this date
       // For blocking specials: also check ALL projects
       const { data: existing } = await supabase
         .from("inspection_requests")
@@ -127,10 +127,10 @@ serve(async (req) => {
       if (existing && existing.length > 0) {
         const conflict = existing.find((r: any) => {
           const rTypes = r.inspection_types || [];
-          const rIsIOR = rTypes.includes("IOR");
+          const rIsRegular = rTypes.includes("Regular");
           const rIsBlockingSpecial = BLOCKING_SPECIAL_TYPES.some((t: string) => rTypes.includes(t));
           // Only conflict against other blocking types
-          if (!rIsIOR && !rIsBlockingSpecial) return false;
+          if (!rIsRegular && !rIsBlockingSpecial) return false;
           // Flexible existing requests block all day
           if (r.flexible_display === "flexible") return true;
           const rStart = parseInt((r.inspection_time || "08:00").split(":")[0]) * 60 + parseInt((r.inspection_time || "08:00").split(":")[1]);

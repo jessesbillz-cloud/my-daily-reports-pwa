@@ -442,7 +442,7 @@ document.getElementById('requestView').style.display=t==='request'?'block':'none
 function changeMonth(dir){ cM+=dir; if(cM>11){cM=0;cY++;} if(cM<0){cM=11;cY--;} renderCal(); loadMD(); }
 function ds(y,m,d){return y+'-'+String(m+1).padStart(2,'0')+'-'+String(d).padStart(2,'0');}
 function loadMD(){
-    var base=SB+'/rest/v1/inspection_requests?status=neq.deleted';
+    var base=SB+'/rest/v1/inspection_requests?and=(status.neq.cancelled,status.neq.deleted)';
     var hdrs={headers:{'apikey':AK,'Authorization':'Bearer '+AK}};
     Promise.all([
         fetch(base+'&inspection_types=cs.%7BRegular%7D',hdrs).then(function(r){return r.json();}),
@@ -501,12 +501,19 @@ function addPersonToTeam(){
     savedContacts.push(newContact);
     renderTeamList();
     refreshDropdownAndEmails();
+    // Auto-select the new person as submitter
+    var sel=document.getElementById('iName');
+    for(var i=0;i<sel.options.length;i++){if(sel.options[i].value===name){sel.selectedIndex=i;break;}}
+    // Save last selected name
+    try{localStorage.setItem('mdr_last_submitter_'+PROJ,name);}catch(e){}
     // Clear inputs
     document.getElementById('iNewName').value='';
     document.getElementById('iNewEmail').value='';
     document.getElementById('iNewCompany').value='';
     // Save to Supabase in background
     fetch(SB+'/rest/v1/contacts',{method:'POST',headers:{'apikey':AK,'Authorization':'Bearer '+AK,'Content-Type':'application/json','Prefer':'resolution=merge-duplicates'},body:JSON.stringify({name:name,email:email||null,company:company||null,project:PROJ})}).catch(function(){});
+    // Also cache contacts locally
+    try{localStorage.setItem('mdr_contacts_'+PROJ,JSON.stringify(savedContacts));}catch(e){}
 }
 function removePersonFromTeam(index){
     savedContacts.splice(index,1);
@@ -532,6 +539,8 @@ function refreshDropdownAndEmails(){
     // Update Submitted By dropdown
     var sel=document.getElementById('iName');
     var currentVal=sel.value;
+    // If no current val, try restoring from localStorage
+    if(!currentVal){try{currentVal=localStorage.getItem('mdr_last_submitter_'+PROJ)||'';}catch(e){}}
     sel.innerHTML='<option value="">Select your name</option>';
     savedContacts.forEach(function(c){
         var o=document.createElement('option');
@@ -642,6 +651,8 @@ function toggleAddlRecipient(index,checked){
 function submitIR(){
     var d=document.getElementById('iDate').value, t=document.getElementById('iTime').value, nm=document.getElementById('iName').value;
     if(!nm||allFiles.length===0||!d||!t||!inspType||!inspDur){alert('Missing required fields.'); return;}
+    // Persist selected submitter name
+    try{localStorage.setItem('mdr_last_submitter_'+PROJ,nm);}catch(e){}
     // Conflict check (non-blocking warning)
     if(t!=='flexible'){
         var conflicts=checkSchedulingConflicts(d,t,[inspType],inspDur);
