@@ -444,31 +444,27 @@ document.querySelectorAll('.tab')[1].classList.toggle('active',t==='request');
 document.getElementById('calendarView').style.display=t==='calendar'?'block':'none';
 document.getElementById('requestView').style.display=t==='request'?'block':'none';
 }
-function changeMonth(dir){ cM+=dir; if(cM>11){cM=0;cY++;} if(cM<0){cM=11;cY--;} renderCal(); loadMD(); }
+function changeMonth(dir){ cM+=dir; if(cM>11){cM=0;cY++;} if(cM<0){cM=11;cY--;} renderCal(); }
 function ds(y,m,d){return y+'-'+String(m+1).padStart(2,'0')+'-'+String(d).padStart(2,'0');}
+var _loadMDTimer=null;
 function loadMD(){
-    if(!OWNER_USER_ID){renderCal();return;} // wait until we know whose calendar
-    // Fetch BLOCKING inspections: Regular, Concrete, Grout, Shotcrete — all scoped to this inspector
-    var base=SB+'/rest/v1/inspection_requests?user_id=eq.'+OWNER_USER_ID+'&and=(status.neq.cancelled,status.neq.deleted)';
-    var hdrs={headers:{'apikey':AK,'Authorization':'Bearer '+AK}};
-    Promise.all([
-        // Regular inspections across all this inspector's projects — these block the calendar
-        fetch(base+'&inspection_types=cs.%7BRegular%7D',hdrs).then(function(r){return r.json();}),
-        // Special inspections for this inspector — shown on calendar, Concrete/Grout/Shotcrete block
-        fetch(base+'&inspection_types=cs.%7BSpecial%7D',hdrs).then(function(r){return r.json();}),
-        // Concrete inspections — these block
-        fetch(base+'&inspection_types=cs.%7BConcrete%7D',hdrs).then(function(r){return r.json();}),
-        // Grout inspections — these block
-        fetch(base+'&inspection_types=cs.%7BGrout%7D',hdrs).then(function(r){return r.json();}),
-        // Shotcrete inspections — these block
-        fetch(base+'&inspection_types=cs.%7BShotcrete%7D',hdrs).then(function(r){return r.json();})
-    ]).then(function(res){
-        mD={};var seen={};
+    if(_loadMDTimer)clearTimeout(_loadMDTimer);
+    _loadMDTimer=setTimeout(_doLoadMD,100);
+}
+function _doLoadMD(){
+    _loadMDTimer=null;
+    if(!OWNER_USER_ID){renderCal();return;}
+    var url=SB+'/rest/v1/inspection_requests?user_id=eq.'+OWNER_USER_ID+'&and=(status.neq.cancelled,status.neq.deleted)&select=*';
+    fetch(url,{headers:{'apikey':AK,'Authorization':'Bearer '+AK}})
+    .then(function(r){return r.json();})
+    .then(function(rows){
+        mD={};
         bookedSlots={};
-        res[0].concat(res[1]).concat(res[2]).concat(res[3]).concat(res[4]).forEach(function(v){
-            if(seen[v.id])return;seen[v.id]=true;
-            if(!mD[v.inspection_date])mD[v.inspection_date]=[];
-            mD[v.inspection_date].push(v);
+        rows.forEach(function(v){
+            var d=v.inspection_date||v.requested_date;
+            if(!d)return;
+            if(!mD[d])mD[d]=[];
+            mD[d].push(v);
             // Determine if this event BLOCKS a time slot
             var types=v.inspection_types||[];
             var isRegular=types.indexOf('Regular')>=0;
@@ -481,8 +477,8 @@ function loadMD(){
                 var durMin=parseInt(v.duration)||60;
                 // Flexible time or missing time: treat as all-day block
                 if(startMin<0||(v.flexible_display==='flexible')) { startMin=0; durMin=480+(10*60); }
-                if(!bookedSlots[v.inspection_date])bookedSlots[v.inspection_date]=[];
-                bookedSlots[v.inspection_date].push({start:startMin,end:startMin+durMin,type:types.join(',')});
+                if(!bookedSlots[d])bookedSlots[d]=[];
+                bookedSlots[d].push({start:startMin,end:startMin+durMin,type:types.join(',')});
             }
         });
         renderCal();
@@ -499,7 +495,8 @@ function renderCal(){
         var s=ds(cY,cM,d),c=document.createElement('div');
         var fullyBooked=isDateFullyBooked(s);
         var hasBookings=dateHasBookings(s);
-        c.className='day-cell'+(fullyBooked?' blocked':'');
+        var todayStr=ds(new Date().getFullYear(),new Date().getMonth(),new Date().getDate());
+        c.className='day-cell'+(fullyBooked?' blocked':'')+(s===todayStr?' today':'');
         c.innerHTML='<span class="day-num">'+d+'</span>';
         if(mD[s]){
             var active=mD[s].filter(function(e){return e.status!=='cancelled';});

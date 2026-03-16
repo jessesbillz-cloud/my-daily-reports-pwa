@@ -131,12 +131,6 @@ details[open] .collapsible-summary::after { content: '−'; }
 </div>
 </div>
 </div>
-<!-- BRANDING (below the calendar) -->
-<div style="display:flex;align-items:center;justify-content:center;gap:10px;padding:12px 0;margin-bottom:8px;">
-    <img src="logo.jpg" alt="Logo" style="width:30px;height:30px;border-radius:6px;">
-    <span style="font-size:13px;color:#888;">Powered by</span>
-    <a href="https://mydailyreports.org" target="_blank" style="font-size:13px;font-weight:700;color:#e8742a;text-decoration:none;">My Daily Reports</a>
-</div>
 <div id="requestView" class="form-wrap">
 <label class="field-label">Photos or PDFs *</label>
 <div class="photo-box" onclick="document.getElementById('photoIn').click()">
@@ -240,6 +234,12 @@ details[open] .collapsible-summary::after { content: '−'; }
 <h2>Request Submitted</h2>
 <button onclick="resetForm()" style="background:none; border:2px solid #5a8fc0; color:#5a8fc0; padding:10px 20px; border-radius:8px; margin-top:20px; cursor:pointer;">Submit Another</button>
 </div>
+<!-- BRANDING (always at bottom) -->
+<div style="display:flex;align-items:center;justify-content:center;gap:10px;padding:12px 0;margin-bottom:8px;">
+    <img src="logo.jpg" alt="Logo" style="width:30px;height:30px;border-radius:6px;">
+    <span style="font-size:13px;color:#888;">Powered by</span>
+    <a href="https://mydailyreports.org" target="_blank" style="font-size:13px;font-weight:700;color:#e8742a;text-decoration:none;">My Daily Reports</a>
+</div>
 <script>
 var SB='https://wluvkmpncafugdbunlkw.supabase.co';
 var params=new URLSearchParams(window.location.search);
@@ -339,8 +339,8 @@ function showDay(d){
             } else {
                 html+='<div style="color:#e8742a;font-size:12px;font-weight:600;margin-top:4px;">⏳ Pending</div>';
             }
-            // Actions — only for non-cancelled events on this project
-            if(!isCancelled && e.project===PROJ){
+            // Actions — admin sees buttons on all events, non-admin only for this project
+            if(!isCancelled && (isAdmin || e.project===PROJ)){
                 html+='<div class="evt-actions">';
                 if(isAdmin){
                     if(!isScheduled){
@@ -375,7 +375,10 @@ var btn=document.createElement('button'); btn.style.cssText='display:block;width
 btn.onclick=function(){document.body.removeChild(overlay);callback(n);}; box.appendChild(btn);
 });
 var cancel=document.createElement('button'); cancel.style.cssText='display:block;width:100%;padding:10px;font-size:13px;color:#888;background:transparent;border:1px solid #333;border-radius:6px;cursor:pointer;margin-top:4px;'; cancel.textContent='Never mind';
-cancel.onclick=function(){document.body.removeChild(overlay);}; box.appendChild(cancel);
+cancel.onclick=function(){document.body.removeChild(overlay);document.removeEventListener('keydown',escHandler);}; box.appendChild(cancel);
+overlay.onclick=function(e){if(e.target===overlay){document.body.removeChild(overlay);document.removeEventListener('keydown',escHandler);}};
+var escHandler=function(e){if(e.key==='Escape'){document.body.removeChild(overlay);document.removeEventListener('keydown',escHandler);}};
+document.addEventListener('keydown',escHandler);
 overlay.appendChild(box); document.body.appendChild(overlay);
 }
 function cancelInsp(id,proj,ty,date,time){
@@ -400,8 +403,11 @@ function showEditModal(id,oldDate,oldTime,who){
 var overlay=document.createElement('div'); overlay.style.cssText='position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.8);z-index:1000;display:flex;align-items:center;justify-content:center;padding:20px;';
 var modal=document.createElement('div'); modal.style.cssText='background:#1a1a1a;border-radius:12px;padding:30px;max-width:400px;width:100%;border:1px solid #333;';
 modal.innerHTML='<h3 style="color:#e8742a;margin-bottom:20px;">Edit Request</h3><label style="color:#ccc;font-size:13px;">New Date</label><input type="date" id="eDate" value="'+oldDate+'" class="field-input"><label style="color:#ccc;font-size:13px;">New Time</label><input type="time" id="eTime" value="'+oldTime+'" class="field-input"><div style="display:flex;gap:10px;margin-top:20px;"><button id="cEdit" style="flex:1;background:#333;color:#fff;padding:12px;border:none;border-radius:8px;">Cancel</button><button id="sEdit" style="flex:1;background:#e8742a;color:#fff;padding:12px;border:none;border-radius:8px;">Save</button></div>';
+overlay.onclick=function(e){if(e.target===overlay){overlay.remove();document.removeEventListener('keydown',editEsc);}};
+var editEsc=function(e){if(e.key==='Escape'){overlay.remove();document.removeEventListener('keydown',editEsc);}};
+document.addEventListener('keydown',editEsc);
 overlay.appendChild(modal); document.body.appendChild(overlay);
-document.getElementById('cEdit').onclick=function(){overlay.remove();};
+document.getElementById('cEdit').onclick=function(){overlay.remove();document.removeEventListener('keydown',editEsc);};
 document.getElementById('sEdit').onclick=function(){
 var nD=document.getElementById('eDate').value, nT=document.getElementById('eTime').value;
 var saveBtn=document.getElementById('sEdit');saveBtn.disabled=true;saveBtn.textContent='Saving...';saveBtn.style.opacity='0.5';
@@ -470,24 +476,27 @@ document.querySelectorAll('.tab')[1].classList.toggle('active',t==='request');
 document.getElementById('calendarView').style.display=t==='calendar'?'block':'none';
 document.getElementById('requestView').style.display=t==='request'?'block':'none';
 }
-function changeMonth(dir){ cM+=dir; if(cM>11){cM=0;cY++;} if(cM<0){cM=11;cY--;} renderCal(); loadMD(); }
+function changeMonth(dir){ cM+=dir; if(cM>11){cM=0;cY++;} if(cM<0){cM=11;cY--;} renderCal(); }
 function ds(y,m,d){return y+'-'+String(m+1).padStart(2,'0')+'-'+String(d).padStart(2,'0');}
+var _loadMDTimer=null;
 function loadMD(){
-    if(!OWNER_USER_ID){renderCal();return;} // wait until we know whose calendar
-    var base=SB+'/rest/v1/inspection_requests?user_id=eq.'+OWNER_USER_ID+'&and=(status.neq.cancelled,status.neq.deleted)';
-    var hdrs={headers:{'apikey':AK,'Authorization':'Bearer '+AK}};
-    Promise.all([
-        fetch(base+'&inspection_types=cs.%7BRegular%7D',hdrs).then(function(r){return r.json();}),
-        fetch(base+'&inspection_types=cs.%7BSpecial%7D',hdrs).then(function(r){return r.json();}),
-        fetch(base+'&inspection_types=cs.%7BConcrete%7D',hdrs).then(function(r){return r.json();}),
-        fetch(base+'&inspection_types=cs.%7BGrout%7D',hdrs).then(function(r){return r.json();}),
-        fetch(base+'&inspection_types=cs.%7BShotcrete%7D',hdrs).then(function(r){return r.json();})
-    ]).then(function(res){
-        mD={};var seen={};
-        res[0].concat(res[1]).concat(res[2]).concat(res[3]).concat(res[4]).forEach(function(v){
-            if(seen[v.id])return;seen[v.id]=true;
-            if(!mD[v.inspection_date])mD[v.inspection_date]=[];
-            mD[v.inspection_date].push(v);
+    // Debounce: if called multiple times quickly, only the last one fires
+    if(_loadMDTimer)clearTimeout(_loadMDTimer);
+    _loadMDTimer=setTimeout(_doLoadMD,100);
+}
+function _doLoadMD(){
+    _loadMDTimer=null;
+    if(!OWNER_USER_ID){renderCal();return;}
+    var url=SB+'/rest/v1/inspection_requests?user_id=eq.'+OWNER_USER_ID+'&and=(status.neq.cancelled,status.neq.deleted)&select=*';
+    fetch(url,{headers:{'apikey':AK,'Authorization':'Bearer '+AK}})
+    .then(function(r){return r.json();})
+    .then(function(rows){
+        mD={};
+        rows.forEach(function(v){
+            var d=v.inspection_date||v.requested_date;
+            if(!d)return;
+            if(!mD[d])mD[d]=[];
+            mD[d].push(v);
         });
         renderCal();
     }).catch(function(err){console.warn('loadMD fetch error:',err.message);renderCal();});
@@ -499,7 +508,8 @@ function renderCal(){
     for(var i=0;i<sd;i++) g.appendChild(document.createElement('div')).className='day-cell other-month';
     for(var d=1;d<=ld;d++){
         var s=ds(cY,cM,d),c=document.createElement('div');
-        c.className='day-cell';c.innerHTML='<span class="day-num">'+d+'</span>';
+        var todayStr=ds(new Date().getFullYear(),new Date().getMonth(),new Date().getDate());
+        c.className='day-cell'+(s===todayStr?' today':'');c.innerHTML='<span class="day-num">'+d+'</span>';
         if(mD[s]){
             var active=mD[s].filter(function(e){return e.status!=='cancelled';});
             if(active.length>0){
