@@ -63,6 +63,7 @@ select.field-input{background:#222;color:#fff;}
 .collapsible-summary::after { content: '+'; font-size: 16px; font-weight: bold; }
 details[open] .collapsible-summary::after { content: '−'; }
 .submit-btn{width:100%;padding:14px;font-size:15px;font-weight:bold;color:#fff;background:#e8742a;border:none;border-radius:8px;cursor:pointer;margin-top:20px;}
+.submit-btn:disabled,.evt-actions button:disabled{opacity:0.5;cursor:not-allowed;pointer-events:none;}
 .success-view{display:none;text-align:center;padding:60px 20px;color:#fff;}
 .reset-btn{margin-top:16px;padding:10px 20px;font-size:14px;font-weight:bold;color:#5a8fc0;background:none;border:2px solid #5a8fc0;border-radius:8px;cursor:pointer;}
 /* ADD PERSON INLINE */
@@ -370,8 +371,10 @@ team=team.filter(function(n,i){return team.indexOf(n)===i;}); // deduplicate
 if(team.length===0) team=["(no saved contacts)"];
 showActionModal('Who is cancelling this?',team,function(who){
 var reason=prompt('Reason (optional):');
+var btns=document.querySelectorAll('.evt-actions button');btns.forEach(function(b){b.disabled=true;b.style.opacity='0.5';});
 fetch(SB+'/functions/v1/update-inspection',{method:'POST',headers:{'Authorization':'Bearer '+AK,'apikey':AK,'Content-Type':'application/json'},body:JSON.stringify({request_id:id,action:'cancel',action_by:who,reason:reason||'',notify:true})})
-.then(function(r){return r.json();}).then(function(data){if(data.success){alert('Cancelled. Notifications sent.'); loadMD();} else {alert('Error: '+data.error);}});
+.then(function(r){return r.json();}).then(function(data){if(data.success){alert('Cancelled. Notifications sent.'); loadMD();} else {alert('Error: '+data.error);btns.forEach(function(b){b.disabled=false;b.style.opacity='1';});}})
+.catch(function(err){alert('Failed: '+err.message);btns.forEach(function(b){b.disabled=false;b.style.opacity='1';});});
 });
 }
 function editInsp(id,oldDate,oldTime){
@@ -388,8 +391,10 @@ overlay.appendChild(modal); document.body.appendChild(overlay);
 document.getElementById('cEdit').onclick=function(){overlay.remove();};
 document.getElementById('sEdit').onclick=function(){
 var nD=document.getElementById('eDate').value, nT=document.getElementById('eTime').value;
+var saveBtn=document.getElementById('sEdit');saveBtn.disabled=true;saveBtn.textContent='Saving...';saveBtn.style.opacity='0.5';
 fetch(SB+'/functions/v1/update-inspection',{method:'POST',headers:{'Authorization':'Bearer '+AK,'apikey':AK,'Content-Type':'application/json'},body:JSON.stringify({request_id:id,action:'edit',action_by:who,new_date:nD,new_time:nT,notify:true})})
-.then(function(r){return r.json();}).then(function(data){if(data.success){alert('Updated. Notifications sent.'); overlay.remove(); loadMD();} else {alert('Error: '+data.error);}});
+.then(function(r){return r.json();}).then(function(data){if(data.success){alert('Updated. Notifications sent.'); overlay.remove(); loadMD();} else {alert('Error: '+data.error);saveBtn.disabled=false;saveBtn.textContent='Save';saveBtn.style.opacity='1';}})
+.catch(function(err){alert('Failed: '+err.message);saveBtn.disabled=false;saveBtn.textContent='Save';saveBtn.style.opacity='1';});
 };
 }
 function editInspAdmin(id,oldDate,oldTime,oldDur){
@@ -414,15 +419,18 @@ document.getElementById('caEdit').onclick=function(){overlay.remove();};
 document.getElementById('saEdit').onclick=function(){
 var nD=document.getElementById('eaDate').value, nT=document.getElementById('eaTime').value;
 var nDur=document.getElementById('eDur').value, nNotes=document.getElementById('eaNotes').value;
+var saveBtn=document.getElementById('saEdit');saveBtn.disabled=true;saveBtn.textContent='Saving...';saveBtn.style.opacity='0.5';
 fetch(SB+'/functions/v1/update-inspection',{method:'POST',headers:{'Authorization':'Bearer '+AK,'apikey':AK,'Content-Type':'application/json'},body:JSON.stringify({request_id:id,action:'edit',action_by:'Admin',new_date:nD,new_time:nT,new_duration:nDur,new_notes:nNotes})})
-.then(function(r){return r.json();}).then(function(data){if(data.success){overlay.remove(); loadMD();} else {alert('Error: '+data.error);}});
+.then(function(r){return r.json();}).then(function(data){if(data.success){overlay.remove(); loadMD();} else {alert('Error: '+data.error);saveBtn.disabled=false;saveBtn.textContent='Save';saveBtn.style.opacity='1';}})
+.catch(function(err){alert('Failed: '+err.message);saveBtn.disabled=false;saveBtn.textContent='Save';saveBtn.style.opacity='1';});
 };
 }
 function deleteInsp(id){
 if(!confirm('Delete this scheduling request? This cannot be undone.')) return;
+var btns=document.querySelectorAll('.evt-actions button');btns.forEach(function(b){b.disabled=true;b.style.opacity='0.5';});
 fetch(SB+'/functions/v1/update-inspection',{method:'POST',headers:{'Authorization':'Bearer '+AK,'apikey':AK,'Content-Type':'application/json'},body:JSON.stringify({request_id:id,action:'delete',action_by:'Admin'})})
-.then(function(r){return r.json();}).then(function(data){if(data.success){loadMD();} else {alert('Error: '+(data.error||'Unknown'));}})
-.catch(function(err){alert('Failed: '+err.message);});
+.then(function(r){return r.json();}).then(function(data){if(data.success){loadMD();} else {alert('Error: '+(data.error||'Unknown'));btns.forEach(function(b){b.disabled=false;b.style.opacity='1';});}})
+.catch(function(err){alert('Failed: '+err.message);btns.forEach(function(b){b.disabled=false;b.style.opacity='1';});});
 }
 var calFeedURL=SB+'/functions/v1/calendar-feed?project='+encodeURIComponent(PROJ);
 setTimeout(function(){var el=document.getElementById('calURLText');if(el)el.textContent=calFeedURL;},100);
@@ -497,9 +505,10 @@ function renderCal(){
 function setType(t){inspType=t;document.getElementById('btnSpecial').classList.toggle('active',t==='Special');document.getElementById('btnRegular').classList.toggle('active',t==='Regular');document.getElementById('specialSub').classList.toggle('show',t==='Special');if(t!=='Special')document.getElementById('specialType').selectedIndex=0;}
 function setDur(d){inspDur=d;document.querySelectorAll('.dur-btn').forEach(function(b){b.classList.remove('active');});event.target.classList.add('active');}
 function scheduleInsp(id){
+var btns=document.querySelectorAll('.evt-actions button');btns.forEach(function(b){b.disabled=true;b.style.opacity='0.5';});
 fetch(SB+'/functions/v1/update-inspection',{method:'POST',headers:{'Authorization':'Bearer '+AK,'apikey':AK,'Content-Type':'application/json'},body:JSON.stringify({request_id:id,action:'schedule'})})
-.then(function(r){return r.json();}).then(function(data){if(data.success){alert('Marked as Scheduled — notifications sent.'); loadMD();} else {alert('Error: '+(data.error||'Unknown'));}})
-.catch(function(err){alert('Failed: '+err.message);});
+.then(function(r){return r.json();}).then(function(data){if(data.success){alert('Marked as Scheduled — notifications sent.'); loadMD();} else {alert('Error: '+(data.error||'Unknown'));btns.forEach(function(b){b.disabled=false;b.style.opacity='1';});}})
+.catch(function(err){alert('Failed: '+err.message);btns.forEach(function(b){b.disabled=false;b.style.opacity='1';});});
 }
 // ── ADD PERSON TO TEAM (like job settings pattern) ──
 function addPersonToTeam(){
