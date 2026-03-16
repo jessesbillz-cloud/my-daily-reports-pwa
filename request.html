@@ -213,9 +213,7 @@ details[open] .collapsible-summary::after { content: '−'; }
         <input type="email" id="iNewEmail" class="field-input">
         <label class="field-label">Company/Role</label>
         <input type="text" id="iNewCompany" class="field-input" placeholder="e.g., (Lusardi), (Testing Lab)">
-        <label style="display:flex;align-items:center;gap:8px;margin-size:13px;color:#ccc;cursor:pointer;">
-            <input type="checkbox" id="saveNewPersonCheck"> Save for future use
-        </label>
+        <div style="font-size:12px;color:#4a4;margin-top:4px;">✓ New contacts are automatically saved for future use</div>
     </div>
 </details>
 <button onclick="submitIR()" id="submitBtn" class="submit-btn">Submit Scheduling Request</button>
@@ -527,9 +525,10 @@ function submitIR(){
         alert('Inspector has a conflicting booking on '+d+' at that time. Choose a different time or date.');
         return;
     }
-    if(newName && document.getElementById('saveNewPersonCheck').checked){
+    if(newName){
         var newEmail=document.getElementById('iNewEmail').value.trim();
         var newCompany=document.getElementById('iNewCompany').value.trim();
+        // Always save new contacts to Supabase permanently
         fetch(SB+'/rest/v1/contacts',{method:'POST',headers:{'apikey':AK,'Authorization':'Bearer '+AK,'Content-Type':'application/json','Prefer':'resolution=merge-duplicates'},body:JSON.stringify({name:newName,email:newEmail,company:newCompany,project:PROJ})}).catch(function(){});
     }
     var emails=[];
