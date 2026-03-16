@@ -572,13 +572,15 @@ function submitIR(){
     if(emails.length>0) fd.append('email_recipients',JSON.stringify(emails));
     var idnt=document.getElementById('iIdentifier').value.trim();
     if(idnt) fd.append('inspection_identifier',idnt);
+    console.log('[submitIR] Submitting to', SB+'/functions/v1/submit-inspection', 'project:', PROJ);
     fetch(SB+'/functions/v1/submit-inspection',{method:'POST',headers:{'Authorization':'Bearer '+AK,'apikey':AK},body:fd})
     .then(function(r){
+        console.log('[submitIR] Response status:', r.status);
         return r.json().then(function(data){ data._status=r.status; return data; });
     }).then(function(data){
+        console.log('[submitIR] Response data:', JSON.stringify(data));
         if(data.success){ document.getElementById('requestView').style.display='none'; document.getElementById('successView').style.display='block'; loadMD(); }
         else if(data._status===409){
-            // Scheduling conflict — friendly message, keep form intact
             var w=document.getElementById('dateWarning');
             w.textContent='⚠️ Scheduling conflict: this time slot is already booked on '+d+'. Please select a different time or date.';
             w.style.display='block';
@@ -586,7 +588,11 @@ function submitIR(){
             document.getElementById('iTime').focus();
             btn.disabled=false; btn.textContent='Submit Scheduling Request';
         }
-        else { alert('Error: '+data.error); btn.disabled=false; btn.textContent='Submit Scheduling Request'; }
+        else { alert('Error: '+(data.error||'Unknown error')); btn.disabled=false; btn.textContent='Submit Scheduling Request'; }
+    }).catch(function(err){
+        console.error('[submitIR] Fetch error:', err);
+        alert('Submit failed: '+err.message+'. Please try again.');
+        btn.disabled=false; btn.textContent='Submit Scheduling Request';
     });
 }
 function renderContacts(rows){
