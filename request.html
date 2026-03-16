@@ -186,10 +186,20 @@ details[open] .collapsible-summary::after { content: '−'; }
 </select>
 </div>
 <label class="field-label">Submitted By *</label>
-<select id="iName" class="field-input">
+<select id="iName" class="field-input" onchange="onNameChange()">
 <option value="">Select your name</option>
-<option value="other">-- Add name below --</option>
+<option value="other">-- My name isn't here --</option>
 </select>
+<div id="newPersonSection" style="display:none;padding:14px;background:#2a2a2a;border-radius:8px;border-left:4px solid #5a8fc0;margin-bottom:14px;">
+    <div style="color:#5a8fc0;font-weight:600;margin-bottom:10px;">Add yourself — you only have to do this once</div>
+    <label class="field-label">Your Name</label>
+    <input type="text" id="iNewName" class="field-input" placeholder="First Last" autocomplete="off">
+    <label class="field-label">Your Email</label>
+    <input type="email" id="iNewEmail" class="field-input" placeholder="you@company.com" autocomplete="off">
+    <label class="field-label">Company/Role</label>
+    <input type="text" id="iNewCompany" class="field-input" placeholder="e.g., Lusardi, Testing Lab" autocomplete="off">
+    <div style="font-size:12px;color:#4a4;margin-top:4px;">Your name will appear in the dropdown next time</div>
+</div>
 <label class="field-label">Notes</label>
 <textarea id="iNotes" class="field-input" rows="3" placeholder="Optional details"></textarea>
 <label class="field-label">Send a copy to:</label>
@@ -202,19 +212,6 @@ details[open] .collapsible-summary::after { content: '−'; }
         <label style="display:flex;align-items:center;gap:8px;margin-bottom:10px;font-size:13px;color:#ccc;cursor:pointer;">
             <input type="checkbox" id="saveEmailsCheck"> Save these emails
         </label>
-    </div>
-</details>
-<details class="collapsible-section">
-    <summary class="collapsible-summary">Add a New Person to Dropdown</summary>
-    <div style="padding:16px;background:#2a2a2a;border-radius:8px;border-left:4px solid #5a8fc0;">
-        <div style="color:#5a8fc0;font-weight:600;margin-bottom:8px;">Don't see your name? Add it below:</div>
-        <label class="field-label">Your Name</label>
-        <input type="text" id="iNewName" class="field-input" autocomplete="off">
-        <label class="field-label">Your Email</label>
-        <input type="email" id="iNewEmail" class="field-input" autocomplete="off">
-        <label class="field-label">Company/Role</label>
-        <input type="text" id="iNewCompany" class="field-input" placeholder="e.g., (Lusardi), (Testing Lab)" autocomplete="off">
-        <div style="font-size:12px;color:#4a4;margin-top:4px;">✓ New contacts are automatically saved for future use</div>
     </div>
 </details>
 <div id="submitWarning" style="display:none;color:#ef4444;font-size:13px;font-weight:600;margin-top:12px;padding:12px;background:#2a1515;border:1px solid #ef4444;border-radius:8px;text-align:center;"></div>
@@ -528,13 +525,19 @@ function submitIR(){
     var newName=document.getElementById('iNewName').value.trim();
     if((!nm||nm==='other')&&newName){ nm=newName; }
     var missing=[];
+    if(allFiles.length===0) missing.push('Photos/PDFs');
     if(!d) missing.push('Date');
     if(!t) missing.push('Time');
-    if(!inspType) missing.push('Inspection Type');
     if(!inspDur) missing.push('Duration');
-    if(!nm) missing.push('Submitted By');
-    if(allFiles.length===0) missing.push('Photos/PDFs');
-    if(missing.length>0){alert('Please fill in: '+missing.join(', ')); return;}
+    if(!inspType) missing.push('Inspection Type');
+    if(!nm) missing.push('Your Name');
+    if(missing.length>0){
+        var w=document.getElementById('submitWarning');
+        w.textContent='Missing: '+missing.join(', ');
+        w.style.display='block';
+        w.scrollIntoView({behavior:'smooth',block:'center'});
+        return;
+    }
     // Persist selected submitter name
     try{localStorage.setItem('mdr_last_submitter_'+PROJ,nm);}catch(e){}
     // Double-booking check: verify time slot is open
@@ -647,6 +650,12 @@ function renderContacts(rows){
             }
         }
     }catch(e){}
+    // If dropdown has no real names (only the 2 default options), auto-show the add section
+    var realOptions=sel.options.length-2; // minus "Select your name" and "My name isn't here"
+    if(realOptions<=0){
+        sel.value='other';
+        document.getElementById('newPersonSection').style.display='block';
+    }
     var container=document.getElementById('emailListContainer');
     container.innerHTML='';
     var addedEmails={};
@@ -698,6 +707,11 @@ function loadContacts(){
         // Now that we have the user_id, load the calendar
         loadMD();
     });
+}
+function onNameChange(){
+    var sel=document.getElementById('iName');
+    var sec=document.getElementById('newPersonSection');
+    sec.style.display=sel.value==='other'?'block':'none';
 }
 function resetForm(){ location.reload(); }
 loadContacts(); // also triggers loadMD() after fetching user_id

@@ -195,12 +195,13 @@ details[open] .collapsible-summary::after { content: '−'; }
 <select id="iName" class="field-input">
 <option value="">Select your name</option>
 </select>
+<div id="nameHint" style="display:none;color:#e8742a;font-size:12px;font-weight:600;margin-top:-10px;margin-bottom:10px;">Add yourself below first, then select your name</div>
 
 <!-- ADD PERSON SECTION — matches job settings pattern -->
 <div style="background:#1a1a1a;border:1px solid #333;border-radius:8px;padding:14px;margin-bottom:14px;">
     <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
         <span style="font-size:14px;">👤</span>
-        <span style="font-size:13px;font-weight:600;color:#5a8fc0;">Project Team</span>
+        <span style="font-size:13px;font-weight:600;color:#5a8fc0;">Scheduling Contacts</span>
     </div>
     <div id="teamListContainer"></div>
     <div style="display:flex;flex-direction:column;gap:8px;margin-top:10px;">
@@ -231,6 +232,7 @@ details[open] .collapsible-summary::after { content: '−'; }
         </div>
     </div>
 </details>
+<div id="submitWarning" style="display:none;color:#ef4444;font-size:13px;font-weight:600;margin-top:12px;padding:12px;background:#2a1515;border:1px solid #ef4444;border-radius:8px;text-align:center;"></div>
 <button onclick="submitIR()" id="submitBtn" class="submit-btn">Submit Scheduling Request</button>
 </div>
 <div class="success-view" id="successView" style="display:none; text-align:center; padding:60px 20px; color:#fff;">
@@ -588,6 +590,9 @@ function refreshDropdownAndEmails(){
             if(sel.options[i].value===currentVal){sel.selectedIndex=i;break;}
         }
     }
+    // Show hint if dropdown has no real names
+    var hint=document.getElementById('nameHint');
+    if(hint) hint.style.display=(sel.options.length<=1)?'block':'none';
     // Update email checkboxes — team members first, then contacts (deduplicated)
     var emailContainer=document.getElementById('emailListContainer');
     emailContainer.innerHTML='';
@@ -697,13 +702,20 @@ function toggleAddlRecipient(index,checked){
 function submitIR(){
     var d=document.getElementById('iDate').value, t=document.getElementById('iTime').value, nm=document.getElementById('iName').value;
     var missing=[];
+    if(allFiles.length===0) missing.push('Photos/PDFs');
     if(!d) missing.push('Date');
     if(!t) missing.push('Time');
-    if(!inspType) missing.push('Inspection Type');
     if(!inspDur) missing.push('Duration');
-    if(!nm) missing.push('Submitted By');
-    if(allFiles.length===0) missing.push('Photos/PDFs');
-    if(missing.length>0){alert('Please fill in: '+missing.join(', ')); return;}
+    if(!inspType) missing.push('Inspection Type');
+    if(!nm) missing.push('Your Name');
+    if(missing.length>0){
+        var w=document.getElementById('submitWarning');
+        w.textContent='Missing: '+missing.join(', ');
+        w.style.display='block';
+        w.scrollIntoView({behavior:'smooth',block:'center'});
+        return;
+    }
+    document.getElementById('submitWarning').style.display='none';
     // Persist selected submitter name
     try{localStorage.setItem('mdr_last_submitter_'+PROJ,nm);}catch(e){}
     // Conflict check (non-blocking warning)
