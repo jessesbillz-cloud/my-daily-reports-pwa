@@ -109,7 +109,7 @@ serve(async (req) => {
         .eq("user_id", resolvedUserId)
         .neq("status", "cancelled")
         .neq("status", "deleted")
-        .order("requested_date", { ascending: true });
+        .order("inspection_date", { ascending: true });
 
       if (error) {
         return new Response(JSON.stringify({ error: error.message }), {

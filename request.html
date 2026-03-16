@@ -429,7 +429,13 @@ fetch(SB+'/functions/v1/update-inspection',{method:'POST',headers:{'Authorizatio
 .then(function(r){return r.json();}).then(function(data){if(data.success){alert('Updated. Notifications sent.'); overlay.remove(); loadMD();} else {alert('Error: '+data.error);}});
 };
 }
-var calFeedURL=SB+'/functions/v1/calendar-feed?project='+encodeURIComponent(PROJ);
+// Calendar feed: use inspector slug for full calendar, fall back to project-only
+var calFeedURL=inspSlug
+    ? SB+'/functions/v1/calendar-feed?slug='+encodeURIComponent(inspSlug)
+    : SB+'/functions/v1/calendar-feed?project='+encodeURIComponent(PROJ);
+function updateCalFeedURL(){
+    if(OWNER_USER_ID) calFeedURL=SB+'/functions/v1/calendar-feed?user_id='+OWNER_USER_ID;
+}
 function copyCalendarURL(){ navigator.clipboard.writeText(calFeedURL); document.getElementById('copyBtn').textContent='✅ URL Copied!'; }
 function switchTab(t){
 document.querySelectorAll('.tab')[0].classList.toggle('active',t==='calendar');
@@ -687,7 +693,8 @@ function loadContacts(){
             }
         }
         renderContacts(rows);
-        // Now that we have the user_id, load the calendar
+        // Now that we have the user_id, update feed URL and load the calendar
+        updateCalFeedURL();
         loadMD();
     });
 }
