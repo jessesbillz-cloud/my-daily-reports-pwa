@@ -797,6 +797,37 @@ const db = {
     if(!r.ok)return null;
     const d=await r.json();return d[0]||null;
   },
+  // ── Job-level logo methods ──
+  async uploadJobLogo(jobId,file){
+    if(file.size>2*1024*1024)throw new Error("Logo must be under 2MB");
+    if(!file.type.startsWith("image/"))throw new Error("Logo must be an image");
+    const ext=file.name.split(".").pop()||"png";
+    const storagePath=`jobs/${jobId}/logo.${ext}`;
+    let upR=await fetch(`${SB_URL}/storage/v1/object/company-templates/${storagePath}`,{
+      method:"POST",headers:{apikey:SB_KEY,Authorization:`Bearer ${AUTH_TOKEN||SB_KEY}`,"Content-Type":file.type},body:file
+    });
+    if(!upR.ok){upR=await fetch(`${SB_URL}/storage/v1/object/company-templates/${storagePath}`,{
+      method:"PUT",headers:{apikey:SB_KEY,Authorization:`Bearer ${AUTH_TOKEN||SB_KEY}`,"Content-Type":file.type},body:file
+    });}
+    if(!upR.ok)throw new Error("Logo upload failed ("+upR.status+")");
+    const logoUrl=`${SB_URL}/storage/v1/object/public/company-templates/${storagePath}`;
+    await fetch(`${SB_URL}/rest/v1/jobs?id=eq.${jobId}`,{method:"PATCH",headers:this._h(),body:JSON.stringify({logo_url:logoUrl})});
+    try{localStorage.setItem("mdr_logo_job_"+jobId,logoUrl);}catch(e){}
+    return logoUrl;
+  },
+  async getJobLogoUrl(jobId){
+    if(!jobId)return null;
+    try{const cached=localStorage.getItem("mdr_logo_job_"+jobId);if(cached)return cached;}catch(e){}
+    try{
+      const r=await fetch(`${SB_URL}/rest/v1/jobs?id=eq.${jobId}&select=logo_url&limit=1`,{headers:this._h()});
+      if(r.ok){const d=await r.json();const url=d[0]?.logo_url;if(url){try{localStorage.setItem("mdr_logo_job_"+jobId,url);}catch(e){}return url;}}
+    }catch(e){}
+    return null;
+  },
+  async removeJobLogo(jobId){
+    await fetch(`${SB_URL}/rest/v1/jobs?id=eq.${jobId}`,{method:"PATCH",headers:this._h(),body:JSON.stringify({logo_url:null})});
+    try{localStorage.removeItem("mdr_logo_job_"+jobId);}catch(e){}
+  },
 };
 
 /* ── Account Settings Page ── */
@@ -1648,6 +1679,10 @@ function CreateJob({user, onBack, onCreated}){
   const [showCompanyTpls,setShowCompanyTpls]=useState(true);
   const jobCompanyDebounce=useRef(null);
   const trackParseAttempt=()=>{};
+  // Job-level logo
+  const [jobLogoFile,setJobLogoFile]=useState(null);
+  const [jobLogoPreview,setJobLogoPreview]=useState(null);
+  const jobLogoRef=useRef(null);
 
   // Load saved templates on mount
   useEffect(()=>{
@@ -2054,6 +2089,10 @@ function CreateJob({user, onBack, onCreated}){
           throw new Error("Template upload failed: "+(tplErr.message||"Unknown error")+". Job was not created.");
         }
       }
+      // Upload job logo if one was selected
+      if(jobLogoFile&&job?.id){
+        try{await db.uploadJobLogo(job.id,jobLogoFile);}catch(logoErr){console.error("Job logo upload (non-fatal):",logoErr);}
+      }
       onCreated();
     }catch(e){setErr(e.message||"Something went wrong. Please try again.");}finally{setSaving(false);}
   };
@@ -2144,6 +2183,21 @@ function CreateJob({user, onBack, onCreated}){
               ))}
             </div>
           )}
+        </div>
+
+        {/* Job Logo (Optional) */}
+        <div style={{marginBottom:20}}>
+          <label style={ls}>Report Logo (Optional)</label>
+          <input ref={jobLogoRef} type="file" accept="image/*" style={{display:"none"}} onChange={e=>{const f=e.target.files?.[0];if(!f)return;if(f.size>2*1024*1024){setErr("Logo must be under 2MB");return;}if(!f.type.startsWith("image/")){setErr("Logo must be an image");return;}setJobLogoFile(f);const r=new FileReader();r.onload=()=>setJobLogoPreview(r.result);r.readAsDataURL(f);}}/>
+          {jobLogoPreview?(
+            <div style={{display:"flex",alignItems:"center",gap:12}}>
+              <img src={jobLogoPreview} style={{width:56,height:56,objectFit:"contain",borderRadius:8,border:`1px solid ${C.brd}`,background:"#fff"}} alt="Logo"/>
+              <button onClick={()=>{setJobLogoFile(null);setJobLogoPreview(null);if(jobLogoRef.current)jobLogoRef.current.value="";}} style={{padding:"6px 12px",background:C.inp,border:`1px solid ${C.brd}`,borderRadius:6,color:C.lt,fontSize:12,cursor:"pointer"}}>Remove</button>
+            </div>
+          ):(
+            <button onClick={()=>jobLogoRef.current?.click()} style={{padding:"10px 16px",background:C.inp,border:`1px solid ${C.brd}`,borderRadius:8,color:C.lt,fontSize:13,cursor:"pointer"}}>Upload Logo</button>
+          )}
+          <div style={{fontSize:11,color:C.mut,marginTop:4}}>Logo shown on your reports. Uses your company logo if not set.</div>
         </div>
 
         {/* Job Type Toggle */}
@@ -2438,6 +2492,8 @@ function WorkLogEditor({job, user, onBack, reportDate}){
   const [activeId,setActiveId]=useState(null); // expanded contractor id
   const [showAdd,setShowAdd]=useState(false);
   const [newName,setNewName]=useState("");
+  const [fieldMode,setFieldMode]=useState(false);
+  const [fieldAddName,setFieldAddName]=useState("");
   const [saving,setSaving]=useState(false);
   const [submitting,setSubmitting]=useState(false);
   const [wlSubmitStep,setWlSubmitStep]=useState("");
@@ -2780,33 +2836,37 @@ function WorkLogEditor({job, user, onBack, reportDate}){
     // Light grey header bar with margins
     page.drawRectangle({x:M,y:H-headerH,width:CW,height:headerH,color:rgb(.85,.85,.85)});
 
-    // Embed company logo — check localStorage first, then fall back to company record
+    // Embed logo — job logo → company logo → profile company logo
     let logoImg=null;
     let logoDrawW=0,logoDrawH=0;
     try{
       let logoBytes=null;let isJpg=true;
-      // 1. Try localStorage (always available, no auth needed)
-      const companyIds=[job.company_id];
-      try{const prof=await db.getProfile(user.id);if(prof?.company_id&&prof.company_id!==job.company_id)companyIds.push(prof.company_id);}catch(e){}
-      for(const cid of companyIds){
-        if(!cid||logoBytes)continue;
-        const logoUrl=await db.getCompanyLogoUrl(cid);
-        if(logoUrl){
-          try{
-            if(logoUrl.startsWith("data:image")){
-              const b64=logoUrl.split(",")[1];
-              const bin=atob(b64);
-              const arr=new Uint8Array(bin.length);for(let i=0;i<bin.length;i++)arr[i]=bin.charCodeAt(i);
-              logoBytes=arr;
-              isJpg=!logoUrl.includes("image/png");
-            }else{
-              const resp=await fetch(logoUrl);
-              if(resp.ok){
-                logoBytes=new Uint8Array(await resp.arrayBuffer());
-                isJpg=logoUrl.toLowerCase().endsWith(".jpg")||logoUrl.toLowerCase().endsWith(".jpeg")||resp.headers.get("content-type")?.includes("jpeg");
-              }
-            }
-          }catch(e){console.error("Logo decode:",e);}
+      // Logo fallback chain: 1) Job logo → 2) Company logo → 3) Profile company logo
+      const fetchLogoBytes=async(url)=>{
+        if(!url)return null;
+        try{
+          if(url.startsWith("data:image")){
+            const b64=url.split(",")[1];const bin=atob(b64);
+            const arr=new Uint8Array(bin.length);for(let i=0;i<bin.length;i++)arr[i]=bin.charCodeAt(i);
+            isJpg=!url.includes("image/png");return arr;
+          }else{
+            const resp=await fetch(url);
+            if(resp.ok){isJpg=url.toLowerCase().endsWith(".jpg")||url.toLowerCase().endsWith(".jpeg")||resp.headers.get("content-type")?.includes("jpeg");return new Uint8Array(await resp.arrayBuffer());}
+          }
+        }catch(e){console.error("Logo decode:",e);}
+        return null;
+      };
+      // 1. Try job-level logo
+      const jobLogoUrl=await db.getJobLogoUrl(job.id);
+      if(jobLogoUrl)logoBytes=await fetchLogoBytes(jobLogoUrl);
+      // 2. Try company logos (job's company, then profile's company)
+      if(!logoBytes){
+        const companyIds=[job.company_id];
+        try{const prof=await db.getProfile(user.id);if(prof?.company_id&&prof.company_id!==job.company_id)companyIds.push(prof.company_id);}catch(e){}
+        for(const cid of companyIds){
+          if(!cid||logoBytes)continue;
+          const cLogoUrl=await db.getCompanyLogoUrl(cid);
+          if(cLogoUrl)logoBytes=await fetchLogoBytes(cLogoUrl);
         }
       }
       if(logoBytes){
@@ -3472,13 +3532,115 @@ function WorkLogEditor({job, user, onBack, reportDate}){
           <div style={{fontWeight:700,fontSize:16,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{job.name}</div>
           <div style={{fontSize:12,color:C.mut}}>Work Log — {new Date(todayISO+"T12:00:00").toLocaleDateString("en-US",{weekday:"short",month:"short",day:"numeric",timeZone:tz})}</div>
         </div>
+        <button onClick={()=>setFieldMode(!fieldMode)} title={fieldMode?"Switch to Full Editor":"Switch to Field Mode"} style={{width:44,height:44,borderRadius:8,background:fieldMode?C.org:C.card,border:`1px solid ${fieldMode?C.org:C.brd}`,color:fieldMode?"#fff":C.mut,fontSize:18,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,transition:"all 0.2s"}}>{fieldMode?"📋":"📱"}</button>
         <button onClick={saveWorking} disabled={saving} style={{padding:"8px 14px",background:C.blu,border:"none",borderRadius:8,color:"#fff",fontSize:13,fontWeight:600,cursor:saving?"default":"pointer",opacity:saving?0.7:1}}>
           {saving?"Saving...":"Save"}
         </button>
       </div>
       </div>
 
-      <div style={{maxWidth:560,margin:"0 auto",padding:"20px 16px 120px"}}>
+      {/* ── Field Mode ── */}
+      {fieldMode?(()=>{
+        const activeCons=contractors.filter(c=>c.active!==false);
+        const selCon=activeCons.find(c=>c.id===activeId)||activeCons[0]||null;
+        const effectiveId=selCon?selCon.id:null;
+        return(
+          <div style={{maxWidth:560,margin:"0 auto",padding:"16px 16px 100px",minHeight:"calc(100vh - 60px)"}}>
+            {/* Field Mode badge */}
+            <div style={{display:"flex",alignItems:"center",justifyContent:"center",marginBottom:16}}>
+              <span style={{background:C.org,color:"#fff",fontSize:11,fontWeight:700,borderRadius:20,padding:"4px 14px"}}>FIELD MODE</span>
+            </div>
+
+            {/* Contractor tabs */}
+            {activeCons.length>0?(
+              <div style={{display:"flex",gap:8,padding:"0 0 14px",overflowX:"auto",WebkitOverflowScrolling:"touch"}}>
+                {activeCons.map(c=>(
+                  <button key={c.id} onClick={()=>setActiveId(c.id)} style={{padding:"10px 16px",borderRadius:8,border:"none",background:effectiveId===c.id?C.org:C.card,color:effectiveId===c.id?"#fff":C.mut,fontSize:14,fontWeight:700,cursor:"pointer",whiteSpace:"nowrap",flexShrink:0,transition:"all 0.15s",boxShadow:effectiveId===c.id?"0 2px 8px rgba(232,116,42,0.3)":"none"}}>
+                    {c.name}
+                    {c.photos?.length>0&&<span style={{marginLeft:6,background:effectiveId===c.id?"rgba(255,255,255,0.3)":"rgba(232,116,42,0.15)",borderRadius:10,padding:"1px 6px",fontSize:11}}>{c.photos.length}</span>}
+                  </button>
+                ))}
+              </div>
+            ):(
+              <div style={{background:C.card,border:`1px solid ${C.brd}`,borderRadius:12,padding:20,marginBottom:16,textAlign:"center"}}>
+                <div style={{fontSize:14,color:C.mut,marginBottom:12}}>No contractors yet</div>
+                <div style={{display:"flex",gap:8}}>
+                  <input type="text" value={fieldAddName} onChange={e=>setFieldAddName(e.target.value)} placeholder="Contractor name" onKeyDown={e=>{if(e.key==="Enter"&&fieldAddName.trim()){setContractors(p=>[...p,{id:Date.now(),name:fieldAddName.trim(),description:"",hours:0,quantity:1,photos:[],active:true}]);const newId=Date.now();setActiveId(newId);setFieldAddName("");}}} style={{flex:1,padding:"12px 14px",background:C.inp,border:`1px solid ${C.brd}`,borderRadius:8,color:C.txt,fontSize:15}}/>
+                  <button onClick={()=>{if(fieldAddName.trim()){const id=Date.now();setContractors(p=>[...p,{id,name:fieldAddName.trim(),description:"",hours:0,quantity:1,photos:[],active:true}]);setActiveId(id);setFieldAddName("");}}} style={{padding:"12px 20px",background:C.org,border:"none",borderRadius:8,color:"#fff",fontSize:14,fontWeight:700,cursor:"pointer"}}>Add</button>
+                </div>
+              </div>
+            )}
+
+            {/* Selected contractor: notes + camera + photos */}
+            {selCon&&(
+              <div>
+                {/* Work description textarea */}
+                <div style={{marginBottom:14}}>
+                  <textarea value={selCon.description||""} onChange={e=>{const v=e.target.value;setContractors(p=>p.map(c=>c.id===selCon.id?{...c,description:v}:c));}} placeholder="Tap mic or type work notes..." style={{width:"100%",minHeight:130,padding:"14px 16px",background:C.card,border:`1px solid ${C.brd}`,borderRadius:12,color:C.txt,fontSize:16,lineHeight:1.5,resize:"vertical",boxSizing:"border-box",fontFamily:"inherit"}}/>
+                </div>
+
+                {/* Hours + Quantity row */}
+                <div style={{display:"flex",gap:10,marginBottom:16}}>
+                  <div style={{flex:1}}>
+                    <label style={{fontSize:12,color:C.mut,fontWeight:600,marginBottom:4,display:"block"}}>Hours</label>
+                    <input type="number" inputMode="decimal" step="0.5" value={selCon.hours||""} onChange={e=>{const v=parseFloat(e.target.value)||0;setContractors(p=>p.map(c=>c.id===selCon.id?{...c,hours:v}:c));}} style={{width:"100%",padding:"12px 14px",background:C.card,border:`1px solid ${C.brd}`,borderRadius:10,color:C.txt,fontSize:18,fontWeight:700,textAlign:"center",boxSizing:"border-box"}}/>
+                  </div>
+                  <div style={{flex:1}}>
+                    <label style={{fontSize:12,color:C.mut,fontWeight:600,marginBottom:4,display:"block"}}>Workers</label>
+                    <input type="number" inputMode="numeric" value={selCon.quantity||""} onChange={e=>{const v=parseInt(e.target.value)||1;setContractors(p=>p.map(c=>c.id===selCon.id?{...c,quantity:v}:c));}} style={{width:"100%",padding:"12px 14px",background:C.card,border:`1px solid ${C.brd}`,borderRadius:10,color:C.txt,fontSize:18,fontWeight:700,textAlign:"center",boxSizing:"border-box"}}/>
+                  </div>
+                </div>
+
+                {/* SNAP PHOTO button */}
+                <button onClick={()=>{setPhotoTarget(selCon.id);setPhotoMode("camera");}} style={{width:"100%",padding:"20px 0",background:C.org,border:"none",borderRadius:14,color:"#fff",fontSize:18,fontWeight:700,cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",gap:6,marginBottom:14,boxShadow:"0 4px 12px rgba(232,116,42,0.35)"}}>
+                  <span style={{fontSize:36}}>📷</span>
+                  <span>SNAP PHOTO</span>
+                  {selCon.photos?.length>0&&<span style={{fontSize:12,opacity:0.8}}>{selCon.photos.length} photo{selCon.photos.length!==1?"s":""}</span>}
+                </button>
+
+                {/* Photo strip */}
+                {selCon.photos?.length>0&&(
+                  <div style={{display:"flex",gap:8,overflowX:"auto",WebkitOverflowScrolling:"touch",padding:"4px 0 14px"}}>
+                    {selCon.photos.map((p,pi)=>(
+                      <div key={pi} style={{position:"relative",flexShrink:0}}>
+                        <img src={p.data||p} style={{width:72,height:72,objectFit:"cover",borderRadius:10,border:`2px solid ${C.brd}`}} alt=""/>
+                        <button onClick={()=>{setContractors(prev=>prev.map(c=>{if(c.id!==selCon.id)return c;const ph=[...(c.photos||[])];ph.splice(pi,1);return{...c,photos:ph};}));}} style={{position:"absolute",top:-6,right:-6,width:22,height:22,borderRadius:"50%",background:C.err,border:"2px solid "+C.bg,color:"#fff",fontSize:12,fontWeight:700,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",padding:0,lineHeight:1}}>✕</button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* Quick add another contractor */}
+                {activeCons.length>0&&(
+                  <div style={{marginTop:8,padding:"12px 0",borderTop:`1px solid ${C.brd}`}}>
+                    <div style={{display:"flex",gap:8}}>
+                      <input type="text" value={fieldAddName} onChange={e=>setFieldAddName(e.target.value)} placeholder="Add contractor..." onKeyDown={e=>{if(e.key==="Enter"&&fieldAddName.trim()){const id=Date.now();setContractors(p=>[...p,{id,name:fieldAddName.trim(),description:"",hours:0,quantity:1,photos:[],active:true}]);setActiveId(id);setFieldAddName("");}}} style={{flex:1,padding:"10px 12px",background:C.inp,border:`1px solid ${C.brd}`,borderRadius:8,color:C.txt,fontSize:14}}/>
+                      <button onClick={()=>{if(fieldAddName.trim()){const id=Date.now();setContractors(p=>[...p,{id,name:fieldAddName.trim(),description:"",hours:0,quantity:1,photos:[],active:true}]);setActiveId(id);setFieldAddName("");}}} style={{padding:"10px 16px",background:C.org,border:"none",borderRadius:8,color:"#fff",fontSize:13,fontWeight:700,cursor:"pointer"}}>Add</button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        );
+      })():null}
+
+      {/* Field Mode bottom bar */}
+      {fieldMode&&(
+        <div style={{position:"fixed",bottom:0,left:0,right:0,padding:"10px 20px",borderTop:`1px solid ${C.brd}`,background:C.card,zIndex:100}}>
+          <div style={{display:"flex",gap:10,maxWidth:560,margin:"0 auto"}}>
+            <button onClick={()=>{saveWorking();setFieldMode(false);}} style={{flex:1,padding:"14px 0",background:C.inp,border:`1px solid ${C.brd}`,borderRadius:10,color:C.lt,fontSize:14,fontWeight:700,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",gap:6}}>
+              <span>📋</span> Full Editor
+            </button>
+            <button onClick={async()=>{await saveWorking();onBack();}} disabled={saving} style={{flex:1,padding:"14px 0",background:C.org,border:"none",borderRadius:10,color:"#fff",fontSize:14,fontWeight:700,cursor:saving?"default":"pointer",opacity:saving?0.7:1,display:"flex",alignItems:"center",justifyContent:"center",gap:6}}>
+              <span>✓</span> {saving?"Saving...":"Save & Exit"}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ── Full Editor Content ── */}
+      {!fieldMode&&<div style={{maxWidth:560,margin:"0 auto",padding:"20px 16px 120px"}}>
 
         {/* Weather — Collapsible */}
         <div style={{background:C.card,border:`1px solid ${expandedSections.weather?C.org:C.brd}`,borderRadius:12,overflow:"hidden",marginBottom:10,transition:"border-color 0.2s"}}>
@@ -3744,7 +3906,7 @@ function WorkLogEditor({job, user, onBack, reportDate}){
           )}
         </div>
 
-      </div>
+      </div>}
 
       {/* Hidden photo inputs — separate for camera vs library */}
       <input ref={cameraRef} type="file" accept="image/*" capture="environment" style={{display:"none"}} onChange={handlePhotoUpload}/>
@@ -3778,7 +3940,8 @@ function WorkLogEditor({job, user, onBack, reportDate}){
         </div>
       )}
 
-      {/* Bottom bar */}
+      {/* Bottom bar (full editor only) */}
+      {!fieldMode&&(
       <div style={{position:"fixed",bottom:0,left:0,right:0,padding:"10px 20px",borderTop:`1px solid ${C.brd}`,background:C.card,zIndex:100}}>
         <div style={{display:"flex",gap:8,marginBottom:8}}>
           <button disabled={saving} onClick={async()=>{if(saving)return;await saveWorking();onBack();}} style={{flex:1,padding:"12px 0",background:C.inp,border:`1px solid ${C.brd}`,borderRadius:10,color:C.txt,fontSize:14,fontWeight:700,cursor:saving?"default":"pointer",opacity:saving?0.7:1}}>
@@ -3792,6 +3955,7 @@ function WorkLogEditor({job, user, onBack, reportDate}){
           {submitting?"Generating PDF...":"Submit Report"}
         </button>
       </div>
+      )}
     </div>
   );
 }
@@ -5318,6 +5482,9 @@ function JobDetail({job, user, onBack, onDeleted}){
   const [reparsing,setReparsing]=useState(false);
   const reuploadRef=useRef(null);
   const [reuploading,setReuploading]=useState(false);
+  const jobLogoInputRef=useRef(null);
+  const [jobLogoUrl,setJobLogoUrl]=useState(job.logo_url||null);
+  const [jobLogoUploading,setJobLogoUploading]=useState(false);
   const handleReuploadTemplate=async(e)=>{
     const f=e.target.files?.[0];if(!f)return;
     const ext=f.name.split(".").pop().toLowerCase();
@@ -5384,6 +5551,11 @@ function JobDetail({job, user, onBack, onDeleted}){
   const [newMemberName,setNewMemberName]=useState("");
   const [newMemberEmail,setNewMemberEmail]=useState("");
   const [teamSaving,setTeamSaving]=useState(false);
+  const [schedContacts,setSchedContacts]=useState((job.scheduling_contacts||[]).map(e=>typeof e==="string"?{name:"",email:e}:e));
+  const [newSchedName,setNewSchedName]=useState("");
+  const [newSchedEmail,setNewSchedEmail]=useState("");
+  const [schedContactsSaving,setSchedContactsSaving]=useState(false);
+  const [showSchedContacts,setShowSchedContacts]=useState(false);
   const [showSchedSet,setShowSchedSet]=useState(false);
   const [schedEnabled,setSchedEnabled]=useState(!!job.scheduling_enabled);
   const [schedSaving,setSchedSaving]=useState(false);
@@ -5703,6 +5875,40 @@ function JobDetail({job, user, onBack, onDeleted}){
           </div>
         )}
 
+        {/* ── Scheduling Contacts (inline) ── */}
+        {showSchedContacts&&(
+          <div style={{background:C.card,border:`1px solid ${C.org}`,borderRadius:12,padding:20,marginBottom:16}}>
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:6}}>
+              <div style={{fontWeight:700,fontSize:15,color:C.org,display:"flex",alignItems:"center",gap:8}}>
+                Scheduling Contacts
+              </div>
+              <button onClick={()=>setShowSchedContacts(false)} style={{background:"none",border:"none",color:C.mut,cursor:"pointer",fontSize:20,padding:"0 4px"}}>✕</button>
+            </div>
+            <div style={{fontSize:12,color:C.mut,marginBottom:16,lineHeight:1.5}}>People who appear on the scheduling request form. Separate from your Project Team (report recipients).</div>
+            {schedContacts.map((m,i)=>(
+              <div key={i} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 0",borderBottom:i<schedContacts.length-1?`1px solid ${C.brd}`:"none"}}>
+                <div style={{flex:1,minWidth:0}}>
+                  <div style={{fontSize:14,fontWeight:600,color:C.lt}}>{m.name||"No name"}</div>
+                  <div style={{fontSize:12,color:C.mut,wordBreak:"break-all"}}>{m.email}</div>
+                </div>
+                <button onClick={()=>{setSchedContacts(p=>p.filter((_,j)=>j!==i));}} style={{background:"none",border:"none",color:C.err,cursor:"pointer",fontSize:16,padding:"0 4px"}}>✕</button>
+              </div>
+            ))}
+            <div style={{marginTop:12,display:"flex",flexDirection:"column",gap:8}}>
+              <input type="text" value={newSchedName} onChange={e=>setNewSchedName(e.target.value)} placeholder="Name" style={{padding:"10px 12px",background:C.inp,border:`1px solid ${C.brd}`,borderRadius:8,color:C.txt,fontSize:14}}/>
+              <div style={{display:"flex",gap:8}}>
+                <input type="email" value={newSchedEmail} onChange={e=>setNewSchedEmail(e.target.value)} placeholder="Email" onKeyDown={e=>{if(e.key==="Enter"&&newSchedEmail.trim()&&newSchedEmail.includes("@")){const em=newSchedEmail.trim().toLowerCase();if(schedContacts.some(m=>m.email.toLowerCase()===em)){alert("That email is already in scheduling contacts.");return;}setSchedContacts(p=>[...p,{name:newSchedName.trim(),email:newSchedEmail.trim()}]);setNewSchedName("");setNewSchedEmail("");}}} style={{flex:1,padding:"10px 12px",background:C.inp,border:`1px solid ${C.brd}`,borderRadius:8,color:C.txt,fontSize:14}}/>
+                <button onClick={()=>{if(newSchedEmail.trim()&&newSchedEmail.includes("@")){const em=newSchedEmail.trim().toLowerCase();if(schedContacts.some(m=>m.email.toLowerCase()===em)){alert("That email is already in scheduling contacts.");return;}setSchedContacts(p=>[...p,{name:newSchedName.trim(),email:newSchedEmail.trim()}]);setNewSchedName("");setNewSchedEmail("");}}} style={{padding:"10px 16px",background:C.org,border:"none",borderRadius:8,color:"#fff",fontSize:13,fontWeight:700,cursor:"pointer"}}>Add</button>
+              </div>
+            </div>
+            <div style={{marginTop:16}}>
+              <button onClick={async()=>{setSchedContactsSaving(true);try{await fetch(`${SB_URL}/rest/v1/jobs?id=eq.${job.id}`,{method:"PATCH",headers:db._h(),body:JSON.stringify({scheduling_contacts:schedContacts})});job.scheduling_contacts=schedContacts;setShowSchedContacts(false);showToast("Scheduling contacts saved!");}catch(e){alert("Save failed: "+e.message);}finally{setSchedContactsSaving(false);}}} disabled={schedContactsSaving} style={{width:"100%",padding:"12px 0",background:C.org,border:"none",borderRadius:8,color:"#fff",fontSize:14,fontWeight:700,cursor:schedContactsSaving?"default":"pointer",opacity:schedContactsSaving?0.6:1}}>
+                {schedContactsSaving?"Saving...":"Save Scheduling Contacts"}
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* ── Scheduling Settings (inline) ── */}
         {showSchedSet&&(
           <div style={{background:C.card,border:`1px solid ${C.org}`,borderRadius:12,padding:20,marginBottom:16}}>
@@ -5853,11 +6059,45 @@ function JobDetail({job, user, onBack, onDeleted}){
             <button onClick={()=>{setShowEditJob(!showEditJob);setEditName(job.name);setEditAddr(job.site_address||"");}} style={{width:"100%",display:"flex",alignItems:"center",gap:10,padding:"14px 18px",background:"none",border:"none",borderBottom:`1px solid ${C.brd}`,cursor:"pointer",textAlign:"left"}}>
               <span style={{fontSize:16}}>✏️</span><span style={{fontSize:14,fontWeight:600,color:C.lt}}>Edit Job Details</span>
             </button>
+            {/* Job Logo */}
+            <div style={{padding:"14px 18px",borderBottom:`1px solid ${C.brd}`}}>
+              <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:8}}>
+                <span style={{fontSize:14,fontWeight:600,color:C.lt}}>Report Logo</span>
+                {jobLogoUploading&&<span style={{fontSize:11,color:C.mut}}>Uploading...</span>}
+              </div>
+              {jobLogoUrl?(
+                <div style={{display:"flex",alignItems:"center",gap:12}}>
+                  <img src={jobLogoUrl+(jobLogoUrl.includes("?")?`&cb=${Date.now()}`:`?cb=${Date.now()}`)} style={{width:56,height:56,objectFit:"contain",borderRadius:8,border:`1px solid ${C.brd}`,background:"#fff"}} alt="Logo"/>
+                  <button onClick={()=>jobLogoInputRef.current?.click()} disabled={jobLogoUploading} style={{padding:"6px 12px",background:C.inp,border:`1px solid ${C.brd}`,borderRadius:6,color:C.lt,fontSize:12,cursor:"pointer"}}>Change</button>
+                  <button onClick={async()=>{setJobLogoUploading(true);try{await db.removeJobLogo(job.id);job.logo_url=null;setJobLogoUrl(null);showToast("Logo removed");}catch(e){showToast("Remove failed");}finally{setJobLogoUploading(false);}}} disabled={jobLogoUploading} style={{padding:"6px 12px",background:C.inp,border:`1px solid ${C.brd}`,borderRadius:6,color:C.err,fontSize:12,cursor:"pointer"}}>Remove</button>
+                </div>
+              ):(
+                <div>
+                  <button onClick={()=>jobLogoInputRef.current?.click()} disabled={jobLogoUploading} style={{padding:"10px 16px",background:C.inp,border:`1px solid ${C.brd}`,borderRadius:8,color:C.lt,fontSize:13,cursor:"pointer"}}>Upload Logo</button>
+                  <div style={{fontSize:11,color:C.mut,marginTop:4}}>Uses your company logo if not set.</div>
+                </div>
+              )}
+              <input ref={jobLogoInputRef} type="file" accept="image/*" style={{display:"none"}} onChange={async(e)=>{
+                const f=e.target.files?.[0];if(!f)return;
+                if(f.size>2*1024*1024){showToast("Logo must be under 2MB");return;}
+                if(!f.type.startsWith("image/")){showToast("Must be an image");return;}
+                setJobLogoUploading(true);
+                try{const url=await db.uploadJobLogo(job.id,f);job.logo_url=url;setJobLogoUrl(url);showToast("Logo updated!");}
+                catch(err){showToast("Upload failed: "+err.message);}
+                finally{setJobLogoUploading(false);if(jobLogoInputRef.current)jobLogoInputRef.current.value="";}
+              }}/>
+            </div>
             <button onClick={()=>setShowTeam(!showTeam)} style={{width:"100%",display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,padding:"14px 18px",background:"none",border:"none",borderBottom:`1px solid ${C.brd}`,cursor:"pointer",textAlign:"left"}}>
               <div style={{display:"flex",alignItems:"center",gap:10}}>
                 <span style={{fontSize:14,fontWeight:600,color:C.lt}}>Project Team</span>
               </div>
               <span style={{fontSize:11,color:C.mut,background:C.inp,borderRadius:10,padding:"2px 8px"}}>{teamMembers.length}</span>
+            </button>
+            <button onClick={()=>setShowSchedContacts(!showSchedContacts)} style={{width:"100%",display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,padding:"14px 18px",background:"none",border:"none",borderBottom:`1px solid ${C.brd}`,cursor:"pointer",textAlign:"left"}}>
+              <div style={{display:"flex",alignItems:"center",gap:10}}>
+                <span style={{fontSize:14,fontWeight:600,color:C.lt}}>Scheduling Contacts</span>
+              </div>
+              <span style={{fontSize:11,color:C.mut,background:C.inp,borderRadius:10,padding:"2px 8px"}}>{schedContacts.length}</span>
             </button>
             <button onClick={()=>{if(!fieldEditFields){const fc=job.field_config||{};const all=[...(fc.editable||[]).map(f=>({...f,mode:f.autoFill==="date"?"auto-date":f.autoFill==="increment"?"auto-num":"edit"})),...(fc.locked||[]).map(f=>({...f,mode:"lock"}))];setFieldEditFields(all);}setShowFieldEdit(!showFieldEdit);}} style={{width:"100%",display:"flex",alignItems:"center",gap:10,padding:"14px 18px",background:"none",border:"none",borderBottom:`1px solid ${C.brd}`,cursor:"pointer",textAlign:"left"}}>
               <span style={{fontSize:14,fontWeight:600,color:C.lt}}>Edit Template Fields</span>

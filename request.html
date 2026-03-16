@@ -649,13 +649,13 @@ function renderContacts(rows){
     var container=document.getElementById('emailListContainer');
     container.innerHTML='';
     var addedEmails={};
-    // Project team members first (from job settings) with "Team" badge
+    // Scheduling contacts first with "Saved" badge
     teamMembers.forEach(function(m){
         if(!m.email||addedEmails[m.email.toLowerCase()])return;
         addedEmails[m.email.toLowerCase()]=true;
         var lbl=document.createElement('label');
         lbl.className='email-row';
-        lbl.innerHTML='<input type="checkbox" value="'+m.email+'" class="emailCheck" checked> '+m.name+' <span style="font-size:10px;color:#f97316;font-weight:600;">(Team)</span>';
+        lbl.innerHTML='<input type="checkbox" value="'+m.email+'" class="emailCheck" checked> '+m.name+' <span style="font-size:10px;color:#5a8fc0;font-weight:600;">(Saved)</span>';
         container.appendChild(lbl);
     });
     // Saved contacts (skip duplicates)
@@ -671,7 +671,7 @@ function renderContacts(rows){
 function loadContacts(){
     var cacheKey='mdr_contacts_'+PROJ;
     var contactsP=fetch(SB+'/rest/v1/contacts?project=eq.'+encodeURIComponent(PROJ)+'&order=name.asc',{headers:{'apikey':AK,'Authorization':'Bearer '+AK}}).then(function(r){return r.json();}).catch(function(){return null;});
-    var teamP=JOB_ID?fetch(SB+'/rest/v1/jobs?id=eq.'+JOB_ID+'&select=team_emails,user_id',{headers:{'apikey':AK,'Authorization':'Bearer '+AK}}).then(function(r){return r.json();}).catch(function(){return null;}):Promise.resolve(null);
+    var teamP=JOB_ID?fetch(SB+'/rest/v1/jobs?id=eq.'+JOB_ID+'&select=scheduling_contacts,user_id',{headers:{'apikey':AK,'Authorization':'Bearer '+AK}}).then(function(r){return r.json();}).catch(function(){return null;}):Promise.resolve(null);
     Promise.all([contactsP,teamP]).then(function(results){
         var rows=results[0];
         var jobData=results[1];
@@ -684,13 +684,13 @@ function loadContacts(){
         if(jobData&&jobData[0]&&jobData[0].user_id){
             OWNER_USER_ID=jobData[0].user_id;
         }
-        // Parse team_emails from the job
+        // Parse scheduling_contacts from the job (separate from project team)
         teamMembers=[];
-        if(jobData&&jobData[0]&&jobData[0].team_emails){
-            var te=jobData[0].team_emails;
-            if(typeof te==='string')try{te=JSON.parse(te);}catch(e){te=[];}
-            if(Array.isArray(te)){
-                teamMembers=te.map(function(m){return typeof m==='string'?{name:'',email:m}:{name:m.name||'',email:m.email||''};}).filter(function(m){return m.email;});
+        if(jobData&&jobData[0]&&jobData[0].scheduling_contacts){
+            var sc=jobData[0].scheduling_contacts;
+            if(typeof sc==='string')try{sc=JSON.parse(sc);}catch(e){sc=[];}
+            if(Array.isArray(sc)){
+                teamMembers=sc.map(function(m){return typeof m==='string'?{name:'',email:m}:{name:m.name||'',email:m.email||''};}).filter(function(m){return m.email;});
             }
         }
         renderContacts(rows);
