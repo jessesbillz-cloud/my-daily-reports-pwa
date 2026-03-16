@@ -424,14 +424,8 @@ fetch(SB+'/functions/v1/update-inspection',{method:'POST',headers:{'Authorizatio
 .then(function(r){return r.json();}).then(function(data){if(data.success){loadMD();} else {alert('Error: '+(data.error||'Unknown'));}})
 .catch(function(err){alert('Failed: '+err.message);});
 }
-// Calendar feed: use inspector slug for full calendar (all projects), fall back to project-only
-var calFeedURL=inspSlug
-    ? SB+'/functions/v1/calendar-feed?slug='+encodeURIComponent(inspSlug)
-    : SB+'/functions/v1/calendar-feed?project='+encodeURIComponent(PROJ);
-function updateCalFeedURL(){
-    var el=document.getElementById('calURLText');if(el)el.textContent=calFeedURL;
-}
-setTimeout(updateCalFeedURL,200);
+var calFeedURL=SB+'/functions/v1/calendar-feed?project='+encodeURIComponent(PROJ);
+setTimeout(function(){var el=document.getElementById('calURLText');if(el)el.textContent=calFeedURL;},100);
 function copyCalendarURL(){
     navigator.clipboard.writeText(calFeedURL);
     var btn=document.getElementById('copyBtn');
@@ -775,8 +769,7 @@ function loadContacts(){
         }
         renderTeamList();
         refreshDropdownAndEmails();
-        // Now that we have the user_id, load the calendar and update the feed URL
-        updateCalFeedURL();
+        // Now that we have the user_id, load the calendar
         loadMD();
     });
 }
