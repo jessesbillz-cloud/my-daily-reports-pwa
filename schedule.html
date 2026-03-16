@@ -433,7 +433,11 @@ function copyCalendarURL(){
     setTimeout(function(){btn.textContent='Copy'; btn.style.background='#5a8fc0';},2000);
 }
 function shareCalendarLink(){
-    var shareURL=window.location.href;
+    // Build a clean share URL — no UUIDs, just project slug and inspector slug
+    var base=window.location.origin+window.location.pathname;
+    var shareParams='?project='+encodeURIComponent(PROJ);
+    if(inspSlug) shareParams+='&i='+encodeURIComponent(inspSlug);
+    var shareURL=base+shareParams;
     navigator.clipboard.writeText(shareURL);
     var btn=document.getElementById('shareCopyBtn');
     btn.textContent='Copied!'; btn.style.background='#4a4';
