@@ -248,6 +248,7 @@ var AK='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Ind
 var isAdmin=params.get('admin')==='true';
 var JOB_ID=params.get('job_id')||'';
 var teamMembers=[];
+var OWNER_USER_ID='';
 
 // If no project selected, redirect to hub to pick one
 if(!PROJ && inspSlug){
@@ -448,11 +449,12 @@ document.getElementById('requestView').style.display=t==='request'?'block':'none
 function changeMonth(dir){ cM+=dir; if(cM>11){cM=0;cY++;} if(cM<0){cM=11;cY--;} renderCal(); loadMD(); }
 function ds(y,m,d){return y+'-'+String(m+1).padStart(2,'0')+'-'+String(d).padStart(2,'0');}
 function loadMD(){
-    var base=SB+'/rest/v1/inspection_requests?and=(status.neq.cancelled,status.neq.deleted)';
+    if(!OWNER_USER_ID){renderCal();return;} // wait until we know whose calendar
+    var base=SB+'/rest/v1/inspection_requests?user_id=eq.'+OWNER_USER_ID+'&and=(status.neq.cancelled,status.neq.deleted)';
     var hdrs={headers:{'apikey':AK,'Authorization':'Bearer '+AK}};
     Promise.all([
         fetch(base+'&inspection_types=cs.%7BRegular%7D',hdrs).then(function(r){return r.json();}),
-        fetch(base+'&project=eq.'+encodeURIComponent(PROJ)+'&inspection_types=cs.%7BSpecial%7D',hdrs).then(function(r){return r.json();}),
+        fetch(base+'&inspection_types=cs.%7BSpecial%7D',hdrs).then(function(r){return r.json();}),
         fetch(base+'&inspection_types=cs.%7BConcrete%7D',hdrs).then(function(r){return r.json();}),
         fetch(base+'&inspection_types=cs.%7BGrout%7D',hdrs).then(function(r){return r.json();}),
         fetch(base+'&inspection_types=cs.%7BShotcrete%7D',hdrs).then(function(r){return r.json();})
@@ -743,7 +745,7 @@ function submitIR(){
 function loadContacts(){
     var cacheKey='mdr_contacts_'+PROJ;
     var contactsP=fetch(SB+'/rest/v1/contacts?project=eq.'+encodeURIComponent(PROJ)+'&order=name.asc',{headers:{'apikey':AK,'Authorization':'Bearer '+AK}}).then(function(r){return r.json();}).catch(function(){return null;});
-    var teamP=JOB_ID?fetch(SB+'/rest/v1/jobs?id=eq.'+JOB_ID+'&select=team_emails',{headers:{'apikey':AK,'Authorization':'Bearer '+AK}}).then(function(r){return r.json();}).catch(function(){return null;}):Promise.resolve(null);
+    var teamP=JOB_ID?fetch(SB+'/rest/v1/jobs?id=eq.'+JOB_ID+'&select=team_emails,user_id',{headers:{'apikey':AK,'Authorization':'Bearer '+AK}}).then(function(r){return r.json();}).catch(function(){return null;}):Promise.resolve(null);
     Promise.all([contactsP,teamP]).then(function(results){
         var rows=results[0];
         var jobData=results[1];
@@ -752,6 +754,10 @@ function loadContacts(){
             savedContacts=rows;
         } else {
             try{var cached=localStorage.getItem(cacheKey);if(cached)savedContacts=JSON.parse(cached);}catch(e){}
+        }
+        // Get owner user_id from job for calendar filtering
+        if(jobData&&jobData[0]&&jobData[0].user_id){
+            OWNER_USER_ID=jobData[0].user_id;
         }
         // Parse team_emails from the job
         teamMembers=[];
@@ -764,13 +770,14 @@ function loadContacts(){
         }
         renderTeamList();
         refreshDropdownAndEmails();
+        // Now that we have the user_id, load the calendar
+        loadMD();
     });
 }
 function resetForm(){ location.reload(); }
-loadContacts();
+loadContacts(); // also triggers loadMD() after fetching user_id
 loadAdditionalRecipients();
 renderCal();
-loadMD();
 // Auto-refresh calendar data every 30 seconds so status changes appear
 setInterval(function(){ loadMD(); }, 30000);
 </script>

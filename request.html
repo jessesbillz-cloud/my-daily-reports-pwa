@@ -238,6 +238,7 @@ var JOB_ID=params.get('job_id')||'';
 var allFiles=[], inspType='', inspDur='', cM=new Date().getMonth(), cY=new Date().getFullYear(), mD={};
 var savedContacts=[];
 var teamMembers=[];
+var OWNER_USER_ID='';
 // Wire back button with inspector slug
 if(inspSlug){
     var backBtn=document.getElementById('backToHub');
@@ -439,20 +440,20 @@ document.getElementById('requestView').style.display=t==='request'?'block':'none
 function changeMonth(dir){ cM+=dir; if(cM>11){cM=0;cY++;} if(cM<0){cM=11;cY--;} renderCal(); loadMD(); }
 function ds(y,m,d){return y+'-'+String(m+1).padStart(2,'0')+'-'+String(d).padStart(2,'0');}
 function loadMD(){
-    // Fetch BLOCKING inspections: Regular (any project), Concrete, Grout, Shotcrete (any project)
-    // Special inspections do NOT block EXCEPT Concrete, Grout, and Shotcrete
-    var base=SB+'/rest/v1/inspection_requests?and=(status.neq.cancelled,status.neq.deleted)';
+    if(!OWNER_USER_ID){renderCal();return;} // wait until we know whose calendar
+    // Fetch BLOCKING inspections: Regular, Concrete, Grout, Shotcrete — all scoped to this inspector
+    var base=SB+'/rest/v1/inspection_requests?user_id=eq.'+OWNER_USER_ID+'&and=(status.neq.cancelled,status.neq.deleted)';
     var hdrs={headers:{'apikey':AK,'Authorization':'Bearer '+AK}};
     Promise.all([
-        // Regular inspections across ALL projects — these block the calendar
+        // Regular inspections across all this inspector's projects — these block the calendar
         fetch(base+'&inspection_types=cs.%7BRegular%7D',hdrs).then(function(r){return r.json();}),
-        // This project's own Special inspections — shown on calendar but only Concrete/Grout/Shotcrete block
-        fetch(base+'&project=eq.'+encodeURIComponent(PROJ)+'&inspection_types=cs.%7BSpecial%7D',hdrs).then(function(r){return r.json();}),
-        // Concrete inspections across ALL projects — these block
+        // Special inspections for this inspector — shown on calendar, Concrete/Grout/Shotcrete block
+        fetch(base+'&inspection_types=cs.%7BSpecial%7D',hdrs).then(function(r){return r.json();}),
+        // Concrete inspections — these block
         fetch(base+'&inspection_types=cs.%7BConcrete%7D',hdrs).then(function(r){return r.json();}),
-        // Grout inspections across ALL projects — these block
+        // Grout inspections — these block
         fetch(base+'&inspection_types=cs.%7BGrout%7D',hdrs).then(function(r){return r.json();}),
-        // Shotcrete inspections across ALL projects — these block
+        // Shotcrete inspections — these block
         fetch(base+'&inspection_types=cs.%7BShotcrete%7D',hdrs).then(function(r){return r.json();})
     ]).then(function(res){
         mD={};var seen={};
@@ -663,7 +664,7 @@ function renderContacts(rows){
 function loadContacts(){
     var cacheKey='mdr_contacts_'+PROJ;
     var contactsP=fetch(SB+'/rest/v1/contacts?project=eq.'+encodeURIComponent(PROJ)+'&order=name.asc',{headers:{'apikey':AK,'Authorization':'Bearer '+AK}}).then(function(r){return r.json();}).catch(function(){return null;});
-    var teamP=JOB_ID?fetch(SB+'/rest/v1/jobs?id=eq.'+JOB_ID+'&select=team_emails',{headers:{'apikey':AK,'Authorization':'Bearer '+AK}}).then(function(r){return r.json();}).catch(function(){return null;}):Promise.resolve(null);
+    var teamP=JOB_ID?fetch(SB+'/rest/v1/jobs?id=eq.'+JOB_ID+'&select=team_emails,user_id',{headers:{'apikey':AK,'Authorization':'Bearer '+AK}}).then(function(r){return r.json();}).catch(function(){return null;}):Promise.resolve(null);
     Promise.all([contactsP,teamP]).then(function(results){
         var rows=results[0];
         var jobData=results[1];
@@ -671,6 +672,10 @@ function loadContacts(){
             try{localStorage.setItem(cacheKey,JSON.stringify(rows));}catch(e){}
         } else {
             try{var cached=localStorage.getItem(cacheKey);if(cached)rows=JSON.parse(cached);}catch(e){}
+        }
+        // Get owner user_id from job for calendar filtering
+        if(jobData&&jobData[0]&&jobData[0].user_id){
+            OWNER_USER_ID=jobData[0].user_id;
         }
         // Parse team_emails from the job
         teamMembers=[];
@@ -682,12 +687,13 @@ function loadContacts(){
             }
         }
         renderContacts(rows);
+        // Now that we have the user_id, load the calendar
+        loadMD();
     });
 }
 function resetForm(){ location.reload(); }
-loadContacts();
+loadContacts(); // also triggers loadMD() after fetching user_id
 renderCal();
-loadMD();
 </script>
 </body>
 </html>
