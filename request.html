@@ -481,7 +481,7 @@ function loadMD(){
         renderCal();
         // Re-check current form date if one is selected
         checkDateAvailability();
-    });
+    }).catch(function(err){console.warn('loadMD fetch error:',err.message);renderCal();});
 }
 function renderCal(){
     var g=document.getElementById('calGrid');g.innerHTML='';
@@ -526,7 +526,14 @@ function submitIR(){
     var d=document.getElementById('iDate').value, t=document.getElementById('iTime').value, nm=document.getElementById('iName').value;
     var newName=document.getElementById('iNewName').value.trim();
     if((!nm||nm==='other')&&newName){ nm=newName; }
-    if(!nm||allFiles.length===0||!d||!t||!inspType||!inspDur){alert('Missing required fields.'); return;}
+    var missing=[];
+    if(!d) missing.push('Date');
+    if(!t) missing.push('Time');
+    if(!inspType) missing.push('Inspection Type');
+    if(!inspDur) missing.push('Duration');
+    if(!nm) missing.push('Submitted By');
+    if(allFiles.length===0) missing.push('Photos/PDFs');
+    if(missing.length>0){alert('Please fill in: '+missing.join(', ')); return;}
     // Persist selected submitter name
     try{localStorage.setItem('mdr_last_submitter_'+PROJ,nm);}catch(e){}
     // Double-booking check: verify time slot is open
