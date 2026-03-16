@@ -203,12 +203,12 @@ details[open] .collapsible-summary::after { content: '−'; }
     </div>
     <div id="teamListContainer"></div>
     <div style="display:flex;flex-direction:column;gap:8px;margin-top:10px;">
-        <input type="text" id="iNewName" class="field-input" placeholder="Name" style="margin-bottom:0;">
+        <input type="text" id="iNewName" class="field-input" placeholder="Name" style="margin-bottom:0;" autocomplete="off">
         <div style="display:flex;gap:8px;">
-            <input type="email" id="iNewEmail" class="field-input" placeholder="Email" style="margin-bottom:0;flex:1;" onkeydown="if(event.key==='Enter')addPersonToTeam();">
+            <input type="email" id="iNewEmail" class="field-input" placeholder="Email" style="margin-bottom:0;flex:1;" autocomplete="off" onkeydown="if(event.key==='Enter')addPersonToTeam();">
             <button onclick="addPersonToTeam()" style="padding:10px 16px;background:#5a8fc0;border:none;border-radius:6px;color:#fff;font-size:13px;font-weight:700;cursor:pointer;white-space:nowrap;">Add</button>
         </div>
-        <input type="text" id="iNewCompany" class="field-input" placeholder="Company/Role (optional)" style="margin-bottom:0;">
+        <input type="text" id="iNewCompany" class="field-input" placeholder="Company/Role (optional)" style="margin-bottom:0;" autocomplete="off">
     </div>
 </div>
 
@@ -222,9 +222,9 @@ details[open] .collapsible-summary::after { content: '−'; }
     <div style="padding-bottom:10px;">
         <div id="addlEmailList" style="margin-bottom:8px;"></div>
         <div style="display:flex;flex-direction:column;gap:6px;">
-            <input type="text" id="addlName" class="field-input" placeholder="Name" style="margin-bottom:0;">
+            <input type="text" id="addlName" class="field-input" placeholder="Name" style="margin-bottom:0;" autocomplete="off">
             <div style="display:flex;gap:8px;align-items:center;">
-                <input type="email" id="addlEmail" class="field-input" placeholder="Email" style="margin-bottom:0;flex:1;" onkeydown="if(event.key==='Enter')addAdditionalRecipient();">
+                <input type="email" id="addlEmail" class="field-input" placeholder="Email" style="margin-bottom:0;flex:1;" autocomplete="off" onkeydown="if(event.key==='Enter')addAdditionalRecipient();">
                 <button onclick="addAdditionalRecipient()" style="padding:10px 16px;background:#5a8fc0;border:none;border-radius:6px;color:#fff;font-size:13px;font-weight:700;cursor:pointer;white-space:nowrap;">Add</button>
             </div>
         </div>
@@ -544,7 +544,19 @@ function refreshDropdownAndEmails(){
     // If no current val, try restoring from localStorage
     if(!currentVal){try{currentVal=localStorage.getItem('mdr_last_submitter_'+PROJ)||'';}catch(e){}}
     sel.innerHTML='<option value="">Select your name</option>';
+    var addedNames={};
+    // Team members first in the dropdown
+    teamMembers.forEach(function(m){
+        if(!m.name||addedNames[m.name.toLowerCase()])return;
+        addedNames[m.name.toLowerCase()]=true;
+        var o=document.createElement('option');
+        o.value=m.name;
+        o.textContent=m.name;
+        sel.appendChild(o);
+    });
     savedContacts.forEach(function(c){
+        if(addedNames[c.name.toLowerCase()])return;
+        addedNames[c.name.toLowerCase()]=true;
         var o=document.createElement('option');
         o.value=c.name;
         o.textContent=c.name+(c.company?' ('+c.company+')':'');

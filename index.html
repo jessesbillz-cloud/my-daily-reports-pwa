@@ -993,9 +993,11 @@ function AccountSettings({user, onBack, onLogout}){
   return(
     <div className="page-in" style={{minHeight:"100vh",background:C.bg,color:C.txt}}>
       {/* Header */}
-      <div style={{display:"flex",alignItems:"center",gap:10,padding:"14px 16px",borderBottom:`1px solid ${C.brd}`,background:C.card}}>
-        <button onClick={onBack} style={{background:"none",border:"none",color:C.mut,fontSize:24,cursor:"pointer",lineHeight:1,minWidth:44,minHeight:44,display:"flex",alignItems:"center",justifyContent:"center"}}>←</button>
+      <div style={{borderBottom:`1px solid ${C.brd}`,background:C.card,padding:"14px 16px"}}>
+      <div style={{display:"flex",alignItems:"center",gap:10,maxWidth:600,margin:"0 auto"}}>
+        <button onClick={onBack} style={{background:"none",border:"none",color:C.mut,fontSize:28,cursor:"pointer",lineHeight:1,minWidth:48,minHeight:48,display:"flex",alignItems:"center",justifyContent:"center"}}>←</button>
         <span style={{fontWeight:700,fontSize:17}}>Account Settings</span>
+      </div>
       </div>
 
       <div style={{maxWidth:500,margin:"0 auto",padding:"24px 20px"}}>
@@ -2084,9 +2086,11 @@ function CreateJob({user, onBack, onCreated}){
 
   return(
     <div className="page-in" style={{minHeight:"100vh",background:C.bg,color:C.txt}}>
-      <div style={{display:"flex",alignItems:"center",gap:10,padding:"14px 16px",borderBottom:`1px solid ${C.brd}`,background:C.card}}>
-        <button onClick={onBack} style={{background:"none",border:"none",color:C.mut,fontSize:24,cursor:"pointer",lineHeight:1,minWidth:44,minHeight:44,display:"flex",alignItems:"center",justifyContent:"center"}}>←</button>
+      <div style={{borderBottom:`1px solid ${C.brd}`,background:C.card,padding:"14px 16px"}}>
+      <div style={{display:"flex",alignItems:"center",gap:10,maxWidth:600,margin:"0 auto"}}>
+        <button onClick={onBack} style={{background:"none",border:"none",color:C.mut,fontSize:28,cursor:"pointer",lineHeight:1,minWidth:48,minHeight:48,display:"flex",alignItems:"center",justifyContent:"center"}}>←</button>
         <span style={{fontWeight:700,fontSize:17}}>New Job</span>
+      </div>
       </div>
       <div style={{maxWidth:500,margin:"0 auto",padding:"24px 20px"}}>
         {err&&<div style={{background:"#2d1214",border:"1px solid #5c2023",borderRadius:8,padding:"10px 14px",marginBottom:16,color:C.err,fontSize:13}}>{err}</div>}
@@ -2383,10 +2387,12 @@ function CreateJob({user, onBack, onCreated}){
 function ArchivedJobs({jobs, onBack, onSelect}){
   return(
     <div className="page-in" style={{minHeight:"100vh",background:C.bg,color:C.txt}}>
-      <div style={{display:"flex",alignItems:"center",gap:10,padding:"14px 16px",borderBottom:`1px solid ${C.brd}`,background:C.card}}>
-        <button onClick={onBack} style={{background:"none",border:"none",color:C.mut,fontSize:24,cursor:"pointer",lineHeight:1,minWidth:44,minHeight:44,display:"flex",alignItems:"center",justifyContent:"center"}}>←</button>
+      <div style={{borderBottom:`1px solid ${C.brd}`,background:C.card,padding:"14px 16px"}}>
+      <div style={{display:"flex",alignItems:"center",gap:10,maxWidth:600,margin:"0 auto"}}>
+        <button onClick={onBack} style={{background:"none",border:"none",color:C.mut,fontSize:28,cursor:"pointer",lineHeight:1,minWidth:48,minHeight:48,display:"flex",alignItems:"center",justifyContent:"center"}}>←</button>
         <span style={{fontWeight:700,fontSize:17}}>Archived Jobs</span>
         <span style={{fontSize:13,color:C.mut,marginLeft:"auto"}}>{jobs.length} job{jobs.length!==1?"s":""}</span>
+      </div>
       </div>
       <div style={{maxWidth:600,margin:"0 auto",padding:"20px"}}>
         {jobs.length===0&&(<div style={{textAlign:"center",padding:"60px 20px",color:C.mut}}><div style={{fontSize:48,marginBottom:16,color:C.brd}}>—</div><p style={{fontSize:16,fontWeight:600,color:C.lt,marginBottom:6}}>No archived jobs</p><p style={{fontSize:14}}>Completed projects will appear here</p></div>)}
@@ -3423,7 +3429,7 @@ function WorkLogEditor({job, user, onBack, reportDate}){
     return(
       <div style={{minHeight:"100vh",background:C.bg,color:C.txt,display:"flex",flexDirection:"column"}}>
         <div style={{display:"flex",alignItems:"center",gap:10,padding:"12px 16px",borderBottom:`1px solid ${C.brd}`,background:C.card}}>
-          <button onClick={()=>setViewingPreview(null)} style={{background:"none",border:"none",color:C.mut,fontSize:24,cursor:"pointer",padding:"8px 12px",lineHeight:1,borderRadius:8,minWidth:44,minHeight:44,display:"flex",alignItems:"center",justifyContent:"center"}}>←</button>
+          <button onClick={()=>setViewingPreview(null)} style={{background:"none",border:"none",color:C.mut,fontSize:28,cursor:"pointer",padding:"10px 14px",lineHeight:1,borderRadius:8,minWidth:48,minHeight:48,display:"flex",alignItems:"center",justifyContent:"center"}}>←</button>
           <div style={{flex:1}}>
             <div style={{fontWeight:700,fontSize:17}}>Report Preview</div>
             <div style={{fontSize:12,color:C.mut}}>{viewingPreview.length} page{viewingPreview.length>1?"s":""}</div>
@@ -3459,8 +3465,9 @@ function WorkLogEditor({job, user, onBack, reportDate}){
         </div>
       )}
       {/* Header */}
-      <div style={{display:"flex",alignItems:"center",gap:12,padding:"14px 16px",borderBottom:`1px solid ${C.brd}`,background:C.card}}>
-        <button onClick={async()=>{await saveWorking();onBack();}} style={{background:"none",border:"none",color:C.mut,fontSize:24,cursor:"pointer",padding:"8px 12px",lineHeight:1,borderRadius:8,minWidth:44,minHeight:44,display:"flex",alignItems:"center",justifyContent:"center"}}>←</button>
+      <div style={{borderBottom:`1px solid ${C.brd}`,background:C.card,padding:"14px 16px"}}>
+      <div style={{display:"flex",alignItems:"center",gap:12,maxWidth:600,margin:"0 auto"}}>
+        <button onClick={async()=>{await saveWorking();onBack();}} style={{background:"none",border:"none",color:C.mut,fontSize:28,cursor:"pointer",padding:"10px 14px",lineHeight:1,borderRadius:8,minWidth:48,minHeight:48,display:"flex",alignItems:"center",justifyContent:"center"}}>←</button>
         <div style={{flex:1,minWidth:0}}>
           <div style={{fontWeight:700,fontSize:16,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{job.name}</div>
           <div style={{fontSize:12,color:C.mut}}>Work Log — {new Date(todayISO+"T12:00:00").toLocaleDateString("en-US",{weekday:"short",month:"short",day:"numeric",timeZone:tz})}</div>
@@ -3468,6 +3475,7 @@ function WorkLogEditor({job, user, onBack, reportDate}){
         <button onClick={saveWorking} disabled={saving} style={{padding:"8px 14px",background:C.blu,border:"none",borderRadius:8,color:"#fff",fontSize:13,fontWeight:600,cursor:saving?"default":"pointer",opacity:saving?0.7:1}}>
           {saving?"Saving...":"Save"}
         </button>
+      </div>
       </div>
 
       <div style={{maxWidth:560,margin:"0 auto",padding:"20px 16px 120px"}}>
@@ -5008,7 +5016,7 @@ function ReportEditor({job, user, onBack, reportDate}){
     return(
       <div style={{minHeight:"100vh",background:C.bg,color:C.txt,display:"flex",flexDirection:"column"}}>
         <div style={{display:"flex",alignItems:"center",gap:10,padding:"12px 16px",borderBottom:`1px solid ${C.brd}`,background:C.card}}>
-          <button onClick={()=>{setViewingReport(null);setViewDocxHtml(null);setEditablePreview(null);}} style={{background:"none",border:"none",color:C.mut,fontSize:24,cursor:"pointer",padding:"8px 12px",lineHeight:1,borderRadius:8,minWidth:44,minHeight:44,display:"flex",alignItems:"center",justifyContent:"center"}}>←</button>
+          <button onClick={()=>{setViewingReport(null);setViewDocxHtml(null);setEditablePreview(null);}} style={{background:"none",border:"none",color:C.mut,fontSize:28,cursor:"pointer",padding:"10px 14px",lineHeight:1,borderRadius:8,minWidth:48,minHeight:48,display:"flex",alignItems:"center",justifyContent:"center"}}>←</button>
           <div style={{flex:1}}>
             <div style={{fontWeight:700,fontSize:17}}>{useEditable?"Edit on Preview":"Report Preview"}</div>
             <div style={{fontSize:12,color:C.mut}}>{useEditable?"Click any field to edit directly on the PDF":"This is how your report will look"}</div>
@@ -5142,7 +5150,7 @@ function ReportEditor({job, user, onBack, reportDate}){
       {toast&&<div style={{position:"fixed",top:60,left:"50%",transform:"translateX(-50%)",background:C.card,border:`1px solid ${C.ok}`,borderRadius:10,padding:"10px 20px",fontSize:14,fontWeight:600,color:C.ok,zIndex:9999}}>{toast}</div>}
       {/* Header */}
       <div style={{display:"flex",alignItems:"center",gap:12,padding:"14px 16px",borderBottom:`1px solid ${C.brd}`,background:C.card}}>
-        <button onClick={async()=>{await saveWorking();onBack();}} style={{background:"none",border:"none",color:C.mut,fontSize:24,cursor:"pointer",padding:"8px 12px",lineHeight:1,borderRadius:8,minWidth:44,minHeight:44,display:"flex",alignItems:"center",justifyContent:"center"}}>←</button>
+        <button onClick={async()=>{await saveWorking();onBack();}} style={{background:"none",border:"none",color:C.mut,fontSize:28,cursor:"pointer",padding:"10px 14px",lineHeight:1,borderRadius:8,minWidth:48,minHeight:48,display:"flex",alignItems:"center",justifyContent:"center"}}>←</button>
         <div style={{flex:1,minWidth:0}}>
           <div style={{fontWeight:700,fontSize:17}}>{reportStatus==="submitted"?"Submitted Report":"Today's Report"}</div>
           <div style={{fontSize:12,color:C.mut,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{job.name}</div>
@@ -5558,13 +5566,15 @@ function JobDetail({job, user, onBack, onDeleted}){
     <div className="page-in" style={{minHeight:"100vh",background:C.bg,color:C.txt}}>
       {jdToast&&<div style={{position:"fixed",top:60,left:"50%",transform:"translateX(-50%)",background:C.card,border:`1px solid ${C.ok}`,borderRadius:10,padding:"10px 20px",fontSize:14,fontWeight:600,color:C.ok,zIndex:9999}}>{jdToast}</div>}
       {/* Header */}
-      <div style={{display:"flex",alignItems:"center",gap:12,padding:"14px 16px",borderBottom:`1px solid ${C.brd}`,background:C.card}}>
-        <button onClick={onBack} style={{background:"none",border:"none",color:C.mut,fontSize:24,cursor:"pointer",padding:"8px 12px",lineHeight:1,borderRadius:8,minWidth:44,minHeight:44,display:"flex",alignItems:"center",justifyContent:"center"}}>←</button>
+      <div style={{borderBottom:`1px solid ${C.brd}`,background:C.card,padding:"14px 16px"}}>
+      <div style={{display:"flex",alignItems:"center",gap:12,maxWidth:600,margin:"0 auto"}}>
+        <button onClick={onBack} style={{background:"none",border:"none",color:C.mut,fontSize:28,cursor:"pointer",padding:"10px 14px",lineHeight:1,borderRadius:8,minWidth:48,minHeight:48,display:"flex",alignItems:"center",justifyContent:"center"}}>←</button>
         <div style={{flex:1,minWidth:0}}>
           <div style={{fontWeight:700,fontSize:17,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{job.name}</div>
           {job.site_address&&<div style={{fontSize:12,color:C.mut,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{job.site_address}</div>}
         </div>
         <button onClick={()=>setShowJobSet(!showJobSet)} style={{width:34,height:34,borderRadius:8,background:C.inp,border:`1px solid ${showJobSet?C.org:C.brd}`,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",fontSize:12,fontWeight:700,color:C.mut}}>⚙</button>
+      </div>
       </div>
 
       <div style={{maxWidth:600,margin:"0 auto",padding:"20px"}}>
@@ -5997,7 +6007,7 @@ function TrainingCenter({onBack}){
     return(
       <div style={{minHeight:"100vh",background:C.bg,color:C.txt,display:"flex",flexDirection:"column"}}>
         <div style={{display:"flex",alignItems:"center",gap:12,padding:"14px 16px",borderBottom:`1px solid ${C.brd}`,background:C.card}}>
-          <button onClick={()=>{setSelGuide(null);setStep(0);}} style={{background:"none",border:"none",color:C.mut,fontSize:24,cursor:"pointer",padding:"8px 12px",lineHeight:1,borderRadius:8,minWidth:44,minHeight:44,display:"flex",alignItems:"center",justifyContent:"center"}}>←</button>
+          <button onClick={()=>{setSelGuide(null);setStep(0);}} style={{background:"none",border:"none",color:C.mut,fontSize:28,cursor:"pointer",padding:"10px 14px",lineHeight:1,borderRadius:8,minWidth:48,minHeight:48,display:"flex",alignItems:"center",justifyContent:"center"}}>←</button>
           <span style={{fontWeight:700,fontSize:17,flex:1}}>{g.title}</span>
         </div>
         <div style={{display:"flex",gap:4,padding:"16px 20px 8px"}}>
@@ -6082,9 +6092,11 @@ function TrainingCenter({onBack}){
 
   return(
     <div className="page-in" style={{minHeight:"100vh",background:C.bg,color:C.txt}}>
-      <div style={{display:"flex",alignItems:"center",gap:10,padding:"14px 16px",borderBottom:`1px solid ${C.brd}`,background:C.card}}>
-        <button onClick={onBack} style={{background:"none",border:"none",color:C.mut,fontSize:24,cursor:"pointer",lineHeight:1,minWidth:44,minHeight:44,display:"flex",alignItems:"center",justifyContent:"center"}}>←</button>
+      <div style={{borderBottom:`1px solid ${C.brd}`,background:C.card,padding:"14px 16px"}}>
+      <div style={{display:"flex",alignItems:"center",gap:10,maxWidth:600,margin:"0 auto"}}>
+        <button onClick={onBack} style={{background:"none",border:"none",color:C.mut,fontSize:28,cursor:"pointer",lineHeight:1,minWidth:48,minHeight:48,display:"flex",alignItems:"center",justifyContent:"center"}}>←</button>
         <span style={{fontWeight:700,fontSize:17}}>Training Center</span>
+      </div>
       </div>
       <div style={{maxWidth:600,margin:"0 auto",padding:"24px"}}>
         <div style={{textAlign:"center",marginBottom:28}}>
@@ -6192,7 +6204,7 @@ function Dashboard({user, onLogout}){
   if(showFairUse)return(
     <div style={{minHeight:"100vh",background:C.bg,color:C.txt}}>
       <div style={{display:"flex",alignItems:"center",gap:10,padding:"14px 16px",borderBottom:`1px solid ${C.brd}`,background:C.card}}>
-        <button onClick={()=>setShowFairUse(false)} style={{background:"none",border:"none",color:C.mut,fontSize:24,cursor:"pointer",lineHeight:1,minWidth:44,minHeight:44,display:"flex",alignItems:"center",justifyContent:"center"}}>←</button>
+        <button onClick={()=>setShowFairUse(false)} style={{background:"none",border:"none",color:C.mut,fontSize:28,cursor:"pointer",lineHeight:1,minWidth:48,minHeight:48,display:"flex",alignItems:"center",justifyContent:"center"}}>←</button>
         <span style={{fontWeight:700,fontSize:17}}>Fair Use Agreement</span>
       </div>
       <div style={{maxWidth:600,margin:"0 auto",padding:"24px 20px"}}>
@@ -6241,7 +6253,7 @@ function Dashboard({user, onLogout}){
   if(showTos)return(
     <div style={{minHeight:"100vh",background:C.bg,color:C.txt}}>
       <div style={{display:"flex",alignItems:"center",gap:10,padding:"14px 16px",borderBottom:`1px solid ${C.brd}`,background:C.card}}>
-        <button onClick={()=>setShowTos(false)} style={{background:"none",border:"none",color:C.mut,fontSize:24,cursor:"pointer",lineHeight:1,minWidth:44,minHeight:44,display:"flex",alignItems:"center",justifyContent:"center"}}>←</button>
+        <button onClick={()=>setShowTos(false)} style={{background:"none",border:"none",color:C.mut,fontSize:28,cursor:"pointer",lineHeight:1,minWidth:48,minHeight:48,display:"flex",alignItems:"center",justifyContent:"center"}}>←</button>
         <div><span style={{fontWeight:700,fontSize:17}}>Terms of Service</span><div style={{fontSize:11,color:C.mut}}>Last updated: January 11, 2025</div></div>
       </div>
       <div style={{maxWidth:600,margin:"0 auto",padding:"24px 20px"}}>
@@ -6334,7 +6346,7 @@ function Dashboard({user, onLogout}){
   if(showPriv)return(
     <div style={{minHeight:"100vh",background:C.bg,color:C.txt}}>
       <div style={{display:"flex",alignItems:"center",gap:10,padding:"14px 16px",borderBottom:`1px solid ${C.brd}`,background:C.card}}>
-        <button onClick={()=>setShowPriv(false)} style={{background:"none",border:"none",color:C.mut,fontSize:24,cursor:"pointer",lineHeight:1,minWidth:44,minHeight:44,display:"flex",alignItems:"center",justifyContent:"center"}}>←</button>
+        <button onClick={()=>setShowPriv(false)} style={{background:"none",border:"none",color:C.mut,fontSize:28,cursor:"pointer",lineHeight:1,minWidth:48,minHeight:48,display:"flex",alignItems:"center",justifyContent:"center"}}>←</button>
         <div><span style={{fontWeight:700,fontSize:17}}>Privacy Policy</span><div style={{fontSize:11,color:C.mut}}>Last updated: January 11, 2025</div></div>
       </div>
       <div style={{maxWidth:600,margin:"0 auto",padding:"24px 20px"}}>
@@ -6487,7 +6499,8 @@ function Dashboard({user, onLogout}){
         <div style={{fontSize:22,fontWeight:800,letterSpacing:1,color:C.txt,whiteSpace:"nowrap"}}>My Daily Reports</div>
       </div>
       {/* ── Header: Dropdown (left) | Logo (center) | Settings (right) ── */}
-      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"12px 16px",borderBottom:`1px solid ${C.brd}`,background:C.card}} data-s>
+      <div style={{borderBottom:`1px solid ${C.brd}`,background:C.card,padding:"12px 16px"}} data-s>
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",maxWidth:600,margin:"0 auto"}}>
         <div style={{display:"flex",alignItems:"center",gap:10}} data-d>
           <button onClick={()=>setShowDD(!showDD)} style={{display:"flex",alignItems:"center",gap:6,padding:"8px 12px",background:C.inp,border:`1px solid ${showDD?C.org:C.brd}`,borderRadius:8,cursor:"pointer",color:C.txt}}>
             <span style={{fontSize:14,fontWeight:600,maxWidth:160,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{selJob?selJob.name:"Jobs"}</span>
@@ -6499,6 +6512,7 @@ function Dashboard({user, onLogout}){
           <button onClick={doShare} style={{width:34,height:34,borderRadius:8,background:C.inp,border:`1px solid ${C.brd}`,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",fontSize:14,color:C.mut}}>↗</button>
           <button onClick={()=>setShowSet(!showSet)} style={{width:34,height:34,borderRadius:8,background:C.inp,border:`1px solid ${C.brd}`,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",fontSize:14,color:C.mut}}>⚙️</button>
         </div>
+      </div>
       </div>
 
       {/* Trial countdown banner */}
