@@ -265,17 +265,7 @@ serve(async (req) => {
         );
       }
 
-      await sendEmail(
-        `UPDATED: ${projectName} — ${typeLabel} rescheduled`,
-        "#e8742a",
-        "Scheduling Request Updated",
-        `<tr><td style="padding:8px 0;font-weight:bold;">Old Date:</td><td>${existing.inspection_date}</td></tr>
-         <tr><td style="padding:8px 0;font-weight:bold;">New Date:</td><td style="color:#e8742a;font-weight:bold;">${new_date || existing.inspection_date}</td></tr>
-         <tr><td style="padding:8px 0;font-weight:bold;">Old Time:</td><td>${existing.inspection_time}</td></tr>
-         <tr><td style="padding:8px 0;font-weight:bold;">New Time:</td><td style="color:#e8742a;font-weight:bold;">${new_time || existing.inspection_time}</td></tr>
-         <tr><td style="padding:8px 0;font-weight:bold;">Updated By:</td><td>${action_by || "Unknown"}</td></tr>`
-      );
-      await sendNtfy("Request Updated", `${typeLabel} for ${projectName} rescheduled to ${new_date || existing.inspection_date} at ${new_time || existing.inspection_time}`, "pencil", "default");
+      // No email for edits — too noisy
 
       return new Response(JSON.stringify({ success: true, action: "edit" }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -333,14 +323,7 @@ serve(async (req) => {
         );
       }
 
-      await sendEmail(
-        `DELETED: ${projectName} — ${typeLabel} on ${existing.inspection_date}`,
-        "#666",
-        "Scheduling Request Deleted",
-        `<tr><td style="padding:8px 0;font-weight:bold;">Date:</td><td>${existing.inspection_date}</td></tr>
-         <tr><td style="padding:8px 0;font-weight:bold;">Deleted By:</td><td>${action_by || "Admin"}</td></tr>
-         <tr><td style="padding:8px 0;font-weight:bold;">Status:</td><td style="color:#c44;font-weight:bold;">Deleted</td></tr>`
-      );
+      // No email for deletes — too noisy
 
       return new Response(JSON.stringify({ success: true, action: "delete" }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
