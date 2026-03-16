@@ -364,15 +364,19 @@ cancel.onclick=function(){document.body.removeChild(overlay);}; box.appendChild(
 overlay.appendChild(box); document.body.appendChild(overlay);
 }
 function cancelInsp(id,proj,ty,date,time){
-var team=savedContacts.map(function(c){return c.name;}); if(team.length===0) team=["(no saved contacts)"];
+var team=teamMembers.map(function(m){return m.name;}).filter(Boolean).concat(savedContacts.map(function(c){return c.name;}));
+team=team.filter(function(n,i){return team.indexOf(n)===i;}); // deduplicate
+if(team.length===0) team=["(no saved contacts)"];
 showActionModal('Who is cancelling this?',team,function(who){
 var reason=prompt('Reason (optional):');
-fetch(SB+'/functions/v1/update-inspection',{method:'POST',headers:{'Authorization':'Bearer '+AK,'apikey':AK,'Content-Type':'application/json'},body:JSON.stringify({request_id:id,action:'cancel',action_by:who,reason:reason||''})})
-.then(function(r){return r.json();}).then(function(data){if(data.success){alert('Cancelled.'); loadMD();} else {alert('Error: '+data.error);}});
+fetch(SB+'/functions/v1/update-inspection',{method:'POST',headers:{'Authorization':'Bearer '+AK,'apikey':AK,'Content-Type':'application/json'},body:JSON.stringify({request_id:id,action:'cancel',action_by:who,reason:reason||'',notify:true})})
+.then(function(r){return r.json();}).then(function(data){if(data.success){alert('Cancelled. Notifications sent.'); loadMD();} else {alert('Error: '+data.error);}});
 });
 }
 function editInsp(id,oldDate,oldTime){
-var team=savedContacts.map(function(c){return c.name;}); if(team.length===0) team=["(no saved contacts)"];
+var team=teamMembers.map(function(m){return m.name;}).filter(Boolean).concat(savedContacts.map(function(c){return c.name;}));
+team=team.filter(function(n,i){return team.indexOf(n)===i;});
+if(team.length===0) team=["(no saved contacts)"];
 showActionModal('Who is editing this?',team,function(who){ showEditModal(id,oldDate,oldTime,who); });
 }
 function showEditModal(id,oldDate,oldTime,who){
@@ -383,8 +387,8 @@ overlay.appendChild(modal); document.body.appendChild(overlay);
 document.getElementById('cEdit').onclick=function(){overlay.remove();};
 document.getElementById('sEdit').onclick=function(){
 var nD=document.getElementById('eDate').value, nT=document.getElementById('eTime').value;
-fetch(SB+'/functions/v1/update-inspection',{method:'POST',headers:{'Authorization':'Bearer '+AK,'apikey':AK,'Content-Type':'application/json'},body:JSON.stringify({request_id:id,action:'edit',action_by:who,new_date:nD,new_time:nT})})
-.then(function(r){return r.json();}).then(function(data){if(data.success){alert('Updated.'); overlay.remove(); loadMD();} else {alert('Error: '+data.error);}});
+fetch(SB+'/functions/v1/update-inspection',{method:'POST',headers:{'Authorization':'Bearer '+AK,'apikey':AK,'Content-Type':'application/json'},body:JSON.stringify({request_id:id,action:'edit',action_by:who,new_date:nD,new_time:nT,notify:true})})
+.then(function(r){return r.json();}).then(function(data){if(data.success){alert('Updated. Notifications sent.'); overlay.remove(); loadMD();} else {alert('Error: '+data.error);}});
 };
 }
 function editInspAdmin(id,oldDate,oldTime,oldDur){
@@ -721,7 +725,7 @@ function submitIR(){
     .then(function(r){
         return r.json().then(function(data){ data._status=r.status; return data; });
     }).then(function(data){
-        if(data.success){ document.getElementById('requestView').style.display='none'; document.getElementById('successView').style.display='block'; }
+        if(data.success){ document.getElementById('requestView').style.display='none'; document.getElementById('successView').style.display='block'; loadMD(); }
         else if(data._status===409){
             var w=document.getElementById('dateWarning');
             w.textContent='⚠️ Scheduling conflict: this time slot is already booked on '+d+'. Please select a different time or date.';

@@ -73,10 +73,10 @@ details[open] .collapsible-summary::after { content: '−'; }
 </head>
 <body>
 <div style="text-align:center;padding:8px 0;margin-bottom:8px;">
-<a href="hub.html" style="color:#5a8fc0;text-decoration:none;font-size:13px;font-weight:600;border:1px solid #333;padding:6px 14px;border-radius:20px;">&larr; Back to Project List</a>
+<a id="backToHub" href="hub.html" style="color:#5a8fc0;text-decoration:none;font-size:13px;font-weight:600;border:1px solid #333;padding:6px 14px;border-radius:20px;">&larr; Back to Project List</a>
 </div>
 <div class="header">
-    <img src="image0-5.jpeg" alt="Logo">
+    <img src="logo.jpg" alt="Logo">
     <div>
         <h2>Scheduling Request</h2>
         <p id="projectSubtitle">Loading...</p>
@@ -104,7 +104,7 @@ details[open] .collapsible-summary::after { content: '−'; }
 </div>
 <div class="card">
 <div style="padding:20px;text-align:center;">
-<img src="image0-5.jpeg" alt="Logo" style="width:70px;height:70px;margin-bottom:8px;">
+<img src="logo.jpg" alt="Logo" style="width:70px;height:70px;margin-bottom:8px;">
 <div style="font-size:22px;font-weight:bold;color:#5a8fc0;">My Daily Reports</div>
 <button style="padding:8px 16px;font-size:13px;font-weight:600;color:#fff;background:#e8742a;border:none;border-radius:6px;cursor:pointer;margin-top:10px;" onclick="window.open('https://mydailyreports.org','_blank')">Learn More</button>
 </div>
@@ -233,10 +233,16 @@ document.getElementById('projectSubtitle').textContent=cleanName;
 document.title=cleanName+' - Scheduling Request';
 var AK='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndsdXZrbXBuY2FmdWdkYnVubGt3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzIzMDU1MTUsImV4cCI6MjA4Nzg4MTUxNX0.HZpQ2xVGpf4EQ0BVDmIEuPqW5T_eNG5OqBNAqT03rH8';
 var isAdmin=params.get('admin')==='true';
+var inspSlug=params.get('i')||'';
 var JOB_ID=params.get('job_id')||'';
 var allFiles=[], inspType='', inspDur='', cM=new Date().getMonth(), cY=new Date().getFullYear(), mD={};
 var savedContacts=[];
 var teamMembers=[];
+// Wire back button with inspector slug
+if(inspSlug){
+    var backBtn=document.getElementById('backToHub');
+    if(backBtn) backBtn.href='hub.html?i='+encodeURIComponent(inspSlug);
+}
 // Booked time slots per date: { "2026-03-10": [{start:480,end:600,type:"Regular"}, ...] }
 // Times stored as minutes from midnight (e.g. 8:00 AM = 480)
 var bookedSlots={};
@@ -511,8 +517,9 @@ function renderCal(){
 function setType(t){inspType=t;document.getElementById('btnSpecial').classList.toggle('active',t==='Special');document.getElementById('btnRegular').classList.toggle('active',t==='Regular');document.getElementById('specialSub').classList.toggle('show',t==='Special');if(t!=='Special')document.getElementById('specialType').selectedIndex=0;checkDateAvailability();}
 function setDur(d){inspDur=d;document.querySelectorAll('.dur-btn').forEach(function(b){b.classList.remove('active');});event.target.classList.add('active');checkDateAvailability();}
 function scheduleInsp(id){
-fetch(SB+'/rest/v1/inspection_requests?id=eq.'+id,{method:'PATCH',headers:{'apikey':AK,'Authorization':'Bearer '+AK,'Content-Type':'application/json'},body:JSON.stringify({status:'scheduled'})})
-.then(function(r){if(r.ok){alert('Marked as Scheduled.'); loadMD();} else {alert('Error updating status.');}});
+fetch(SB+'/functions/v1/update-inspection',{method:'POST',headers:{'Authorization':'Bearer '+AK,'apikey':AK,'Content-Type':'application/json'},body:JSON.stringify({request_id:id,action:'schedule',notify:true})})
+.then(function(r){return r.json();}).then(function(data){if(data.success){alert('Marked as Scheduled — notifications sent.'); loadMD();} else {alert('Error: '+(data.error||'Unknown'));}})
+.catch(function(err){alert('Failed: '+err.message);});
 }
 function submitIR(){
     var d=document.getElementById('iDate').value, t=document.getElementById('iTime').value, nm=document.getElementById('iName').value;
