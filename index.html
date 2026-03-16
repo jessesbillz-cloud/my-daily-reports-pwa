@@ -4905,17 +4905,20 @@ function ReportEditor({job, user, onBack, reportDate}){
   // Post-submit: Download/save PDF to device
   const downloadPdf=async()=>{
     if(!submitSuccess)return;
-    const file=new File([submitSuccess.pdfBlob],submitSuccess.pdfFilename,{type:"application/pdf"});
-    // Use Web Share API if available (iOS/Android "Save to Files" or share sheet)
-    if(navigator.canShare&&navigator.canShare({files:[file]})){
-      try{await navigator.share({files:[file],title:submitSuccess.pdfFilename});showToast("PDF shared!");return;}catch(e){if(e.name==="AbortError")return;}
+    const isMobile=/iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+    if(isMobile){
+      // Mobile: use Web Share API for "Save to Files" / AirDrop / share sheet
+      const file=new File([submitSuccess.pdfBlob],submitSuccess.pdfFilename,{type:"application/pdf"});
+      if(navigator.canShare&&navigator.canShare({files:[file]})){
+        try{await navigator.share({files:[file],title:submitSuccess.pdfFilename});showToast("PDF shared!");return;}catch(e){if(e.name==="AbortError")return;}
+      }
     }
-    // Fallback: trigger download
+    // Desktop (or mobile fallback): trigger direct file download
     const url=URL.createObjectURL(submitSuccess.pdfBlob);
     const a=document.createElement("a");a.href=url;a.download=submitSuccess.pdfFilename;
     document.body.appendChild(a);a.click();document.body.removeChild(a);
     URL.revokeObjectURL(url);
-    showToast("PDF saved!");
+    showToast("PDF downloaded!");
   };
 
   // Post-submit: Email to project team
