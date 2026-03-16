@@ -246,6 +246,8 @@ var inspSlug=params.get('i')||'';
 var cleanName=PROJ.replace(/-/g,' ');
 var AK='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndsdXZrbXBuY2FmdWdkYnVubGt3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzIzMDU1MTUsImV4cCI6MjA4Nzg4MTUxNX0.HZpQ2xVGpf4EQ0BVDmIEuPqW5T_eNG5OqBNAqT03rH8';
 var isAdmin=params.get('admin')==='true';
+var JOB_ID=params.get('job_id')||'';
+var teamMembers=[];
 
 // If no project selected, redirect to hub to pick one
 if(!PROJ && inspSlug){
@@ -554,11 +556,23 @@ function refreshDropdownAndEmails(){
             if(sel.options[i].value===currentVal){sel.selectedIndex=i;break;}
         }
     }
-    // Update email checkboxes
+    // Update email checkboxes — team members first, then contacts (deduplicated)
     var emailContainer=document.getElementById('emailListContainer');
     emailContainer.innerHTML='';
+    var addedEmails={};
+    // Project team members (from job settings) — shown first with "Team" badge
+    teamMembers.forEach(function(m){
+        if(!m.email||addedEmails[m.email.toLowerCase()])return;
+        addedEmails[m.email.toLowerCase()]=true;
+        var lbl=document.createElement('label');
+        lbl.className='email-row';
+        lbl.innerHTML='<input type="checkbox" value="'+m.email+'" class="emailCheck"> '+m.name+' <span style="font-size:10px;color:#f97316;font-weight:600;">(Team)</span>';
+        emailContainer.appendChild(lbl);
+    });
+    // Saved contacts (skip duplicates already added from team)
     savedContacts.forEach(function(c){
-        if(!c.email)return;
+        if(!c.email||addedEmails[c.email.toLowerCase()])return;
+        addedEmails[c.email.toLowerCase()]=true;
         var lbl=document.createElement('label');
         lbl.className='email-row';
         lbl.innerHTML='<input type="checkbox" value="'+c.email+'" class="emailCheck">'+c.name+(c.company?' ('+c.company+')':'');
@@ -712,24 +726,28 @@ function submitIR(){
 }
 function loadContacts(){
     var cacheKey='mdr_contacts_'+PROJ;
-    fetch(SB+'/rest/v1/contacts?project=eq.'+encodeURIComponent(PROJ)+'&order=name.asc',{headers:{'apikey':AK,'Authorization':'Bearer '+AK}})
-    .then(function(r){return r.json();}).then(function(rows){
+    var contactsP=fetch(SB+'/rest/v1/contacts?project=eq.'+encodeURIComponent(PROJ)+'&order=name.asc',{headers:{'apikey':AK,'Authorization':'Bearer '+AK}}).then(function(r){return r.json();}).catch(function(){return null;});
+    var teamP=JOB_ID?fetch(SB+'/rest/v1/jobs?id=eq.'+JOB_ID+'&select=team_emails',{headers:{'apikey':AK,'Authorization':'Bearer '+AK}}).then(function(r){return r.json();}).catch(function(){return null;}):Promise.resolve(null);
+    Promise.all([contactsP,teamP]).then(function(results){
+        var rows=results[0];
+        var jobData=results[1];
         if(rows&&rows.length>0){
             try{localStorage.setItem(cacheKey,JSON.stringify(rows));}catch(e){}
+            savedContacts=rows;
+        } else {
+            try{var cached=localStorage.getItem(cacheKey);if(cached)savedContacts=JSON.parse(cached);}catch(e){}
         }
-        savedContacts=rows||[];
+        // Parse team_emails from the job
+        teamMembers=[];
+        if(jobData&&jobData[0]&&jobData[0].team_emails){
+            var te=jobData[0].team_emails;
+            if(typeof te==='string')try{te=JSON.parse(te);}catch(e){te=[];}
+            if(Array.isArray(te)){
+                teamMembers=te.map(function(m){return typeof m==='string'?{name:'',email:m}:{name:m.name||'',email:m.email||''};}).filter(function(m){return m.email;});
+            }
+        }
         renderTeamList();
         refreshDropdownAndEmails();
-    }).catch(function(){
-        // DB fetch failed — load from cache
-        try{
-            var cached=localStorage.getItem(cacheKey);
-            if(cached){
-                savedContacts=JSON.parse(cached);
-                renderTeamList();
-                refreshDropdownAndEmails();
-            }
-        }catch(e){}
     });
 }
 function resetForm(){ location.reload(); }
