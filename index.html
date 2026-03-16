@@ -305,6 +305,8 @@ function MDRLogo({size=36}){
 
 /* ── Support Chat Widget ── */
 function SupportChat({user}){
+  const [scToast,setScToast]=useState("");
+  const showToast=(m)=>{setScToast(m);setTimeout(()=>setScToast(""),3000);};
   const [open,setOpen]=useState(false);
   const savedConvId=useMemo(()=>{try{return localStorage.getItem("mdr_support_conv")||null;}catch(e){return null;}},[]);
   const [convId,setConvId]=useState(savedConvId);
@@ -397,6 +399,7 @@ function SupportChat({user}){
 
   return(
     <div style={{position:"fixed",bottom:20,right:20,width:340,maxWidth:"calc(100vw - 40px)",height:460,maxHeight:"calc(100vh - 40px)",background:C.card,border:`1px solid ${C.brd}`,borderRadius:16,zIndex:9999,display:"flex",flexDirection:"column",boxShadow:"0 8px 32px rgba(0,0,0,0.5)",overflow:"hidden"}}>
+      {scToast&&<div style={{position:"absolute",top:50,left:"50%",transform:"translateX(-50%)",background:"#333",color:"#fff",padding:"8px 16px",borderRadius:8,fontSize:13,zIndex:10,whiteSpace:"nowrap"}}>{scToast}</div>}
       {/* Header */}
       <div style={{padding:"14px 16px",background:C.org,display:"flex",alignItems:"center",justifyContent:"space-between"}}>
         <div style={{color:"#fff",fontWeight:700,fontSize:15}}>Support Chat</div>
@@ -1644,6 +1647,8 @@ function TemplateFieldEditor({pdfBase64,initialFields,onDone,onCancel}){
 
 /* ── Create Job ── */
 function CreateJob({user, onBack, onCreated}){
+  const [cjToast,setCjToast]=useState("");
+  const showToast=(m)=>{setCjToast(m);setTimeout(()=>setCjToast(""),3000);};
   const tz=Intl.DateTimeFormat().resolvedOptions().timeZone;
   const [jn,setJn]=useState("");
   const [addr,setAddr]=useState("");
@@ -2125,6 +2130,7 @@ function CreateJob({user, onBack, onCreated}){
 
   return(
     <div className="page-in" style={{minHeight:"100vh",background:C.bg,color:C.txt}}>
+      {cjToast&&<div style={{position:"fixed",bottom:30,left:"50%",transform:"translateX(-50%)",background:"#333",color:"#fff",padding:"10px 20px",borderRadius:8,fontSize:13,zIndex:99999}}>{cjToast}</div>}
       <div style={{borderBottom:`1px solid ${C.brd}`,background:C.card,padding:"14px 16px"}}>
       <div style={{display:"flex",alignItems:"center",gap:10,maxWidth:600,margin:"0 auto"}}>
         <button onClick={onBack} style={{background:"none",border:"none",color:C.mut,fontSize:28,cursor:"pointer",lineHeight:1,minWidth:48,minHeight:48,display:"flex",alignItems:"center",justifyContent:"center"}}>←</button>
@@ -6441,6 +6447,8 @@ function TrainingCenter({onBack}){
 
 /* ── Dashboard ── */
 function Dashboard({user, onLogout}){
+  const [dashToast,setDashToast]=useState("");
+  const showToast=(m)=>{setDashToast(m);setTimeout(()=>setDashToast(""),3000);};
   const [jobs,setJobs]=useState([]);
   const [rpts,setRpts]=useState([]);
   const [loading,setLoading]=useState(true);
@@ -6813,6 +6821,7 @@ function Dashboard({user, onLogout}){
 
   return(
     <div style={{minHeight:"100vh",background:C.bg,color:C.txt,position:"relative"}} onClick={e=>{if(showSet&&!e.target.closest('[data-s]'))setShowSet(false);if(showDD&&!e.target.closest('[data-d]'))setShowDD(false);}}>
+      {dashToast&&<div style={{position:"fixed",bottom:30,left:"50%",transform:"translateX(-50%)",background:"#333",color:"#fff",padding:"10px 20px",borderRadius:8,fontSize:13,zIndex:99999}}>{dashToast}</div>}
       {/* Ghosted MDR watermark */}
       <div style={{position:"fixed",top:"50%",left:"50%",transform:"translate(-50%,-50%)",opacity:0.03,pointerEvents:"none",zIndex:0,display:"flex",flexDirection:"column",alignItems:"center",gap:8}}>
         <img src="logo.jpg" alt="" style={{width:180,height:180,borderRadius:16,objectFit:"contain"}}/>
@@ -7114,6 +7123,8 @@ function Dashboard({user, onLogout}){
 
 /* ── Setup Wizard (gates dashboard access for new users) ── */
 function SetupWizard({user, inviteCompany, onComplete}){
+  const [swToast,setSwToast]=useState("");
+  const showToast=(m)=>{setSwToast(m);setTimeout(()=>setSwToast(""),3000);};
   const [step,setStep]=useState(0);
   const [saving,setSaving]=useState(false);
   const [fullName,setFullName]=useState(user?.user_metadata?.full_name||"");
@@ -7242,6 +7253,7 @@ function SetupWizard({user, inviteCompany, onComplete}){
 
   return(
     <div style={{minHeight:"100vh",background:C.bg,color:C.txt}}>
+      {swToast&&<div style={{position:"fixed",bottom:30,left:"50%",transform:"translateX(-50%)",background:"#333",color:"#fff",padding:"10px 20px",borderRadius:8,fontSize:13,zIndex:99999}}>{swToast}</div>}
       {/* Header */}
       <div style={{display:"flex",alignItems:"center",gap:10,padding:"14px 20px",borderBottom:`1px solid ${C.brd}`,background:C.card}}>
         <MDRLogo size={30}/>
