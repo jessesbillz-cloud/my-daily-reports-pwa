@@ -4557,9 +4557,11 @@ function ReportEditor({job, user, onBack, reportDate}){
             const lh=sz*1.5;
             lines.forEach((ln,i)=>{const ly=textStartY-(i*lh);if(ly>=td.y)page.drawText(ln,{x:td.x+2,y:ly,size:sz,font:acroFont,color:rgb(0,0,0)});});
           }else{
-            // Single line: vertically center text in the field rect
-            const textY=td.y+(td.h-sz)/2+sz*0.15;
-            page.drawText(td.val,{x:td.x+2,y:textY,size:sz,font:acroFont,color:rgb(0,0,0)});
+            // Single line: vertically center text in the field rect, auto-shrink if too wide
+            let useSz=sz;
+            if(td.w>0){const tw=acroFont.widthOfTextAtSize(td.val,useSz);if(tw>td.w-4){useSz=Math.max(6,useSz*(td.w-4)/tw);}}
+            const textY=td.y+(td.h-useSz)/2+useSz*0.15;
+            page.drawText(td.val,{x:td.x+2,y:textY,size:useSz,font:acroFont,color:rgb(0,0,0)});
           }
         });
         // Load a separate copy for photo page header/footer embedding
@@ -4625,10 +4627,12 @@ function ReportEditor({job, user, onBack, reportDate}){
             const lh=sz*1.5;
             lines.forEach((ln,i)=>{const ly=textStartY-(i*lh);if(ly>=fieldBottomPDF)page.drawText(ln,{x:f.x+2,y:ly,size:sz,font,color:rgb(0,0,0)});});
           }else{
-            // Single line: vertically center text in the cell
-            // PDF text y = baseline position. Center: fieldTop - (fieldH - sz)/2 - sz*0.8
-            const pdfY=pageH-f.y-(fieldH+sz)/2+sz*0.15;
-            page.drawText(String(f.val),{x:f.x+2,y:pdfY,size:sz,font,color:rgb(0,0,0)});
+            // Single line: vertically center text in the cell, auto-shrink if too wide
+            let useSz=sz;
+            const fieldW=f.w||120;
+            if(fieldW>0){const tw=font.widthOfTextAtSize(String(f.val),useSz);if(tw>fieldW-4){useSz=Math.max(6,useSz*(fieldW-4)/tw);}}
+            const pdfY=pageH-f.y-(fieldH+useSz)/2+useSz*0.15;
+            page.drawText(String(f.val),{x:f.x+2,y:pdfY,size:useSz,font,color:rgb(0,0,0)});
           }
         });
       }
