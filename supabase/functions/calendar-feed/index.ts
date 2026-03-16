@@ -109,7 +109,7 @@ serve(async (req) => {
         .eq("user_id", resolvedUserId)
         .neq("status", "cancelled")
         .neq("status", "deleted")
-        .order("inspection_date", { ascending: true });
+        .order("requested_date", { ascending: true });
 
       if (error) {
         return new Response(JSON.stringify({ error: error.message }), {
@@ -121,8 +121,6 @@ serve(async (req) => {
       requests = data || [];
     }
 
-    const TZ = "America/Los_Angeles";
-
     const lines: string[] = [
       "BEGIN:VCALENDAR",
       "VERSION:2.0",
@@ -130,24 +128,7 @@ serve(async (req) => {
       `X-WR-CALNAME:${escapeICS(calendarName)}`,
       "CALSCALE:GREGORIAN",
       "METHOD:PUBLISH",
-      `X-WR-TIMEZONE:${TZ}`,
-      "BEGIN:VTIMEZONE",
-      `TZID:${TZ}`,
-      "BEGIN:STANDARD",
-      "DTSTART:19701101T020000",
-      "RRULE:FREQ=YEARLY;BYMONTH=11;BYDAY=1SU",
-      "TZOFFSETFROM:-0700",
-      "TZOFFSETTO:-0800",
-      "TZNAME:PST",
-      "END:STANDARD",
-      "BEGIN:DAYLIGHT",
-      "DTSTART:19700308T020000",
-      "RRULE:FREQ=YEARLY;BYMONTH=3;BYDAY=2SU",
-      "TZOFFSETFROM:-0800",
-      "TZOFFSETTO:-0700",
-      "TZNAME:PDT",
-      "END:DAYLIGHT",
-      "END:VTIMEZONE",
+      "X-WR-TIMEZONE:America/Los_Angeles",
     ];
 
     const now = new Date()
@@ -181,14 +162,14 @@ serve(async (req) => {
 
       if (hasTime) {
         const dtStart = formatICSDate(dateField, timeField);
-        lines.push(`DTSTART;TZID=${TZ}:${dtStart}`);
+        lines.push(`DTSTART:${dtStart}`);
 
         const timeParts = timeField.split(":").map(Number);
         const totalMin = timeParts[0] * 60 + timeParts[1] + duration;
         const endH = String(Math.floor(totalMin / 60)).padStart(2, "0");
         const endM = String(totalMin % 60).padStart(2, "0");
         const dtEnd = formatICSDate(dateField, `${endH}:${endM}`);
-        lines.push(`DTEND;TZID=${TZ}:${dtEnd}`);
+        lines.push(`DTEND:${dtEnd}`);
       } else {
         const dtStart = formatICSDate(dateField);
         lines.push(`DTSTART;VALUE=DATE:${dtStart}`);
@@ -202,25 +183,23 @@ serve(async (req) => {
       lines.push(`SUMMARY:${escapeICS(statusEmoji + summary)}`);
 
       const descParts: string[] = [];
+      descParts.push(`Status: ${r.status || "pending"}`);
+      if (r.submitted_by) descParts.push(`Submitted by: ${r.submitted_by}`);
+      if (r.requester_name)
+        descParts.push(`Requested by: ${r.requester_name}`);
+      if (r.requester_company)
+        descParts.push(`Company: ${r.requester_company}`);
       if (r.inspection_identifier)
         descParts.push(`Request #: ${r.inspection_identifier}`);
-      if (r.requester_name || r.requester_company) {
-        const who = [r.requester_name, r.requester_company].filter(Boolean).join(" — ");
-        descParts.push(`Requested by: ${who}`);
-      }
       if (r.subcontractor) descParts.push(`Subcontractor: ${r.subcontractor}`);
-      if (r.special_type) descParts.push(`Type: ${r.special_type}`);
-      descParts.push(`Status: ${r.status || "pending"}`);
-      descParts.push(`Duration: ${duration} min`);
-      if (isFlexible) descParts.push("Time: Flexible — anytime today");
       if (r.notes) descParts.push(`Notes: ${r.notes}`);
+      if (isFlexible) descParts.push("Time: Flexible — anytime today");
       lines.push(`DESCRIPTION:${escapeICS(descParts.join("\n"))}`);
 
       if (siteAddr) {
         lines.push(`LOCATION:${escapeICS(siteAddr)}`);
       }
 
-      // Attach file URLs if present
       const attachUrls = r.file_urls || [];
       for (const url of attachUrls) {
         if (url) lines.push(`ATTACH:${url}`);
