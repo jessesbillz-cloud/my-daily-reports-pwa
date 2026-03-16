@@ -587,7 +587,7 @@ function refreshDropdownAndEmails(){
         addedEmails[m.email.toLowerCase()]=true;
         var lbl=document.createElement('label');
         lbl.className='email-row';
-        lbl.innerHTML='<input type="checkbox" value="'+m.email+'" class="emailCheck"> '+m.name+' <span style="font-size:10px;color:#f97316;font-weight:600;">(Team)</span>';
+        lbl.innerHTML='<input type="checkbox" value="'+m.email+'" class="emailCheck" checked> '+m.name+' <span style="font-size:10px;color:#f97316;font-weight:600;">(Team)</span>';
         emailContainer.appendChild(lbl);
     });
     // Saved contacts (skip duplicates already added from team)
@@ -596,7 +596,7 @@ function refreshDropdownAndEmails(){
         addedEmails[c.email.toLowerCase()]=true;
         var lbl=document.createElement('label');
         lbl.className='email-row';
-        lbl.innerHTML='<input type="checkbox" value="'+c.email+'" class="emailCheck">'+c.name+(c.company?' ('+c.company+')':'');
+        lbl.innerHTML='<input type="checkbox" value="'+c.email+'" class="emailCheck" checked>'+c.name+(c.company?' ('+c.company+')':'');
         emailContainer.appendChild(lbl);
     });
 }
