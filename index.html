@@ -4330,22 +4330,24 @@ function ReportEditor({job, user, onBack, reportDate}){
       }
       ctx.fillStyle="#000000";
       if(f.multiline&&f.w){
-        const maxW=f.w*scale;
-        const bullet="\u2022 ";
+        const leftPad=6*scale;
+        const maxW=f.w*scale-leftPad-4*scale;
+        const bullet="\u2022  ";
         const bulletW=ctx.measureText(bullet).width;
-        // Split on newlines first, then word-wrap each line
+        // Split on newlines first, then word-wrap each line with hanging indent
         const rawLines=f.val.split(/\n/).filter(l=>l.trim());
-        const lines=[];
+        const useBullets=rawLines.length>1;
+        const textAfterBullet=leftPad+bulletW;
+        const wrapMaxW=maxW-bulletW;
+        const lines=[]; // {text, xOff}
         rawLines.forEach(rl=>{
-          const hasBullet=rawLines.length>1;
-          const prefix=hasBullet?bullet:"";
-          const indent=hasBullet?bulletW:0;
-          const lineMaxW=maxW-indent;
-          const words=rl.trim().split(" ");let cur=prefix;
-          words.forEach(w=>{const test=cur?cur+(cur===prefix?"":" ")+w:prefix+w;if(ctx.measureText(test).width>maxW&&cur!==prefix){lines.push(cur);cur=new Array(Math.ceil(indent/ctx.measureText(" ").width)+1).join(" ")+w;}else cur=test;});
-          if(cur)lines.push(cur);
+          const clean=rl.replace(/^[\-\•\*]\s*/,"").trim();
+          if(!clean)return;
+          const words=clean.split(" ");let cur="";let first=true;
+          words.forEach(w=>{const test=cur?cur+" "+w:w;if(ctx.measureText(test).width>wrapMaxW&&cur){lines.push({text:first?(useBullets?bullet:"")+cur:cur,xOff:first?leftPad:textAfterBullet});first=false;cur=w;}else cur=test;});
+          if(cur)lines.push({text:first?(useBullets?bullet:"")+cur:cur,xOff:first?leftPad:textAfterBullet});
         });
-        lines.forEach((ln,li)=>{ctx.fillText(ln,drawX,drawY+(li*sz*1.5));});
+        lines.forEach((ln,li)=>{ctx.fillText(ln.text,drawX+ln.xOff,drawY+(li*sz*1.5));});
       }else{
         ctx.fillText(String(f.val),drawX,drawY);
       }
@@ -4747,23 +4749,25 @@ function ReportEditor({job, user, onBack, reportDate}){
             page.drawText(dayName+", "+datePart+" at "+timePart,{x:td.x+2,y:sigY-sigSz*1.15,size:sigSz*0.65,font:acroFont,color:rgb(0.4,0.4,0.4)});
             page.drawText("powered by My Daily Reports",{x:td.x+2,y:sigY-sigSz*2.1,size:sigSz*0.55,font:acroFontItalic,color:rgb(0.6,0.6,0.6)});
           }else if(td.multiline&&td.w>0){
-            // Multiline: bullet-formatted, start text at top of field, wrap within width
+            // Multiline: bullet-formatted with hanging indent, start text at top of field, wrap within width
+            const leftPad=6;
             const textStartY=td.y+td.h-sz;
             const rawLines=td.val.split(/\n/).filter(l=>l.trim());
             const useBullets=rawLines.length>1;
-            const bullet="\u2022 ";
+            const bullet="\u2022  ";
             const bulletW=useBullets?acroFont.widthOfTextAtSize(bullet,sz):0;
+            const textAfterBullet=leftPad+bulletW;
+            const wrapMaxW=td.w-leftPad-4-bulletW;
             const lines=[];
             rawLines.forEach(rl=>{
-              const prefix=useBullets?bullet:"";
-              const indentW=bulletW;
-              const lineMaxW=td.w-4-indentW;
-              const words=rl.trim().split(" ");let cur=prefix;
-              words.forEach(w=>{const test=cur+(cur===prefix?"":" ")+w;const tw=acroFont.widthOfTextAtSize(test,sz);if(tw>td.w-4&&cur!==prefix){lines.push(cur);cur=(useBullets?"  ":"")+w;}else cur=test;});
-              if(cur)lines.push(cur);
+              const clean=rl.replace(/^[\-\•\*]\s*/,"").trim();
+              if(!clean)return;
+              const words=clean.split(" ");let cur="";let first=true;
+              words.forEach(w=>{const test=cur?cur+" "+w:w;const tw=acroFont.widthOfTextAtSize(test,sz);if(tw>wrapMaxW&&cur){lines.push({text:first?(useBullets?bullet:"")+cur:cur,xOff:first?leftPad:textAfterBullet});first=false;cur=w;}else cur=test;});
+              if(cur)lines.push({text:first?(useBullets?bullet:"")+cur:cur,xOff:first?leftPad:textAfterBullet});
             });
             const lh=sz*1.5;
-            lines.forEach((ln,i)=>{const ly=textStartY-(i*lh);if(ly>=td.y)page.drawText(ln,{x:td.x+2,y:ly,size:sz,font:acroFont,color:rgb(0,0,0)});});
+            lines.forEach((ln,i)=>{const ly=textStartY-(i*lh);if(ly>=td.y)page.drawText(ln.text,{x:td.x+ln.xOff,y:ly,size:sz,font:acroFont,color:rgb(0,0,0)});});
           }else{
             // Single line: vertically center text in the field rect, auto-shrink if too wide
             let useSz=sz;
@@ -4816,24 +4820,29 @@ function ReportEditor({job, user, onBack, reportDate}){
             page.drawText(dayName+", "+datePart+" at "+timePart,{x:f.x+2,y:pdfY-sigSz*1.15,size:sigSz*0.65,font,color:rgb(0.4,0.4,0.4)});
             page.drawText("powered by My Daily Reports",{x:f.x+2,y:pdfY-sigSz*2.1,size:sigSz*0.55,font:fontItalic,color:rgb(0.6,0.6,0.6)});
           }else if(f.multiline&&f.w){
-            // Multiline: bullet-formatted, start text at TOP of field and clip at bottom
+            // Multiline: bullet-formatted with hanging indent, start at TOP of field, clip at bottom
+            const leftPad=6; // indent from left edge of field
             const fieldTopPDF=pageH-f.y;
             const fieldBottomPDF=pageH-f.y-fieldH;
             const textStartY=fieldTopPDF-sz; // first baseline just below top edge
-            const maxW=f.w;const rawLines=f.val.split(/\n/).filter(l=>l.trim());
+            const maxW=f.w-leftPad-4;const rawLines=f.val.split(/\n/).filter(l=>l.trim());
             const useBullets=rawLines.length>1;
-            const bullet="\u2022 ";
+            const bullet="\u2022  ";
             const bulletW=useBullets?font.widthOfTextAtSize(bullet,sz):0;
+            const textAfterBullet=leftPad+bulletW; // x offset where text starts after bullet
+            const wrapMaxW=maxW-bulletW; // wrap width for continuation lines
+            // Build lines: {text, xOffset} — bullet lines start at leftPad, continuations at textAfterBullet
             const lines=[];
             rawLines.forEach(rl=>{
-              const prefix=useBullets?bullet:"";
-              const words=rl.trim().split(" ");let cur=prefix;
-              words.forEach(w=>{const test=cur+(cur===prefix?"":" ")+w;const tw=font.widthOfTextAtSize(test,sz);if(tw>maxW&&cur!==prefix){lines.push(cur);cur=(useBullets?"  ":"")+w;}else cur=test;});
-              if(cur)lines.push(cur);
+              const clean=rl.replace(/^[\-\•\*]\s*/,"").trim();
+              if(!clean)return;
+              const words=clean.split(" ");let cur="";let first=true;
+              words.forEach(w=>{const test=cur?cur+" "+w:w;const tw=font.widthOfTextAtSize(test,sz);if(tw>wrapMaxW&&cur){lines.push({text:first?(useBullets?bullet:"")+cur:cur,xOff:first?leftPad:textAfterBullet});first=false;cur=w;}else cur=test;});
+              if(cur)lines.push({text:first?(useBullets?bullet:"")+cur:cur,xOff:first?leftPad:textAfterBullet});
             });
             // Only draw lines that fit within the field boundary
             const lh=sz*1.5;
-            lines.forEach((ln,i)=>{const ly=textStartY-(i*lh);if(ly>=fieldBottomPDF)page.drawText(ln,{x:f.x+2,y:ly,size:sz,font,color:rgb(0,0,0)});});
+            lines.forEach((ln,i)=>{const ly=textStartY-(i*lh);if(ly>=fieldBottomPDF)page.drawText(ln.text,{x:f.x+ln.xOff,y:ly,size:sz,font,color:rgb(0,0,0)});});
           }else{
             // Single line: vertically center text in the cell, auto-shrink if too wide
             let useSz=sz;
