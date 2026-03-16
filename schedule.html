@@ -269,11 +269,22 @@ document.getElementById('projectSubtitle').textContent=cleanName||'Loading...';
 document.title=(cleanName||'Schedule')+' - Scheduling Request';
 var allFiles=[], inspType='', inspDur='', cM=new Date().getMonth(), cY=new Date().getFullYear(), mD={};
 var savedContacts=[];
+
+// Toast notification function
+function showToast(msg){
+  var t=document.createElement('div');
+  t.textContent=msg;
+  t.style.cssText='position:fixed;bottom:30px;left:50%;transform:translateX(-50%);background:#333;color:#fff;padding:12px 24px;border-radius:8px;font-size:14px;z-index:99999;opacity:0;transition:opacity 0.3s;max-width:90%;text-align:center;';
+  document.body.appendChild(t);
+  requestAnimationFrame(function(){t.style.opacity='1';});
+  setTimeout(function(){t.style.opacity='0';setTimeout(function(){t.remove();},300);},3000);
+}
+
 function handleFileSelection(input) {
     var files=Array.from(input.files);
     files.forEach(function(file){
         if(file.size>(file.type==='application/pdf'?25*1024*1024:10*1024*1024)){
-            alert(file.name+" is too large."); return;
+            showToast(file.name+" is too large."); return;
         }
         allFiles.push(file);
     });
@@ -375,8 +386,8 @@ showActionModal('Who is cancelling this?',team,function(who){
 var reason=prompt('Reason (optional):');
 var btns=document.querySelectorAll('.evt-actions button');btns.forEach(function(b){b.disabled=true;b.style.opacity='0.5';});
 fetch(SB+'/functions/v1/update-inspection',{method:'POST',headers:{'Authorization':'Bearer '+AK,'apikey':AK,'Content-Type':'application/json'},body:JSON.stringify({request_id:id,action:'cancel',action_by:who,reason:reason||'',notify:true})})
-.then(function(r){return r.json();}).then(function(data){if(data.success){alert('Cancelled. Notifications sent.'); loadMD();} else {alert('Error: '+data.error);btns.forEach(function(b){b.disabled=false;b.style.opacity='1';});}})
-.catch(function(err){alert('Failed: '+err.message);btns.forEach(function(b){b.disabled=false;b.style.opacity='1';});});
+.then(function(r){return r.json();}).then(function(data){if(data.success){showToast('Cancelled. Notifications sent.'); loadMD();} else {showToast('Error — try again');btns.forEach(function(b){b.disabled=false;b.style.opacity='1';});}})
+.catch(function(err){showToast('Failed — try again');btns.forEach(function(b){b.disabled=false;b.style.opacity='1';});});
 });
 }
 function editInsp(id,oldDate,oldTime){
@@ -395,8 +406,8 @@ document.getElementById('sEdit').onclick=function(){
 var nD=document.getElementById('eDate').value, nT=document.getElementById('eTime').value;
 var saveBtn=document.getElementById('sEdit');saveBtn.disabled=true;saveBtn.textContent='Saving...';saveBtn.style.opacity='0.5';
 fetch(SB+'/functions/v1/update-inspection',{method:'POST',headers:{'Authorization':'Bearer '+AK,'apikey':AK,'Content-Type':'application/json'},body:JSON.stringify({request_id:id,action:'edit',action_by:who,new_date:nD,new_time:nT,notify:true})})
-.then(function(r){return r.json();}).then(function(data){if(data.success){alert('Updated. Notifications sent.'); overlay.remove(); loadMD();} else {alert('Error: '+data.error);saveBtn.disabled=false;saveBtn.textContent='Save';saveBtn.style.opacity='1';}})
-.catch(function(err){alert('Failed: '+err.message);saveBtn.disabled=false;saveBtn.textContent='Save';saveBtn.style.opacity='1';});
+.then(function(r){return r.json();}).then(function(data){if(data.success){showToast('Updated. Notifications sent.'); overlay.remove(); loadMD();} else {showToast('Error — try again');saveBtn.disabled=false;saveBtn.textContent='Save';saveBtn.style.opacity='1';}})
+.catch(function(err){showToast('Failed — try again');saveBtn.disabled=false;saveBtn.textContent='Save';saveBtn.style.opacity='1';});
 };
 }
 function editInspAdmin(id,oldDate,oldTime,oldDur){
@@ -423,16 +434,16 @@ var nD=document.getElementById('eaDate').value, nT=document.getElementById('eaTi
 var nDur=document.getElementById('eDur').value, nNotes=document.getElementById('eaNotes').value;
 var saveBtn=document.getElementById('saEdit');saveBtn.disabled=true;saveBtn.textContent='Saving...';saveBtn.style.opacity='0.5';
 fetch(SB+'/functions/v1/update-inspection',{method:'POST',headers:{'Authorization':'Bearer '+AK,'apikey':AK,'Content-Type':'application/json'},body:JSON.stringify({request_id:id,action:'edit',action_by:'Admin',new_date:nD,new_time:nT,new_duration:nDur,new_notes:nNotes})})
-.then(function(r){return r.json();}).then(function(data){if(data.success){overlay.remove(); loadMD();} else {alert('Error: '+data.error);saveBtn.disabled=false;saveBtn.textContent='Save';saveBtn.style.opacity='1';}})
-.catch(function(err){alert('Failed: '+err.message);saveBtn.disabled=false;saveBtn.textContent='Save';saveBtn.style.opacity='1';});
+.then(function(r){return r.json();}).then(function(data){if(data.success){overlay.remove(); loadMD();} else {showToast('Error — try again');saveBtn.disabled=false;saveBtn.textContent='Save';saveBtn.style.opacity='1';}})
+.catch(function(err){showToast('Failed — try again');saveBtn.disabled=false;saveBtn.textContent='Save';saveBtn.style.opacity='1';});
 };
 }
 function deleteInsp(id){
 if(!confirm('Delete this scheduling request? This cannot be undone.')) return;
 var btns=document.querySelectorAll('.evt-actions button');btns.forEach(function(b){b.disabled=true;b.style.opacity='0.5';});
 fetch(SB+'/functions/v1/update-inspection',{method:'POST',headers:{'Authorization':'Bearer '+AK,'apikey':AK,'Content-Type':'application/json'},body:JSON.stringify({request_id:id,action:'delete',action_by:'Admin'})})
-.then(function(r){return r.json();}).then(function(data){if(data.success){loadMD();} else {alert('Error: '+(data.error||'Unknown'));btns.forEach(function(b){b.disabled=false;b.style.opacity='1';});}})
-.catch(function(err){alert('Failed: '+err.message);btns.forEach(function(b){b.disabled=false;b.style.opacity='1';});});
+.then(function(r){return r.json();}).then(function(data){if(data.success){loadMD();} else {showToast('Error — try again');btns.forEach(function(b){b.disabled=false;b.style.opacity='1';});}})
+.catch(function(err){showToast('Failed — try again');btns.forEach(function(b){b.disabled=false;b.style.opacity='1';});});
 }
 var calFeedURL=SB+'/functions/v1/calendar-feed?project='+encodeURIComponent(PROJ);
 setTimeout(function(){var el=document.getElementById('calURLText');if(el)el.textContent=calFeedURL;},100);
@@ -509,15 +520,15 @@ function setDur(d){inspDur=d;document.querySelectorAll('.dur-btn').forEach(funct
 function scheduleInsp(id){
 var btns=document.querySelectorAll('.evt-actions button');btns.forEach(function(b){b.disabled=true;b.style.opacity='0.5';});
 fetch(SB+'/functions/v1/update-inspection',{method:'POST',headers:{'Authorization':'Bearer '+AK,'apikey':AK,'Content-Type':'application/json'},body:JSON.stringify({request_id:id,action:'schedule'})})
-.then(function(r){return r.json();}).then(function(data){if(data.success){alert('Marked as Scheduled — notifications sent.'); loadMD();} else {alert('Error: '+(data.error||'Unknown'));btns.forEach(function(b){b.disabled=false;b.style.opacity='1';});}})
-.catch(function(err){alert('Failed: '+err.message);btns.forEach(function(b){b.disabled=false;b.style.opacity='1';});});
+.then(function(r){return r.json();}).then(function(data){if(data.success){showToast('Marked as Scheduled — notifications sent.'); loadMD();} else {showToast('Error — try again');btns.forEach(function(b){b.disabled=false;b.style.opacity='1';});}})
+.catch(function(err){showToast('Failed — try again');btns.forEach(function(b){b.disabled=false;b.style.opacity='1';});});
 }
 // ── ADD PERSON TO TEAM (like job settings pattern) ──
 function addPersonToTeam(){
     var name=document.getElementById('iNewName').value.trim();
     var email=document.getElementById('iNewEmail').value.trim();
     var company=document.getElementById('iNewCompany').value.trim();
-    if(!name){alert('Name is required.');return;}
+    if(!name){showToast('Name is required.');return;}
     // Add to local list immediately
     var newContact={name:name,email:email,company:company,project:PROJ};
     savedContacts.push(newContact);
@@ -679,11 +690,11 @@ function addAdditionalRecipient(){
     var emailInput=document.getElementById('addlEmail');
     var name=nameInput.value.trim();
     var email=emailInput.value.trim();
-    if(!email||email.indexOf('@')<1){alert('Please enter a valid email.');return;}
+    if(!email||email.indexOf('@')<1){showToast('Please enter a valid email.');return;}
     if(!name)name=email.split('@')[0];
     // Check duplicate
     var exists=additionalRecipients.some(function(r){return r.email===email;});
-    if(exists){alert('This email is already in the list.');return;}
+    if(exists){showToast('This email is already in the list.');return;}
     additionalRecipients.push({name:name,email:email,checked:true});
     saveAdditionalRecipients();
     renderAdditionalRecipients();
@@ -769,9 +780,9 @@ function submitIR(){
             document.getElementById('iTime').focus();
             btn.disabled=false; btn.textContent='Submit Scheduling Request';
         }
-        else { alert('Error: '+(data.error||'Unknown error')); btn.disabled=false; btn.textContent='Submit Scheduling Request'; }
+        else { showToast('Error — try again'); btn.disabled=false; btn.textContent='Submit Scheduling Request'; }
     }).catch(function(err){
-        alert('Submit failed: '+err.message+'. Please try again.');
+        showToast('Submit failed — try again');
         btn.disabled=false; btn.textContent='Submit Scheduling Request';
     });
 }

@@ -245,11 +245,20 @@ if(inspSlug){
 // Booked time slots per date: { "2026-03-10": [{start:480,end:600,type:"Regular"}, ...] }
 // Times stored as minutes from midnight (e.g. 8:00 AM = 480)
 var bookedSlots={};
+// Toast notification function
+function showToast(msg){
+  var t=document.createElement('div');
+  t.textContent=msg;
+  t.style.cssText='position:fixed;bottom:30px;left:50%;transform:translateX(-50%);background:#333;color:#fff;padding:12px 24px;border-radius:8px;font-size:14px;z-index:99999;opacity:0;transition:opacity 0.3s;max-width:90%;text-align:center;';
+  document.body.appendChild(t);
+  requestAnimationFrame(function(){t.style.opacity='1';});
+  setTimeout(function(){t.style.opacity='0';setTimeout(function(){t.remove();},300);},3000);
+}
 function handleFileSelection(input) {
     var files=Array.from(input.files);
     files.forEach(function(file){
         if(file.size>(file.type==='application/pdf'?25*1024*1024:10*1024*1024)){
-            alert(file.name+" is too large."); return;
+            showToast(file.name+" is too large."); return;
         }
         allFiles.push(file);
     });
@@ -399,7 +408,7 @@ var team=savedContacts.map(function(c){return c.name;}); if(team.length===0) tea
 showActionModal('Who is cancelling this?',team,function(who){
 var reason=prompt('Reason (optional):');
 fetch(SB+'/functions/v1/update-inspection',{method:'POST',headers:{'Authorization':'Bearer '+AK,'apikey':AK,'Content-Type':'application/json'},body:JSON.stringify({request_id:id,action:'cancel',action_by:who,reason:reason||'',notify:true})})
-.then(function(r){return r.json();}).then(function(data){if(data.success){alert('Cancelled. Notifications sent.'); loadMD();} else {alert('Error: '+data.error);}});
+.then(function(r){return r.json();}).then(function(data){if(data.success){showToast('Cancelled. Notifications sent.'); loadMD();} else {showToast('Error — try again');}});
 });
 }
 function editInsp(id,oldDate,oldTime){
@@ -419,12 +428,12 @@ if(nD!==oldDate||nT!==oldTime){
     var startMin=timeToMin(nT);
     var dur=60; // default 1hr for edits
     if(hasTimeConflict(nD,startMin,dur)){
-        alert('Inspector has a conflicting booking on '+nD+' at that time. Choose another date or time.');
+        showToast('Inspector has a conflicting booking on '+nD+' at that time. Choose another date or time.');
         return;
     }
 }
 fetch(SB+'/functions/v1/update-inspection',{method:'POST',headers:{'Authorization':'Bearer '+AK,'apikey':AK,'Content-Type':'application/json'},body:JSON.stringify({request_id:id,action:'edit',action_by:who,new_date:nD,new_time:nT,notify:true})})
-.then(function(r){return r.json();}).then(function(data){if(data.success){alert('Updated. Notifications sent.'); overlay.remove(); loadMD();} else {alert('Error: '+data.error);}});
+.then(function(r){return r.json();}).then(function(data){if(data.success){showToast('Updated. Notifications sent.'); overlay.remove(); loadMD();} else {showToast('Error — try again');}});
 };
 }
 var calFeedURL=SB+'/functions/v1/calendar-feed?project='+encodeURIComponent(PROJ);
@@ -517,8 +526,8 @@ function setType(t){inspType=t;document.getElementById('btnSpecial').classList.t
 function setDur(d){inspDur=d;document.querySelectorAll('.dur-btn').forEach(function(b){b.classList.remove('active');});event.target.classList.add('active');checkDateAvailability();}
 function scheduleInsp(id){
 fetch(SB+'/functions/v1/update-inspection',{method:'POST',headers:{'Authorization':'Bearer '+AK,'apikey':AK,'Content-Type':'application/json'},body:JSON.stringify({request_id:id,action:'schedule',notify:true})})
-.then(function(r){return r.json();}).then(function(data){if(data.success){alert('Marked as Scheduled — notifications sent.'); loadMD();} else {alert('Error: '+(data.error||'Unknown'));}})
-.catch(function(err){alert('Failed: '+err.message);});
+.then(function(r){return r.json();}).then(function(data){if(data.success){showToast('Marked as Scheduled — notifications sent.'); loadMD();} else {showToast('Error — try again');}})
+.catch(function(err){showToast('Failed — try again');});
 }
 function submitIR(){
     var d=document.getElementById('iDate').value, t=document.getElementById('iTime').value, nm=document.getElementById('iName').value;
@@ -544,7 +553,7 @@ function submitIR(){
     var reqStartMin=timeToMin(t);
     var reqDurMin=parseInt(inspDur)||60;
     if(hasTimeConflict(d,reqStartMin,reqDurMin)){
-        alert('Inspector has a conflicting booking on '+d+' at that time. Choose a different time or date.');
+        showToast('Inspector has a conflicting booking on '+d+' at that time. Choose a different time or date.');
         return;
     }
     if(newName){
@@ -610,10 +619,10 @@ function submitIR(){
             w.scrollIntoView({behavior:'smooth',block:'center'});
             btn.disabled=false; btn.textContent='Submit Scheduling Request';
         }
-        else { alert('Error: '+(data.error||'Unknown error')); btn.disabled=false; btn.textContent='Submit Scheduling Request'; }
+        else { showToast('Error — try again'); btn.disabled=false; btn.textContent='Submit Scheduling Request'; }
     }).catch(function(err){
         console.error('[submitIR] Fetch error:', err);
-        alert('Submit failed: '+err.message+'. Please try again.');
+        showToast('Submit failed — try again');
         btn.disabled=false; btn.textContent='Submit Scheduling Request';
     });
 }

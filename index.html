@@ -347,14 +347,14 @@ function SupportChat({user}){
       if(user&&user.email)body.guest_email=user.email;
       const r=await fetch(`${SB_URL}/rest/v1/support_conversations`,{method:"POST",headers,body:JSON.stringify(body)});
       const txt=await r.text();
-      if(!r.ok){alert("Chat error: "+txt);return;}
+      if(!r.ok){showToast("Chat error — try again");return;}
       const convArr=JSON.parse(txt);
-      if(!convArr||!convArr[0]){alert("Chat error: no conversation created");return;}
+      if(!convArr||!convArr[0]){showToast("Chat error — try again");return;}
       setConvId(convArr[0].id);
       setStarted(true);
       try{localStorage.setItem("mdr_support_conv",convArr[0].id);}catch(e){}
       subscribeToMessages(convArr[0].id);
-    }catch(e){alert("Chat error: "+e.message);}
+    }catch(e){showToast("Chat error — try again");}
   };
 
   const subscribeToMessages=(cid)=>{
@@ -381,11 +381,11 @@ function SupportChat({user}){
       const tok=AUTH_TOKEN||(localStorage.getItem("sb_access_token"))||SB_KEY;
       const h={"apikey":SB_KEY,"Authorization":"Bearer "+tok,"Content-Type":"application/json"};
       const pr=await fetch(`${SB_URL}/rest/v1/support_messages`,{method:"POST",headers:h,body:JSON.stringify({conversation_id:convId,sender:"user",body:draft.trim()})});
-      if(!pr.ok){alert("Send failed: "+await pr.text());setSending(false);return;}
+      if(!pr.ok){showToast("Send failed — try again");setSending(false);return;}
       setDraft("");
       const r=await fetch(`${SB_URL}/rest/v1/support_messages?conversation_id=eq.${convId}&order=created_at.asc`,{headers:{"apikey":SB_KEY,"Authorization":"Bearer "+tok}});
       if(r.ok)setMsgs(await r.json());
-    }catch(e){alert("Send error: "+e.message);}
+    }catch(e){showToast("Send failed — try again");}
     finally{setSending(false);}
   };
 
@@ -2267,7 +2267,7 @@ function CreateJob({user, onBack, onCreated}){
                         </div>
                         <span style={{color:C.blu,fontSize:12,fontWeight:600}}>Use</span>
                       </div>
-                      <button onClick={async(e)=>{e.stopPropagation();const btn=e.currentTarget;if(btn.disabled)return;btn.disabled=true;if(!confirm("Delete this saved template?")){btn.disabled=false;return;}try{await db.deleteSavedTemplate(t.id);setSavedTpls(p=>p.filter(x=>x.id!==t.id));}catch(err){alert("Delete failed: "+err.message);btn.disabled=false;}}} style={{background:"none",border:"none",color:C.err,fontSize:14,cursor:"pointer",padding:"4px 6px",flexShrink:0}}>🗑️</button>
+                      <button onClick={async(e)=>{e.stopPropagation();const btn=e.currentTarget;if(btn.disabled)return;btn.disabled=true;if(!confirm("Delete this saved template?")){btn.disabled=false;return;}try{await db.deleteSavedTemplate(t.id);setSavedTpls(p=>p.filter(x=>x.id!==t.id));}catch(err){showToast("Delete failed");btn.disabled=false;}}} style={{background:"none",border:"none",color:C.err,fontSize:14,cursor:"pointer",padding:"4px 6px",flexShrink:0}}>🗑️</button>
                     </div>
                   ))}
                 </div>
@@ -2283,10 +2283,18 @@ function CreateJob({user, onBack, onCreated}){
               <div style={{fontSize:32,marginBottom:8}}>—</div>
               <p style={{color:C.lt,fontSize:14,fontWeight:600,marginBottom:4}}>{usedSavedId?"Now upload the actual file (parsing will be skipped)":"Drop your template here"}</p>
               <p style={{color:C.mut,fontSize:12}}>{usedSavedId?"Fields already loaded from saved template":"or tap to browse • PDF only"}</p>
-              {!usedSavedId&&<p style={{color:C.mut,fontSize:11,marginTop:8,lineHeight:1.4,fontStyle:"italic"}}>Tip: Download the file to your phone first, then upload from your files. Uploading directly from email or cloud viewers may change the filename.</p>}
+              {!usedSavedId&&<p style={{color:C.mut,fontSize:11,marginTop:8,lineHeight:1.4,fontStyle:"italic"}}>Tip: Download the file to your phone first, then upload from your files.</p>}
               <input id="fi" type="file" accept=".pdf" style={{display:"none"}} onChange={e=>e.target.files[0]&&(usedSavedId?doFileWithSaved:doFile)(e.target.files[0])}/>
             </div>
-          ):(
+          )}
+          {!tf&&!usedSavedId&&(
+            <div style={{background:"rgba(90,143,192,0.08)",border:`1px solid rgba(90,143,192,0.2)`,borderRadius:10,padding:"12px 14px",marginTop:10}}>
+              <div style={{fontSize:13,fontWeight:600,color:C.blu,marginBottom:4}}>Don't have a template yet?</div>
+              <p style={{fontSize:12,color:C.lt,lineHeight:1.5,margin:0}}>Use any AI (ChatGPT, Gemini, etc.) and ask it: <em style={{color:C.org}}>"Create a fillable PDF daily report template for construction inspection. Include Date, Project Name, Inspector, Report Number, Weather, Notes, and Signature. Single page, 8.5x11."</em> Then upload the PDF it gives you.</p>
+              <p style={{fontSize:11,color:C.mut,marginTop:6,margin:0}}>Or email support@mydailyreports.org and we'll help.</p>
+            </div>
+          )}
+          {tf&&(
             <div style={{background:C.inp,border:`1px solid ${C.brd}`,borderRadius:12,padding:"14px 16px"}}>
               <div style={{display:"flex",alignItems:"center",gap:12}}>
                 <div style={{fontSize:24}}>—</div>
@@ -2564,7 +2572,7 @@ function WorkLogEditor({job, user, onBack, reportDate}){
   // Toggle weather on — requires site address
   const toggleWeather=(on)=>{
     if(on&&!job.site_address){
-      alert("To enable weather, add a site address in Job Settings (tap the gear icon from the job dashboard).");
+      showToast("Add a site address in Job Settings to enable weather");
       return;
     }
     setWeatherEnabled(on);
@@ -2573,7 +2581,7 @@ function WorkLogEditor({job, user, onBack, reportDate}){
 
   // Fetch weather from Open-Meteo (free, no API key)
   const fetchWeather=async()=>{
-    if(!job.site_address){alert("Add a site address in Job Settings to fetch weather.");return;}
+    if(!job.site_address){showToast("Add a site address in Job Settings to fetch weather");return;}
     setWeatherLoading(true);
     try{
       let lat,lng;
@@ -2594,7 +2602,7 @@ function WorkLogEditor({job, user, onBack, reportDate}){
         }catch(e){console.log("Fallback geocode failed:",e);}
       }
       if(!lat||!lng){
-        alert("Could not find location for \""+job.site_address+"\". Check the site address in Job Settings.");
+        showToast("Could not find location — check the site address in Job Settings");
         setWeatherLoading(false);return;
       }
       // Fetch hourly weather for today
@@ -2617,7 +2625,7 @@ function WorkLogEditor({job, user, onBack, reportDate}){
       setWeatherAM(fmt(7));   // 7:00 AM
       setWeatherMid(fmt(12)); // 12:00 PM
       setWeatherPM(fmt(16));  // 4:00 PM
-    }catch(e){console.error("Weather fetch:",e);alert("Weather fetch failed: "+e.message);}
+    }catch(e){console.error("Weather fetch:",e);showToast("Weather fetch failed — try again later");}
     finally{setWeatherLoading(false);}
   };
 
@@ -2746,7 +2754,7 @@ function WorkLogEditor({job, user, onBack, reportDate}){
   const [aiUsageCount,setAiUsageCount]=useState(getAiUsageCount(job?.id));
   const aiLimitReached=aiUsageCount>=AI_DESCRIBE_DAILY_LIMIT;
   const describePhoto=async(imageDataUrl,context,uniqueId)=>{
-    if(!checkAiLimit(job?.id)){alert(`AI description limit reached (${AI_DESCRIBE_DAILY_LIMIT}/day per job). Resets tomorrow.`);return null;}
+    if(!checkAiLimit(job?.id)){showToast(`AI limit reached (${AI_DESCRIBE_DAILY_LIMIT}/day). Resets tomorrow.`);return null;}
     setAiDescribing(p=>({...p,[uniqueId]:true}));
     try{
       // Downscale for AI vision (800px vs 1600px stored), then strip prefix
@@ -2764,7 +2772,7 @@ function WorkLogEditor({job, user, onBack, reportDate}){
       return data.description||"";
     }catch(e){
       console.error("[AI describe]",e);
-      alert("AI describe failed: "+e.message);
+      showToast("AI describe failed — try again");
       return null;
     }finally{
       setAiDescribing(p=>({...p,[uniqueId]:false}));
@@ -4057,7 +4065,7 @@ function ReportEditor({job, user, onBack, reportDate}){
   const [aiUsageCount,setAiUsageCount]=useState(getAiUsageCount(job?.id));
   const aiLimitReached=aiUsageCount>=AI_DESCRIBE_DAILY_LIMIT;
   const describePhoto=async(imageDataUrl,context,uniqueId)=>{
-    if(!checkAiLimit(job?.id)){alert(`AI description limit reached (${AI_DESCRIBE_DAILY_LIMIT}/day per job). Resets tomorrow.`);return null;}
+    if(!checkAiLimit(job?.id)){showToast(`AI limit reached (${AI_DESCRIBE_DAILY_LIMIT}/day). Resets tomorrow.`);return null;}
     setAiDescribing(p=>({...p,[uniqueId]:true}));
     try{
       const aiImg=await downscaleForAI(imageDataUrl);
@@ -4074,7 +4082,7 @@ function ReportEditor({job, user, onBack, reportDate}){
       return data.description||"";
     }catch(e){
       console.error("[AI describe]",e);
-      alert("AI describe failed: "+e.message);
+      showToast("AI describe failed — try again");
       return null;
     }finally{
       setAiDescribing(p=>({...p,[uniqueId]:false}));
@@ -4274,7 +4282,7 @@ function ReportEditor({job, user, onBack, reportDate}){
       });
     }catch(e){
       console.error("Save error:",e);
-      alert("Save failed: "+e.message);
+      showToast("Save failed — try again");
     }finally{reSavingRef.current=false;setSaving(false);}
   };
 
@@ -5499,7 +5507,7 @@ function ReportEditor({job, user, onBack, reportDate}){
                 <div key={p.id} style={{position:"relative",borderRadius:8,overflow:"hidden",border:`1px solid ${C.brd}`,aspectRatio:photoLayout==="1"?"auto":"1"}}>
                   <img src={p.src} alt={p.name} style={{width:"100%",height:"100%",objectFit:"cover",display:"block"}}/>
                   <button onClick={()=>setPhotos(prev=>prev.filter(x=>x.id!==p.id))} style={{position:"absolute",top:4,right:4,width:22,height:22,borderRadius:"50%",background:"rgba(0,0,0,0.7)",border:"none",color:"#fff",fontSize:12,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}>✕</button>
-                  {job.field_config?.aiPhotos&&<button disabled={aiDescribing[aiKey]||aiLimitReached} onClick={async()=>{const notesF=editFields.find(f=>f.voiceEnabled&&/notes|observations|comments/i.test(f.name));const desc=await describePhoto(p.src,`Job: ${job?.name||""}`,aiKey);if(desc&&notesF)setVals(v=>({...v,[notesF.name]:(v[notesF.name]?v[notesF.name]+"\n":"")+desc}));else if(desc)alert(desc);}} style={{position:"absolute",bottom:4,left:4,padding:"3px 7px",borderRadius:5,background:aiLimitReached?"#666":aiDescribing[aiKey]?C.blu:C.org,border:"none",color:"#fff",fontSize:10,fontWeight:700,cursor:aiDescribing[aiKey]?"wait":aiLimitReached?"not-allowed":"pointer",opacity:aiDescribing[aiKey]||aiLimitReached?0.7:0.9}}>{aiDescribing[aiKey]?"···":aiLimitReached?"—":"AI"}</button>}
+                  {job.field_config?.aiPhotos&&<button disabled={aiDescribing[aiKey]||aiLimitReached} onClick={async()=>{const notesF=editFields.find(f=>f.voiceEnabled&&/notes|observations|comments/i.test(f.name));const desc=await describePhoto(p.src,`Job: ${job?.name||""}`,aiKey);if(desc&&notesF)setVals(v=>({...v,[notesF.name]:(v[notesF.name]?v[notesF.name]+"\n":"")+desc}));else if(desc)showToast("AI: "+desc.slice(0,80));}} style={{position:"absolute",bottom:4,left:4,padding:"3px 7px",borderRadius:5,background:aiLimitReached?"#666":aiDescribing[aiKey]?C.blu:C.org,border:"none",color:"#fff",fontSize:10,fontWeight:700,cursor:aiDescribing[aiKey]?"wait":aiLimitReached?"not-allowed":"pointer",opacity:aiDescribing[aiKey]||aiLimitReached?0.7:0.9}}>{aiDescribing[aiKey]?"···":aiLimitReached?"—":"AI"}</button>}
                 </div>
               );})}
             </div>
@@ -5560,7 +5568,7 @@ function JobDetail({job, user, onBack, onDeleted}){
   const handleReuploadTemplate=async(e)=>{
     const f=e.target.files?.[0];if(!f)return;
     const ext=f.name.split(".").pop().toLowerCase();
-    if(!["pdf","docx","doc","jpg","jpeg","png"].includes(ext)){alert("Accepted formats: PDF, DOCX, JPG, PNG");return;}
+    if(!["pdf","docx","doc","jpg","jpeg","png"].includes(ext)){showToast("Accepted formats: PDF, DOCX, JPG, PNG");return;}
     setReuploading(true);
     try{
       const blob=new Blob([await f.arrayBuffer()],{type:f.type||"application/octet-stream"});
@@ -5574,7 +5582,7 @@ function JobDetail({job, user, onBack, onDeleted}){
       }
       setTplFilename(f.name);
       showToast("Template uploaded successfully!");
-    }catch(err){alert("Upload failed: "+err.message);}
+    }catch(err){showToast("Upload failed — try again");}
     finally{setReuploading(false);if(reuploadRef.current)reuploadRef.current.value="";}
   };
   const reparseTemplate=async()=>{
@@ -5740,7 +5748,7 @@ function JobDetail({job, user, onBack, onDeleted}){
       onDeleted();
     }catch(e){
       console.error("Delete job failed:",e);
-      alert("Delete failed: "+e.message);
+      showToast("Delete failed — try again");
       setDeleting(false);
     }
   };
@@ -5754,7 +5762,7 @@ function JobDetail({job, user, onBack, onDeleted}){
       job.name=body.name;job.site_address=body.site_address;
       showToast("Job updated!");
       setShowEditJob(false);
-    }catch(e){alert(e.message);}
+    }catch(e){showToast("Save failed — try again");}
     finally{setEditSaving(false);}
   };
 
@@ -5858,7 +5866,7 @@ function JobDetail({job, user, onBack, onDeleted}){
         {/* ── Working Copies Folder ── */}
         <Folder icon="📋" label="Working Copies" count={working.length} color={C.org} open={showWorking} setOpen={setShowWorking}>
           {working.length===0?(
-            <div style={{textAlign:"center",padding:"16px 0",color:C.mut,fontSize:13}}>No drafts in progress</div>
+            <div style={{textAlign:"center",padding:"16px 0",color:C.mut,fontSize:13}}>No drafts — tap "Start Today's Report" above</div>
           ):(
             working.map((r,i)=>{const rptName=buildReportName(r.report_number||1,r.report_date);return(
               <div key={r.id} style={{display:"flex",alignItems:"center",borderBottom:i<working.length-1?`1px solid ${C.brd}`:"none"}}>
@@ -5870,7 +5878,7 @@ function JobDetail({job, user, onBack, onDeleted}){
                   </div>
                   <div style={{color:C.org,fontSize:20,flexShrink:0}}>›</div>
                 </button>
-                <button onClick={async(e)=>{e.stopPropagation();if(!confirm("Delete this draft and start over?"))return;try{await db.deleteReport(r.id,job.id,r.report_date);showToast("Draft deleted");loadReports();}catch(err){alert("Delete failed: "+err.message);}}} style={{padding:"10px 14px",background:"none",border:"none",color:C.err,fontSize:16,cursor:"pointer",flexShrink:0}} title="Delete draft">🗑</button>
+                <button onClick={async(e)=>{e.stopPropagation();if(!confirm("Delete this draft and start over?"))return;const btn=e.currentTarget;btn.disabled=true;btn.style.opacity="0.4";try{await db.deleteReport(r.id,job.id,r.report_date);showToast("Draft deleted");loadReports();}catch(err){showToast("Delete failed");btn.disabled=false;btn.style.opacity="1";}}} style={{padding:"10px 14px",background:"none",border:"none",color:C.err,fontSize:16,cursor:"pointer",flexShrink:0}} title="Delete draft">🗑</button>
               </div>);})
 
           )}
@@ -5879,7 +5887,7 @@ function JobDetail({job, user, onBack, onDeleted}){
         {/* ── Completed Reports Folder ── */}
         <Folder icon="✅" label="Completed Reports" count={submitted.length} color={C.ok} open={showCompleted} setOpen={setShowCompleted}>
           {submitted.length===0?(
-            <div style={{textAlign:"center",padding:"16px 0",color:C.mut,fontSize:13}}>No submitted reports yet</div>
+            <div style={{textAlign:"center",padding:"16px 0",color:C.mut,fontSize:13}}>No submitted reports yet — completed reports appear here</div>
           ):(
             submitted.map((r,i)=>{
               const rptName=buildReportName(r.report_number||i+1,r.report_date);
@@ -5935,12 +5943,12 @@ function JobDetail({job, user, onBack, onDeleted}){
             <div style={{marginTop:12,display:"flex",flexDirection:"column",gap:8}}>
               <input type="text" value={newMemberName} onChange={e=>setNewMemberName(e.target.value)} placeholder="Name" style={{padding:"10px 12px",background:C.inp,border:`1px solid ${C.brd}`,borderRadius:8,color:C.txt,fontSize:14}}/>
               <div style={{display:"flex",gap:8}}>
-                <input type="email" value={newMemberEmail} onChange={e=>setNewMemberEmail(e.target.value)} placeholder="Email" onKeyDown={e=>{if(e.key==="Enter"&&newMemberEmail.trim()&&newMemberEmail.includes("@")){const em=newMemberEmail.trim().toLowerCase();if(teamMembers.some(m=>m.email.toLowerCase()===em)){alert("That email is already on the team.");return;}setTeamMembers(p=>[...p,{name:newMemberName.trim(),email:newMemberEmail.trim()}]);setNewMemberName("");setNewMemberEmail("");}}} style={{flex:1,padding:"10px 12px",background:C.inp,border:`1px solid ${C.brd}`,borderRadius:8,color:C.txt,fontSize:14}}/>
-                <button onClick={()=>{if(newMemberEmail.trim()&&newMemberEmail.includes("@")){const em=newMemberEmail.trim().toLowerCase();if(teamMembers.some(m=>m.email.toLowerCase()===em)){alert("That email is already on the team.");return;}setTeamMembers(p=>[...p,{name:newMemberName.trim(),email:newMemberEmail.trim()}]);setNewMemberName("");setNewMemberEmail("");}}} style={{padding:"10px 16px",background:C.blu,border:"none",borderRadius:8,color:"#fff",fontSize:13,fontWeight:700,cursor:"pointer"}}>Add</button>
+                <input type="email" value={newMemberEmail} onChange={e=>setNewMemberEmail(e.target.value)} placeholder="Email" onKeyDown={e=>{if(e.key==="Enter"&&newMemberEmail.trim()&&newMemberEmail.includes("@")){const em=newMemberEmail.trim().toLowerCase();if(teamMembers.some(m=>m.email.toLowerCase()===em)){showToast("That email is already on the team");return;}setTeamMembers(p=>[...p,{name:newMemberName.trim(),email:newMemberEmail.trim()}]);setNewMemberName("");setNewMemberEmail("");}}} style={{flex:1,padding:"10px 12px",background:C.inp,border:`1px solid ${C.brd}`,borderRadius:8,color:C.txt,fontSize:14}}/>
+                <button onClick={()=>{if(newMemberEmail.trim()&&newMemberEmail.includes("@")){const em=newMemberEmail.trim().toLowerCase();if(teamMembers.some(m=>m.email.toLowerCase()===em)){showToast("That email is already on the team");return;}setTeamMembers(p=>[...p,{name:newMemberName.trim(),email:newMemberEmail.trim()}]);setNewMemberName("");setNewMemberEmail("");}}} style={{padding:"10px 16px",background:C.blu,border:"none",borderRadius:8,color:"#fff",fontSize:13,fontWeight:700,cursor:"pointer"}}>Add</button>
               </div>
             </div>
             <div style={{marginTop:16}}>
-              <button onClick={async()=>{setTeamSaving(true);try{await fetch(`${SB_URL}/rest/v1/jobs?id=eq.${job.id}`,{method:"PATCH",headers:db._h(),body:JSON.stringify({team_emails:teamMembers})});job.team_emails=teamMembers;setShowTeam(false);}catch(e){alert("Save failed: "+e.message);}finally{setTeamSaving(false);}}} disabled={teamSaving} className="btn-o" style={{width:"100%",padding:"12px 0",background:C.blu,border:"none",borderRadius:8,color:"#fff",fontSize:14,fontWeight:700,cursor:teamSaving?"default":"pointer",opacity:teamSaving?0.6:1}}>
+              <button onClick={async()=>{setTeamSaving(true);try{await fetch(`${SB_URL}/rest/v1/jobs?id=eq.${job.id}`,{method:"PATCH",headers:db._h(),body:JSON.stringify({team_emails:teamMembers})});job.team_emails=teamMembers;setShowTeam(false);}catch(e){showToast("Save failed — try again");}finally{setTeamSaving(false);}}} disabled={teamSaving} className="btn-o" style={{width:"100%",padding:"12px 0",background:C.blu,border:"none",borderRadius:8,color:"#fff",fontSize:14,fontWeight:700,cursor:teamSaving?"default":"pointer",opacity:teamSaving?0.6:1}}>
                 {teamSaving?"Saving...":"Save Team"}
               </button>
             </div>
@@ -5969,12 +5977,12 @@ function JobDetail({job, user, onBack, onDeleted}){
             <div style={{marginTop:12,display:"flex",flexDirection:"column",gap:8}}>
               <input type="text" value={newSchedName} onChange={e=>setNewSchedName(e.target.value)} placeholder="Name" style={{padding:"10px 12px",background:C.inp,border:`1px solid ${C.brd}`,borderRadius:8,color:C.txt,fontSize:14}}/>
               <div style={{display:"flex",gap:8}}>
-                <input type="email" value={newSchedEmail} onChange={e=>setNewSchedEmail(e.target.value)} placeholder="Email" onKeyDown={e=>{if(e.key==="Enter"&&newSchedEmail.trim()&&newSchedEmail.includes("@")){const em=newSchedEmail.trim().toLowerCase();if(schedContacts.some(m=>m.email.toLowerCase()===em)){alert("That email is already in scheduling contacts.");return;}setSchedContacts(p=>[...p,{name:newSchedName.trim(),email:newSchedEmail.trim()}]);setNewSchedName("");setNewSchedEmail("");}}} style={{flex:1,padding:"10px 12px",background:C.inp,border:`1px solid ${C.brd}`,borderRadius:8,color:C.txt,fontSize:14}}/>
-                <button onClick={()=>{if(newSchedEmail.trim()&&newSchedEmail.includes("@")){const em=newSchedEmail.trim().toLowerCase();if(schedContacts.some(m=>m.email.toLowerCase()===em)){alert("That email is already in scheduling contacts.");return;}setSchedContacts(p=>[...p,{name:newSchedName.trim(),email:newSchedEmail.trim()}]);setNewSchedName("");setNewSchedEmail("");}}} style={{padding:"10px 16px",background:C.org,border:"none",borderRadius:8,color:"#fff",fontSize:13,fontWeight:700,cursor:"pointer"}}>Add</button>
+                <input type="email" value={newSchedEmail} onChange={e=>setNewSchedEmail(e.target.value)} placeholder="Email" onKeyDown={e=>{if(e.key==="Enter"&&newSchedEmail.trim()&&newSchedEmail.includes("@")){const em=newSchedEmail.trim().toLowerCase();if(schedContacts.some(m=>m.email.toLowerCase()===em)){showToast("That email is already added");return;}setSchedContacts(p=>[...p,{name:newSchedName.trim(),email:newSchedEmail.trim()}]);setNewSchedName("");setNewSchedEmail("");}}} style={{flex:1,padding:"10px 12px",background:C.inp,border:`1px solid ${C.brd}`,borderRadius:8,color:C.txt,fontSize:14}}/>
+                <button onClick={()=>{if(newSchedEmail.trim()&&newSchedEmail.includes("@")){const em=newSchedEmail.trim().toLowerCase();if(schedContacts.some(m=>m.email.toLowerCase()===em)){showToast("That email is already added");return;}setSchedContacts(p=>[...p,{name:newSchedName.trim(),email:newSchedEmail.trim()}]);setNewSchedName("");setNewSchedEmail("");}}} style={{padding:"10px 16px",background:C.org,border:"none",borderRadius:8,color:"#fff",fontSize:13,fontWeight:700,cursor:"pointer"}}>Add</button>
               </div>
             </div>
             <div style={{marginTop:16}}>
-              <button onClick={async()=>{setSchedContactsSaving(true);try{await fetch(`${SB_URL}/rest/v1/jobs?id=eq.${job.id}`,{method:"PATCH",headers:db._h(),body:JSON.stringify({scheduling_contacts:schedContacts})});job.scheduling_contacts=schedContacts;setShowSchedContacts(false);showToast("Scheduling contacts saved!");}catch(e){alert("Save failed: "+e.message);}finally{setSchedContactsSaving(false);}}} disabled={schedContactsSaving} style={{width:"100%",padding:"12px 0",background:C.org,border:"none",borderRadius:8,color:"#fff",fontSize:14,fontWeight:700,cursor:schedContactsSaving?"default":"pointer",opacity:schedContactsSaving?0.6:1}}>
+              <button onClick={async()=>{setSchedContactsSaving(true);try{await fetch(`${SB_URL}/rest/v1/jobs?id=eq.${job.id}`,{method:"PATCH",headers:db._h(),body:JSON.stringify({scheduling_contacts:schedContacts})});job.scheduling_contacts=schedContacts;setShowSchedContacts(false);showToast("Scheduling contacts saved!");}catch(e){showToast("Save failed — try again");}finally{setSchedContactsSaving(false);}}} disabled={schedContactsSaving} style={{width:"100%",padding:"12px 0",background:C.org,border:"none",borderRadius:8,color:"#fff",fontSize:14,fontWeight:700,cursor:schedContactsSaving?"default":"pointer",opacity:schedContactsSaving?0.6:1}}>
                 {schedContactsSaving?"Saving...":"Save Scheduling Contacts"}
               </button>
             </div>
@@ -6003,7 +6011,7 @@ function JobDetail({job, user, onBack, onDeleted}){
                 <div style={{background:C.inp,border:`1px solid ${C.brd}`,borderRadius:8,padding:12,marginBottom:12}}>
                   <div style={{fontSize:12,fontWeight:700,color:C.blu,marginBottom:6}}>Your Calendar Link</div>
                   <div style={{fontSize:11,color:C.org,wordBreak:"break-all",marginBottom:8,fontWeight:600}}>{`${window.location.origin}${window.location.pathname.replace(/index\.html$/,"").replace(/\/$/,"")}/hub.html?i=${jdSlug||user?.user_metadata?.full_name?.toLowerCase().replace(/\s+/g,"-")||"inspector"}`}</div>
-                  <button onClick={async()=>{const s=jdSlug||user?.user_metadata?.full_name?.toLowerCase().replace(/\s+/g,"-")||"inspector";const url=`${window.location.origin}${window.location.pathname.replace(/index\.html$/,"").replace(/\/$/,"")}/hub.html?i=${s}`;try{await navigator.clipboard.writeText(url);alert("Calendar link copied!");}catch(e){alert(url);}}} style={{width:"100%",padding:"8px 0",fontSize:12,fontWeight:700,borderRadius:6,background:C.blu,border:"none",color:"#fff",cursor:"pointer",marginBottom:4}}>Copy Calendar Link</button>
+                  <button onClick={async()=>{const s=jdSlug||user?.user_metadata?.full_name?.toLowerCase().replace(/\s+/g,"-")||"inspector";const url=`${window.location.origin}${window.location.pathname.replace(/index\.html$/,"").replace(/\/$/,"")}/hub.html?i=${s}`;try{await navigator.clipboard.writeText(url);showToast("Calendar link copied!");}catch(e){showToast("Couldn't copy — long-press the link above");}}} style={{width:"100%",padding:"8px 0",fontSize:12,fontWeight:700,borderRadius:6,background:C.blu,border:"none",color:"#fff",cursor:"pointer",marginBottom:4}}>Copy Calendar Link</button>
                   <button onClick={()=>{const s=jdSlug||user?.user_metadata?.full_name?.toLowerCase().replace(/\s+/g,"-")||"inspector";window.open(`${window.location.origin}${window.location.pathname.replace(/index\.html$/,"").replace(/\/$/,"")}/hub.html?i=${s}&admin=true`,"_blank");}} style={{width:"100%",padding:"8px 0",fontSize:12,fontWeight:700,borderRadius:6,background:"transparent",border:`1px solid ${C.brd}`,color:C.lt,cursor:"pointer",marginBottom:10}}>Open My Calendar (Admin)</button>
                   <details style={{borderTop:`1px solid ${C.brd}`,paddingTop:8}}>
                     <summary style={{fontSize:12,color:C.blu,fontWeight:600,cursor:"pointer",listStyle:"none",display:"flex",justifyContent:"space-between",alignItems:"center"}}>Subscribe to Your Own Calendar<span style={{fontSize:14}}>+</span></summary>
@@ -6017,7 +6025,7 @@ function JobDetail({job, user, onBack, onDeleted}){
                 </div>
               </div>
             )}
-            <button onClick={async()=>{setSchedSaving(true);try{await fetch(`${SB_URL}/rest/v1/jobs?id=eq.${job.id}`,{method:"PATCH",headers:db._h(),body:JSON.stringify({scheduling_enabled:schedEnabled})});job.scheduling_enabled=schedEnabled;setShowSchedSet(false);}catch(e){alert("Save failed: "+e.message);}finally{setSchedSaving(false);}}} disabled={schedSaving} style={{width:"100%",padding:"12px 0",background:C.org,border:"none",borderRadius:8,color:"#fff",fontSize:14,fontWeight:700,cursor:schedSaving?"default":"pointer",opacity:schedSaving?0.6:1}}>
+            <button onClick={async()=>{setSchedSaving(true);try{await fetch(`${SB_URL}/rest/v1/jobs?id=eq.${job.id}`,{method:"PATCH",headers:db._h(),body:JSON.stringify({scheduling_enabled:schedEnabled})});job.scheduling_enabled=schedEnabled;setShowSchedSet(false);}catch(e){showToast("Save failed — try again");}finally{setSchedSaving(false);}}} disabled={schedSaving} style={{width:"100%",padding:"12px 0",background:C.org,border:"none",borderRadius:8,color:"#fff",fontSize:14,fontWeight:700,cursor:schedSaving?"default":"pointer",opacity:schedSaving?0.6:1}}>
               {schedSaving?"Saving...":"Save Scheduling"}
             </button>
           </div>
@@ -6060,7 +6068,7 @@ function JobDetail({job, user, onBack, onDeleted}){
                 )}
               </div>
             )}
-            <button onClick={async()=>{setFreqSaving(true);try{const es=jdEffSch();const patch={schedule:es,schedule_days:es==="custom"?jdDays:[],reminder_enabled:jdRemOn,reminder_time:jdRemOn?jdRemT:null,reminder_hours_before:jdRemOn?jdRemH:null};await fetch(`${SB_URL}/rest/v1/jobs?id=eq.${job.id}`,{method:"PATCH",headers:db._h(),body:JSON.stringify(patch)});Object.assign(job,patch);setShowFreqSet(false);showToast("Frequency & reminders saved");}catch(e){alert("Save failed: "+e.message);}finally{setFreqSaving(false);}}} disabled={freqSaving} style={{width:"100%",padding:"12px 0",background:C.org,border:"none",borderRadius:8,color:"#fff",fontSize:14,fontWeight:700,cursor:freqSaving?"default":"pointer",opacity:freqSaving?0.6:1}}>
+            <button onClick={async()=>{setFreqSaving(true);try{const es=jdEffSch();const patch={schedule:es,schedule_days:es==="custom"?jdDays:[],reminder_enabled:jdRemOn,reminder_time:jdRemOn?jdRemT:null,reminder_hours_before:jdRemOn?jdRemH:null};await fetch(`${SB_URL}/rest/v1/jobs?id=eq.${job.id}`,{method:"PATCH",headers:db._h(),body:JSON.stringify(patch)});Object.assign(job,patch);setShowFreqSet(false);showToast("Frequency & reminders saved");}catch(e){showToast("Save failed — try again");}finally{setFreqSaving(false);}}} disabled={freqSaving} style={{width:"100%",padding:"12px 0",background:C.org,border:"none",borderRadius:8,color:"#fff",fontSize:14,fontWeight:700,cursor:freqSaving?"default":"pointer",opacity:freqSaving?0.6:1}}>
               {freqSaving?"Saving...":"Save Frequency & Reminders"}
             </button>
           </div>
@@ -6112,7 +6120,7 @@ function JobDetail({job, user, onBack, onDeleted}){
                 job.field_config=newConfig;
                 setShowFieldEdit(false);
                 setFieldEditFields(null);
-              }catch(e){alert("Save failed: "+e.message);}
+              }catch(e){showToast("Save failed — try again");}
               finally{setFieldEditSaving(false);}
             }} disabled={fieldEditSaving} style={{width:"100%",padding:"12px 0",background:C.org,border:"none",borderRadius:8,color:"#fff",fontSize:14,fontWeight:700,cursor:fieldEditSaving?"default":"pointer",opacity:fieldEditSaving?0.6:1}}>
               {fieldEditSaving?"Saving...":"Save Field Changes"}
@@ -6507,7 +6515,7 @@ function Dashboard({user, onLogout}){
   const stat=(id,sc)=>{if(sc==="as_needed")return"none";const r=rpts.find(r=>r.job_id===id);if(!r)return"due";return r.status==="submitted"?"submitted":"working";};
   const dot=(s)=>{if(s==="none")return null;const c=s==="submitted"?C.ok:s==="working"?C.org:"#ef4444";return<div style={{width:10,height:10,borderRadius:"50%",background:c,flexShrink:0}}/>;};
 
-  const doShare=async()=>{const url=window.location.href;if(navigator.share){try{await navigator.share({title:"My Daily Reports",text:"Voice-to-PDF jobsite reports",url});}catch(e){}}else{try{await navigator.clipboard.writeText(url);alert("Link copied!");}catch(e){alert("Could not copy link.");}}};
+  const doShare=async()=>{const url=window.location.href;if(navigator.share){try{await navigator.share({title:"My Daily Reports",text:"Voice-to-PDF jobsite reports",url});}catch(e){}}else{try{await navigator.clipboard.writeText(url);showToast("Link copied!");}catch(e){showToast("Couldn't copy link");}}};
 
   if(showAcct)return<AccountSettings user={user} onBack={()=>{setShowAcct(false);/* refresh logo in case it changed */db.getProfile(user.id).then(async p=>{if(p?.company_id){const l=await db.getCompanyLogoUrl(p.company_id);setDashLogoUrl(l||null);}}).catch(()=>{});}} onLogout={onLogout}/>;
   if(showNew)return<CreateJob user={user} onBack={()=>setShowNew(false)} onCreated={()=>{setShowNew(false);load();}}/>;
@@ -6932,7 +6940,7 @@ function Dashboard({user, onLogout}){
                   <button onClick={nextMonth} style={{background:"none",border:"none",color:C.mut,fontSize:18,cursor:"pointer",padding:"0 4px"}}>›</button>
                 </div>
                 <div style={{display:"flex",gap:6}}>
-                  <button onClick={async()=>{try{await navigator.clipboard.writeText(calURL);setShareCopied(true);setTimeout(()=>setShareCopied(false),2000);}catch(e){alert(calURL);}}} style={{padding:"6px 12px",fontSize:12,fontWeight:700,borderRadius:6,background:shareCopied?"#22c55e":C.blu,border:"none",color:"#fff",cursor:"pointer",display:"flex",alignItems:"center",gap:4,transition:"background 0.2s"}}>
+                  <button onClick={async()=>{try{await navigator.clipboard.writeText(calURL);setShareCopied(true);setTimeout(()=>setShareCopied(false),2000);}catch(e){showToast("Couldn't copy — long-press the link");}}} style={{padding:"6px 12px",fontSize:12,fontWeight:700,borderRadius:6,background:shareCopied?"#22c55e":C.blu,border:"none",color:"#fff",cursor:"pointer",display:"flex",alignItems:"center",gap:4,transition:"background 0.2s"}}>
                     {shareCopied?"Copied!":"Share"}
                   </button>
                   <button onClick={()=>setShowSubDash(!showSubDash)} style={{padding:"6px 12px",fontSize:12,fontWeight:700,borderRadius:6,background:showSubDash?C.org:C.blu,border:"none",color:"#fff",cursor:"pointer"}}>
@@ -6987,7 +6995,7 @@ function Dashboard({user, onLogout}){
                         {rq.notes&&<div style={{fontSize:11,color:C.mut,marginTop:4,fontStyle:"italic"}}>{rq.notes}</div>}
                         <div style={{display:"flex",gap:8,marginTop:10}}>
                           {rq.status!=="scheduled"&&(
-                            <button onClick={async(e)=>{e.stopPropagation();try{
+                            <button onClick={async(e)=>{e.stopPropagation();const btn=e.currentTarget;if(btn.disabled)return;btn.disabled=true;btn.style.opacity="0.5";try{
                               await db.updateRequest(rq.id,{status:"scheduled"});
                               // Send confirmation email to requester
                               if(rq.requester_email){
@@ -7006,16 +7014,16 @@ function Dashboard({user, onLogout}){
                                 if(!confirmR.ok)console.error("Confirmation email failed:",confirmR.status);
                               }
                               await loadRequests();
-                            }catch(er){alert("Error: "+er.message);}}} style={{flex:1,padding:"7px 0",fontSize:12,fontWeight:700,borderRadius:6,background:"#22c55e",border:"none",color:"#fff",cursor:"pointer"}}>
+                            }catch(er){showToast("Error — try again");btn.disabled=false;btn.style.opacity="1";}}} style={{flex:1,padding:"7px 0",fontSize:12,fontWeight:700,borderRadius:6,background:"#22c55e",border:"none",color:"#fff",cursor:"pointer"}}>
                               Confirm Schedule
                             </button>
                           )}
                           {rq.status==="scheduled"&&(
-                            <button onClick={async(e)=>{e.stopPropagation();try{await db.updateRequest(rq.id,{status:"pending"});await loadRequests();}catch(er){alert("Error: "+er.message);}}} style={{flex:1,padding:"7px 0",fontSize:12,fontWeight:700,borderRadius:6,background:C.org,border:"none",color:"#fff",cursor:"pointer"}}>
+                            <button onClick={async(e)=>{e.stopPropagation();const btn=e.currentTarget;if(btn.disabled)return;btn.disabled=true;btn.style.opacity="0.5";try{await db.updateRequest(rq.id,{status:"pending"});await loadRequests();}catch(er){showToast("Error — try again");btn.disabled=false;btn.style.opacity="1";}}} style={{flex:1,padding:"7px 0",fontSize:12,fontWeight:700,borderRadius:6,background:C.org,border:"none",color:"#fff",cursor:"pointer"}}>
                               Edit
                             </button>
                           )}
-                          <button onClick={async(e)=>{e.stopPropagation();if(!confirm("Delete this request?"))return;try{await db.deleteRequest(rq.id);await loadRequests();}catch(er){alert("Error: "+er.message);}}} style={{padding:"7px 12px",fontSize:12,fontWeight:700,borderRadius:6,background:"transparent",border:`1px solid #ef4444`,color:"#ef4444",cursor:"pointer"}}>
+                          <button onClick={async(e)=>{e.stopPropagation();if(!confirm("Delete this request?"))return;const btn=e.currentTarget;btn.disabled=true;btn.style.opacity="0.5";try{await db.deleteRequest(rq.id);await loadRequests();}catch(er){showToast("Error — try again");btn.disabled=false;btn.style.opacity="1";}}} style={{padding:"7px 12px",fontSize:12,fontWeight:700,borderRadius:6,background:"transparent",border:`1px solid #ef4444`,color:"#ef4444",cursor:"pointer"}}>
                             Delete
                           </button>
                         </div>
@@ -7060,7 +7068,7 @@ function Dashboard({user, onLogout}){
                 <div style={{fontSize:12,fontWeight:700,color:C.org,marginBottom:6}}>Calendar Share Link</div>
                 <div style={{background:C.inp,border:`1px solid ${C.brd}`,borderRadius:6,padding:"10px 12px",display:"flex",alignItems:"center",gap:8}}>
                   <div style={{flex:1,fontSize:12,color:C.lt,wordBreak:"break-all",lineHeight:1.4}}>{calURL}</div>
-                  <button onClick={async(e)=>{const btn=e.currentTarget;try{await navigator.clipboard.writeText(calURL);btn.textContent="Copied!";btn.style.background="#22c55e";setTimeout(()=>{btn.textContent="Copy";btn.style.background=C.blu;},3000);}catch(err){alert(calURL);}}} style={{background:C.blu,color:"#fff",border:"none",borderRadius:4,padding:"6px 12px",fontSize:12,fontWeight:700,cursor:"pointer",whiteSpace:"nowrap",minWidth:52}}>Copy</button>
+                  <button onClick={async(e)=>{const btn=e.currentTarget;try{await navigator.clipboard.writeText(calURL);btn.textContent="Copied!";btn.style.background="#22c55e";setTimeout(()=>{btn.textContent="Copy";btn.style.background=C.blu;},3000);}catch(err){showToast("Couldn't copy — long-press the link");}}} style={{background:C.blu,color:"#fff",border:"none",borderRadius:4,padding:"6px 12px",fontSize:12,fontWeight:700,cursor:"pointer",whiteSpace:"nowrap",minWidth:52}}>Copy</button>
                 </div>
                 <div style={{fontSize:11,color:C.mut,marginTop:6,marginBottom:8}}>Send this link to your GC and subs so they can request site visits.</div>
               </div>
@@ -7069,7 +7077,7 @@ function Dashboard({user, onLogout}){
                 <div style={{fontSize:11,color:C.mut,marginBottom:8}}>Use this subscription URL to sync your calendar to iPhone, Android, or Outlook.</div>
                 <div style={{background:C.inp,border:`1px solid ${C.brd}`,borderRadius:6,padding:"10px 12px",marginBottom:12,display:"flex",alignItems:"center",gap:8}}>
                   <div style={{flex:1,fontSize:12,color:C.lt,wordBreak:"break-all",lineHeight:1.4,fontFamily:"monospace"}}>{icsURL}</div>
-                  <button onClick={async(e)=>{const btn=e.currentTarget;try{if(navigator.clipboard&&navigator.clipboard.writeText){await navigator.clipboard.writeText(icsURL);}else{const ta=document.createElement("textarea");ta.value=icsURL;ta.style.cssText="position:fixed;opacity:0";document.body.appendChild(ta);ta.select();document.execCommand("copy");document.body.removeChild(ta);}btn.textContent="Copied!";btn.style.background="#22c55e";setTimeout(()=>{btn.textContent="Copy";btn.style.background=C.blu;},3000);}catch(err){alert(icsURL);}}} style={{background:C.blu,color:"#fff",border:"none",borderRadius:4,padding:"6px 12px",fontSize:12,fontWeight:700,cursor:"pointer",whiteSpace:"nowrap",minWidth:52}}>Copy</button>
+                  <button onClick={async(e)=>{const btn=e.currentTarget;try{if(navigator.clipboard&&navigator.clipboard.writeText){await navigator.clipboard.writeText(icsURL);}else{const ta=document.createElement("textarea");ta.value=icsURL;ta.style.cssText="position:fixed;opacity:0";document.body.appendChild(ta);ta.select();document.execCommand("copy");document.body.removeChild(ta);}btn.textContent="Copied!";btn.style.background="#22c55e";setTimeout(()=>{btn.textContent="Copy";btn.style.background=C.blu;},3000);}catch(err){showToast("Couldn't copy — long-press the link");}}} style={{background:C.blu,color:"#fff",border:"none",borderRadius:4,padding:"6px 12px",fontSize:12,fontWeight:700,cursor:"pointer",whiteSpace:"nowrap",minWidth:52}}>Copy</button>
                 </div>
                 <details style={{borderTop:`1px solid ${C.brd}`,padding:"10px 0 0"}}><summary style={{fontSize:13,fontWeight:600,color:C.txt,cursor:"pointer",listStyle:"none",display:"flex",justifyContent:"space-between",alignItems:"center"}}>iPhone Setup <span style={{fontSize:14,color:C.lt}}>+</span></summary><div style={{padding:"8px 0",fontSize:13,color:C.lt,lineHeight:1.6}}>1. Settings → Calendar → Accounts<br/>2. "Add Account" → "Other"<br/>3. "Add Subscribed Calendar"<br/>4. Paste the URL above<br/>5. Done!</div></details>
                 <details style={{borderTop:`1px solid ${C.brd}`,padding:"10px 0 0"}}><summary style={{fontSize:13,fontWeight:600,color:C.txt,cursor:"pointer",listStyle:"none",display:"flex",justifyContent:"space-between",alignItems:"center"}}>Android / Google Calendar <span style={{fontSize:14,color:C.lt}}>+</span></summary><div style={{padding:"8px 0",fontSize:13,color:C.lt,lineHeight:1.6}}>1. Open Google Calendar on desktop<br/>2. Next to "Other calendars," click (+)<br/>3. Select "From URL"<br/>4. Paste the URL above</div></details>
@@ -7224,7 +7232,7 @@ function SetupWizard({user, inviteCompany, onComplete}){
       // Mark wizard complete
       try{await db.upsertProfile({id:user.id,setup_complete:true,wizard_completed_at:new Date().toISOString()});}catch(_){}
       onComplete();
-    }catch(e){alert("Error saving profile: "+e.message);}
+    }catch(e){showToast("Save failed — try again");}
     finally{setSaving(false);}
   };
 
@@ -7388,11 +7396,11 @@ function SetupWizard({user, inviteCompany, onComplete}){
                 "Your company header and formatting carry through",
                 "Upload a single-page template — remove any blank extra pages first",
               ]},
-              {key:"bestPractices",icon:"📐",title:"Need Help?",bullets:[
+              {key:"bestPractices",icon:"📐",title:"Need Help Creating a Template?",bullets:[
                 "Single-page PDF works best, standard letter size (8.5\" x 11\")",
                 "Fillable PDFs with form fields give the most accurate results",
-                "If detection doesn't look right, try uploading again or email your template to support@mydailyreports.org and we'll get it set up for you",
-                "One template per job — reused for every report",
+                "Don't have a template? Use ChatGPT, Google Gemini, or any AI — just tell it: \"Create a fillable PDF daily inspection report template for [your industry]. Include fields for: Date, Project Name, Inspector Name, Report Number, Weather, Notes/Observations, and a signature line. Single page, 8.5x11, professional layout.\"",
+                "If detection doesn't look right, email your template to support@mydailyreports.org and we'll set it up for you",
               ]},
             ].map(section=>{
               const wasRead=readSections[section.key];
