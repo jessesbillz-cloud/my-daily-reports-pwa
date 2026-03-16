@@ -4160,6 +4160,9 @@ function ReportEditor({job, user, onBack, reportDate}){
     })();
   },[]);
 
+  const [fieldMode,setFieldMode]=useState(false);
+  const fieldPhotoRef=useRef(null);
+
   const [sigTimestamps,setSigTimestamps]=useState({});
   const setVal=(name,val)=>{
     setVals(p=>({...p,[name]:val}));
@@ -5320,9 +5323,59 @@ function ReportEditor({job, user, onBack, reportDate}){
           <div style={{fontSize:12,color:C.mut,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{job.name}</div>
         </div>
         {reportStatus==="submitted"&&<span style={{padding:"4px 10px",fontSize:11,fontWeight:700,borderRadius:6,background:C.ok+"22",color:C.ok}}>Submitted</span>}
+        <button onClick={()=>setFieldMode(!fieldMode)} title={fieldMode?"Switch to Full Editor":"Switch to Field Mode — simplified for walking around"} style={{background:fieldMode?C.org:"transparent",border:`1px solid ${fieldMode?C.org:C.brd}`,borderRadius:8,padding:"8px 10px",cursor:"pointer",color:fieldMode?"#fff":C.mut,fontSize:18,lineHeight:1,minWidth:44,minHeight:44,display:"flex",alignItems:"center",justifyContent:"center"}}>{fieldMode?"📋":"📱"}</button>
       </div>
 
-      <div style={{maxWidth:600,margin:"0 auto",padding:"20px 20px 140px"}}>
+      {/* ── Field Mode — simplified mobile view for walking around ── */}
+      {fieldMode&&(
+        <div style={{maxWidth:600,margin:"0 auto",padding:"16px 16px 160px"}}>
+          <div style={{textAlign:"center",marginBottom:12}}>
+            <span style={{display:"inline-block",padding:"4px 14px",fontSize:11,fontWeight:700,borderRadius:6,background:C.org,color:"#fff",letterSpacing:1}}>FIELD MODE</span>
+            <div style={{fontSize:12,color:C.mut,marginTop:4}}>{todayDisplay}</div>
+          </div>
+
+          {/* Big camera button */}
+          <button onClick={()=>{fieldPhotoRef.current.setAttribute("capture","environment");fieldPhotoRef.current.click();}} style={{width:"100%",padding:"20px 0",background:C.org,border:"none",borderRadius:14,color:"#fff",fontSize:18,fontWeight:700,cursor:"pointer",marginBottom:16,display:"flex",alignItems:"center",justifyContent:"center",gap:10}}>
+            <span style={{fontSize:28}}>📷</span> SNAP PHOTO
+          </button>
+          <input ref={fieldPhotoRef} type="file" accept="image/*" capture="environment" multiple onChange={handlePhoto} style={{display:"none"}}/>
+
+          {/* Photo strip */}
+          {photos.length>0&&(
+            <div style={{display:"flex",gap:8,overflowX:"auto",WebkitOverflowScrolling:"touch",marginBottom:16,paddingBottom:4}}>
+              {photos.map(p=>(
+                <div key={p.id} style={{position:"relative",flexShrink:0,width:72,height:72,borderRadius:8,overflow:"hidden",border:`1px solid ${C.brd}`}}>
+                  <img src={p.src} alt={p.name} style={{width:"100%",height:"100%",objectFit:"cover"}}/>
+                  <button onClick={()=>setPhotos(prev=>prev.filter(x=>x.id!==p.id))} style={{position:"absolute",top:2,right:2,width:20,height:20,borderRadius:"50%",background:"rgba(0,0,0,0.7)",border:"none",color:"#fff",fontSize:10,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}>✕</button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Editable fields — only non-auto, non-skipped */}
+          {editFields.filter(f=>!(f.autoFill==="date"||f.autoFill==="increment"||f.autoFill==="name")&&!skippedFields[f.name]).map(f=>(
+            <div key={f.name} style={{marginBottom:14}}>
+              <label style={{fontSize:13,fontWeight:600,color:C.lt,marginBottom:6,display:"block"}}>{f.name}</label>
+              {f.voiceEnabled?(
+                <textarea value={vals[f.name]||""} onChange={e=>setVal(f.name,e.target.value)} placeholder="Tap here and use your keyboard mic to dictate..." rows={4} style={{width:"100%",boxSizing:"border-box",background:C.inp,border:`1px solid ${C.brd}`,borderRadius:10,padding:"12px 14px",fontSize:15,color:C.lt,resize:"vertical",minHeight:100,lineHeight:1.5}}/>
+              ):(
+                <input type="text" value={vals[f.name]||""} onChange={e=>setVal(f.name,e.target.value)} placeholder={"Enter "+f.name+"..."} style={{width:"100%",boxSizing:"border-box",background:C.inp,border:`1px solid ${C.brd}`,borderRadius:10,padding:"12px 14px",fontSize:15,color:C.lt}}/>
+              )}
+            </div>
+          ))}
+
+          {/* Bottom bar */}
+          <div style={{position:"fixed",bottom:0,left:0,right:0,padding:"12px 20px",borderTop:`1px solid ${C.brd}`,background:C.card,zIndex:100}}>
+            <div style={{maxWidth:600,margin:"0 auto",display:"flex",gap:10}}>
+              <button onClick={()=>setFieldMode(false)} style={{flex:1,padding:"14px 0",background:C.card,border:`1px solid ${C.brd}`,borderRadius:10,color:C.mut,fontSize:14,fontWeight:700,cursor:"pointer"}}>📋 Full Editor</button>
+              <button onClick={async()=>{await saveWorking();showToast("Saved!");}} disabled={saving} style={{flex:1,padding:"14px 0",background:C.blu,border:"none",borderRadius:10,color:"#fff",fontSize:14,fontWeight:700,cursor:saving?"default":"pointer",opacity:saving?0.6:1}}>{saving?"Saving...":"Save Draft"}</button>
+              <button onClick={submitReport} disabled={submitting||viewLoading} className="btn-o" style={{flex:1,padding:"14px 0",background:C.org,border:"none",borderRadius:10,color:"#fff",fontSize:14,fontWeight:700,cursor:submitting?"default":"pointer",opacity:submitting?0.6:1}}>{submitting?"...":"Submit"}</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {!fieldMode&&<div style={{maxWidth:600,margin:"0 auto",padding:"20px 20px 140px"}}>
         <div style={{fontSize:14,color:C.mut,marginBottom:6,textAlign:"center"}}>{todayDisplay}</div>
         <div style={{fontSize:11,color:C.mut,textAlign:"center",marginBottom:8}}>Editable anytime • {tz.split("/").pop().replace(/_/g," ")}</div>
         {editFilename&&(
@@ -5456,9 +5509,10 @@ function ReportEditor({job, user, onBack, reportDate}){
           <div style={{fontSize:11,color:C.mut,marginTop:8}}>Photos will display as {layouts.find(l=>l.k===photoLayout)?.l} in the final PDF</div>
         </div>
 
-      </div>
+      </div>}
 
       {/* Fixed bottom bar */}
+      {!fieldMode&&(
       <div style={{position:"fixed",bottom:0,left:0,right:0,padding:"12px 20px",borderTop:`1px solid ${C.brd}`,background:C.card,zIndex:100}}>
         <div style={{maxWidth:600,margin:"0 auto",display:"flex",flexDirection:"column",gap:8}}>
           <div style={{display:"flex",gap:10}}>
@@ -5476,6 +5530,7 @@ function ReportEditor({job, user, onBack, reportDate}){
           </button>
         </div>
       </div>
+      )}
     </div>
   );
 }
