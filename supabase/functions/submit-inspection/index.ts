@@ -194,15 +194,13 @@ serve(async (req) => {
     const pushTitle = "New Scheduling Request";
     const pushBody = `${submittedBy} requested ${typeLabel} on ${inspectionDate} at ${timeLabel} for ${project.replace(/-/g, " ")}`;
 
-    let pushSent = false;
     if (ownerPushSub && ownerPushSub.endpoint) {
       try {
         const pushRes = await fetch(ownerPushSub.endpoint, { method: "POST", headers: { "Content-Type": "application/json", "TTL": "86400" }, body: JSON.stringify({ title: pushTitle, body: pushBody, tag: "scheduling-" + inserted.id }) });
         console.log("Web push result:", pushRes.status);
-        if (pushRes.ok) pushSent = true;
       } catch (pushErr) { console.error("Web push error (non-fatal):", pushErr); }
     }
-    // Always send ntfy as well (or as fallback if web push failed)
+    // Always send ntfy (not gated behind web push)
     if (ownerNtfyTopic) {
       try {
         await fetch(`https://ntfy.sh/${ownerNtfyTopic}`, { method: "POST", headers: { "Title": pushTitle, "Priority": "high", "Tags": "calendar" }, body: pushBody });
