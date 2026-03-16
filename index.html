@@ -2283,7 +2283,7 @@ function CreateJob({user, onBack, onCreated}){
           )}
 
           {/* Upload area */}
-          {!tf?(
+          {!tf&&(
             <div onDragOver={e=>{e.preventDefault();setDrag(true);}} onDragLeave={()=>setDrag(false)} onDrop={e=>{e.preventDefault();setDrag(false);const f=e.dataTransfer.files[0];if(!f)return;if(!f.name.toLowerCase().endsWith(".pdf")){setErr("Only PDF files are supported.");return;}(usedSavedId?doFileWithSaved:doFile)(f);}} onClick={()=>document.getElementById("fi").click()}
               style={{border:`2px dashed ${drag?C.org:C.brd}`,borderRadius:12,padding:"32px 20px",textAlign:"center",cursor:"pointer",background:drag?"#1f1a14":C.inp}}>
               <div style={{fontSize:32,marginBottom:8}}>—</div>
@@ -6838,7 +6838,7 @@ function Dashboard({user, onLogout}){
           {dashLogoUrl&&<img src={dashLogoUrl} alt="" style={{width:34,height:34,borderRadius:8,objectFit:"contain",background:"#fff",border:`1px solid ${C.brd}`}}/>}
         </div>
         <div style={{display:"flex",alignItems:"center",gap:8}}>
-          <button onClick={doShare} style={{width:34,height:34,borderRadius:8,background:C.inp,border:`1px solid ${C.brd}`,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",fontSize:14,color:C.mut}}>↗</button>
+          <button onClick={()=>{const s=profileSlug||user?.user_metadata?.full_name?.toLowerCase().replace(/\s+/g,"-")||"inspector";window.open(`${window.location.origin}${window.location.pathname.replace(/index\.html$/,"").replace(/\/$/,"")}/hub.html?i=${s}`,"_blank");}} style={{width:34,height:34,borderRadius:8,background:C.inp,border:`1px solid ${C.brd}`,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",fontSize:14,color:C.mut}} title="Open scheduling hub">↗</button>
           <button onClick={()=>setShowSet(!showSet)} style={{width:34,height:34,borderRadius:8,background:C.inp,border:`1px solid ${C.brd}`,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",fontSize:14,color:C.mut}}>⚙️</button>
         </div>
       </div>
