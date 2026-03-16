@@ -220,6 +220,12 @@ serve(async (req) => {
         lines.push(`LOCATION:${escapeICS(siteAddr)}`);
       }
 
+      // Attach file URLs if present
+      const attachUrls = r.file_urls || [];
+      for (const url of attachUrls) {
+        if (url) lines.push(`ATTACH:${url}`);
+      }
+
       if (r.status === "scheduled" || r.status === "confirmed") {
         lines.push("CATEGORIES:Confirmed");
       } else {

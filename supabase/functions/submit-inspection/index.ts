@@ -155,6 +155,7 @@ serve(async (req) => {
     if (requesterName) insertData.requester_name = requesterName;
     if (requesterCompany) insertData.requester_company = requesterCompany;
     if (specialType) insertData.special_type = specialType;
+    if (fileUrls.length > 0) insertData.file_urls = fileUrls;
 
     const { data: inserted, error: insertError } = await supabase.from("inspection_requests").insert(insertData).select().single();
     if (insertError) {

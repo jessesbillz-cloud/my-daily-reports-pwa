@@ -216,6 +216,7 @@ details[open] .collapsible-summary::after { content: '−'; }
         <div style="font-size:12px;color:#4a4;margin-top:4px;">✓ New contacts are automatically saved for future use</div>
     </div>
 </details>
+<div id="submitWarning" style="display:none;color:#ef4444;font-size:13px;font-weight:600;margin-top:12px;padding:12px;background:#2a1515;border:1px solid #ef4444;border-radius:8px;text-align:center;"></div>
 <button onclick="submitIR()" id="submitBtn" class="submit-btn">Submit Scheduling Request</button>
 </div>
 <div class="success-view" id="successView" style="display:none; text-align:center; padding:60px 20px; color:#fff;">
@@ -572,6 +573,7 @@ function submitIR(){
     if(emails.length>0) fd.append('email_recipients',JSON.stringify(emails));
     var idnt=document.getElementById('iIdentifier').value.trim();
     if(idnt) fd.append('inspection_identifier',idnt);
+    document.getElementById('submitWarning').style.display='none';
     console.log('[submitIR] Submitting to', SB+'/functions/v1/submit-inspection', 'project:', PROJ);
     fetch(SB+'/functions/v1/submit-inspection',{method:'POST',headers:{'Authorization':'Bearer '+AK,'apikey':AK},body:fd})
     .then(function(r){
@@ -581,11 +583,10 @@ function submitIR(){
         console.log('[submitIR] Response data:', JSON.stringify(data));
         if(data.success){ document.getElementById('requestView').style.display='none'; document.getElementById('successView').style.display='block'; loadMD(); }
         else if(data._status===409){
-            var w=document.getElementById('dateWarning');
+            var w=document.getElementById('submitWarning');
             w.textContent='⚠️ Scheduling conflict: this time slot is already booked on '+d+'. Please select a different time or date.';
             w.style.display='block';
-            w.style.cssText='display:block;color:#ef4444;font-size:13px;font-weight:600;margin-bottom:12px;padding:12px;background:#2a1515;border:1px solid #ef4444;border-radius:8px;text-align:center;';
-            document.getElementById('iTime').focus();
+            w.scrollIntoView({behavior:'smooth',block:'center'});
             btn.disabled=false; btn.textContent='Submit Scheduling Request';
         }
         else { alert('Error: '+(data.error||'Unknown error')); btn.disabled=false; btn.textContent='Submit Scheduling Request'; }

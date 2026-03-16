@@ -16,6 +16,7 @@ ALTER TABLE inspection_requests ADD COLUMN IF NOT EXISTS email_recipients JSONB 
 ALTER TABLE inspection_requests ADD COLUMN IF NOT EXISTS requested_date DATE;
 ALTER TABLE inspection_requests ADD COLUMN IF NOT EXISTS cancelled_by TEXT;
 ALTER TABLE inspection_requests ADD COLUMN IF NOT EXISTS cancel_reason TEXT;
+ALTER TABLE inspection_requests ADD COLUMN IF NOT EXISTS file_urls JSONB DEFAULT '[]';
 
 -- 3. profiles: add push_subscription column for Web Push notifications
 ALTER TABLE profiles ADD COLUMN IF NOT EXISTS push_subscription JSONB;

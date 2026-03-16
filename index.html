@@ -3011,7 +3011,7 @@ function WorkLogEditor({job, user, onBack, reportDate}){
       const rawLines=text.split("\n").filter(l=>l.trim());
       const fontSize=11;
       const lineHeight=16; // spacing within a wrapped bullet
-      const bulletGap=10; // extra space between separate bullets
+      const bulletGap=18; // double-space between separate bullets
       const bulletChar="•";
       const bulletIndent=24; // left indent for bullet character
       const textIndent=36; // left indent for text (after bullet)
@@ -4280,10 +4280,11 @@ function ReportEditor({job, user, onBack, reportDate}){
             if(pair.length===1){
               drawPhoto(ctx,pair[0],(pgW-Math.min(bodyW,380*scale))/2,60*scale,Math.min(bodyW,380*scale),usableHP-20*scale);
             }else{
-              // Always stacked vertically — 2 rows
-              const rowH=(usableHP-20*scale-12*scale)/2;
-              pair.forEach((p,r)=>{
-                drawPhoto(ctx,p,(pgW-bodyW)/2,60*scale+r*(rowH+12*scale),bodyW,rowH);
+              // Side-by-side — 2 columns
+              const colGap=12*scale;
+              const colW=(bodyW-colGap)/2;
+              pair.forEach((p,c)=>{
+                drawPhoto(ctx,p,36*scale+c*(colW+colGap),60*scale,colW,usableHP-20*scale);
               });
             }
             previewPages.push(cvs.toDataURL("image/jpeg",0.92));cvs.width=0;cvs.height=0;
@@ -4800,17 +4801,22 @@ function ReportEditor({job, user, onBack, reportDate}){
               else{imgH=Math.min(maxH,maxW/ratio);imgW=imgH*ratio;}
               pg.drawImage(img,{x:(pageW-imgW)/2,y:photoAreaTop-10-imgH+(usableH-20-imgH)/2,width:imgW,height:imgH});
             }else{
-              // Always stacked vertically — 2 rows, centered
-              const rowH=(usableH-20-12)/2;
-              pair.forEach((p,r)=>{
-                const {img,ratio}=p;
+              // Side-by-side — 2 columns
+              const colGap=12;
+              const colW=(bodyW-colGap)/2;
+              const maxH=usableH-20;
+              pair.forEach((p,c)=>{
+                const {img,ratio,caption}=p;
+                const capH=caption?captionSize+8:0;
                 let imgW,imgH;
-                if(ratio>=1){imgW=Math.min(bodyW,rowH*ratio);imgH=imgW/ratio;}
-                else{imgH=Math.min(rowH,bodyW/ratio);imgW=imgH*ratio;}
-                const rowTop=photoAreaTop-10-(r*(rowH+12));
-                const xPos=(pageW-imgW)/2;
-                const yPos=rowTop-imgH+(rowH-imgH)/2;
+                if(ratio>=1){imgW=Math.min(colW,maxH*ratio);imgH=imgW/ratio;}
+                else{imgH=Math.min(maxH-capH,(colW)/ratio);imgW=imgH*ratio;}
+                if(imgW>colW){imgH=imgH*(colW/imgW);imgW=colW;}
+                if(imgH>maxH-capH){imgW=imgW*((maxH-capH)/imgH);imgH=maxH-capH;}
+                const xPos=36+c*(colW+colGap)+(colW-imgW)/2;
+                const yPos=photoAreaTop-10-imgH+(maxH-capH-imgH)/2+capH;
                 pg.drawImage(img,{x:xPos,y:Math.max(yPos,photoAreaBottom),width:imgW,height:imgH});
+                drawCaption(pg,caption,xPos,Math.max(yPos,photoAreaBottom),imgW);
               });
             }
             i+=pair.length;
@@ -4941,10 +4947,10 @@ function ReportEditor({job, user, onBack, reportDate}){
       });
 
       const userName=user.user_metadata?.full_name||user.email?.split("@")[0]||"Inspector";
-      const photoNote=photos.length>0?`<p style="color:#555;font-size:14px;margin:12px 0 0;">${photos.length} site photo${photos.length>1?"s":""} included in the attached PDF.</p>`:"";
-      const fieldSummary=editFields.filter(f=>vals[f.name]).map(f=>`<tr><td style="padding:4px 12px 4px 0;color:#888;font-size:13px;white-space:nowrap;">${f.name}</td><td style="padding:4px 0;color:#333;font-size:13px;">${vals[f.name]}</td></tr>`).join("");
-      const summaryTable=fieldSummary?`<table style="margin:16px 0;border-collapse:collapse;">${fieldSummary}</table>`:"";
-      const emailHtml=`<div style="font-family:-apple-system,sans-serif;max-width:600px;margin:0 auto;"><div style="background:#e8742a;padding:20px 24px;border-radius:8px 8px 0 0;"><h1 style="color:#fff;margin:0;font-size:20px;">My Daily Reports</h1></div><div style="background:#f9f9f9;padding:24px;border:1px solid #e0e0e0;border-top:none;border-radius:0 0 8px 8px;"><p style="color:#333;font-size:16px;line-height:1.6;margin:0 0 8px;">Hi,</p><p style="color:#333;font-size:15px;line-height:1.6;margin:0 0 16px;">${userName} has submitted the daily field report for <strong>${job.name}</strong> on ${todayDisplay}.</p>${summaryTable}<p style="color:#555;font-size:14px;margin:16px 0 0;">The full PDF report is attached to this email.${photoNote?"":" No site photos were included."}</p>${photoNote}</div><p style="color:#999;font-size:11px;text-align:center;margin-top:16px;">Sent via My Daily Reports &bull; mydailyreports.com</p></div>`;
+      // Build optional photo thumbnails for email
+      const photoThumbs=photos.length>0?photos.slice(0,6).map(p=>{const src=typeof p==="string"?p:(p.dataUrl||p.url||"");return src?`<img src="${src}" style="width:80px;height:80px;object-fit:cover;border-radius:6px;border:1px solid #ddd;" alt="Site photo"/>`:"";}).filter(Boolean).join(""):"";
+      const photoSection=photoThumbs?`<div style="margin-top:16px;"><p style="color:#888;font-size:12px;margin:0 0 8px;">Site Photos (${photos.length}):</p><div style="display:flex;flex-wrap:wrap;gap:8px;">${photoThumbs}</div></div>`:"";
+      const emailHtml=`<div style="font-family:-apple-system,sans-serif;max-width:600px;margin:0 auto;"><div style="background:#e8742a;padding:20px 24px;border-radius:8px 8px 0 0;"><h1 style="color:#fff;margin:0;font-size:20px;">My Daily Reports</h1></div><div style="background:#f9f9f9;padding:24px;border:1px solid #e0e0e0;border-top:none;border-radius:0 0 8px 8px;"><p style="color:#333;font-size:16px;line-height:1.6;margin:0 0 8px;">Hi,</p><p style="color:#333;font-size:15px;line-height:1.6;margin:0 0 16px;">${userName} has submitted the daily field report for <strong>${job.name}</strong> on ${todayDisplay}.</p><p style="color:#555;font-size:14px;margin:0;">The full PDF report is attached to this email.</p>${photoSection}</div><p style="color:#999;font-size:11px;text-align:center;margin-top:16px;">Sent via My Daily Reports &bull; mydailyreports.org</p></div>`;
 
       // Store PDF info and show post-submit options instead of auto-emailing
       const rawTeam=job.team_emails||[];
