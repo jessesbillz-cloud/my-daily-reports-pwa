@@ -2191,8 +2191,8 @@ function CreateJob({user, onBack, onCreated}){
           )}
         </div>
 
-        {/* Job Logo (Optional) */}
-        <div style={{marginBottom:20}}>
+        {/* Job Logo (Optional) — only for work logs */}
+        {jobType==="worklog"&&(<div style={{marginBottom:20}}>
           <label style={ls}>Report Logo (Optional)</label>
           <input ref={jobLogoRef} type="file" accept="image/*" style={{display:"none"}} onChange={e=>{const f=e.target.files?.[0];if(!f)return;if(f.size>2*1024*1024){setErr("Logo must be under 2MB");return;}if(!f.type.startsWith("image/")){setErr("Logo must be an image");return;}setJobLogoFile(f);const r=new FileReader();r.onload=()=>setJobLogoPreview(r.result);r.readAsDataURL(f);}}/>
           {jobLogoPreview?(
@@ -2204,7 +2204,7 @@ function CreateJob({user, onBack, onCreated}){
             <button onClick={()=>jobLogoRef.current?.click()} style={{padding:"10px 16px",background:C.inp,border:`1px solid ${C.brd}`,borderRadius:8,color:C.lt,fontSize:13,cursor:"pointer"}}>Upload Logo</button>
           )}
           <div style={{fontSize:11,color:C.mut,marginTop:4}}>Logo shown on your reports. Uses your company logo if not set.</div>
-        </div>
+        </div>)}
 
         {/* Job Type Toggle */}
         <div style={{marginBottom:20}}>
@@ -2291,13 +2291,6 @@ function CreateJob({user, onBack, onCreated}){
               <p style={{color:C.mut,fontSize:12}}>{usedSavedId?"Fields already loaded from saved template":"or tap to browse • PDF only"}</p>
               {!usedSavedId&&<p style={{color:C.mut,fontSize:11,marginTop:8,lineHeight:1.4,fontStyle:"italic"}}>Tip: Download the file to your phone first, then upload from your files.</p>}
               <input id="fi" type="file" accept=".pdf" style={{display:"none"}} onChange={e=>e.target.files[0]&&(usedSavedId?doFileWithSaved:doFile)(e.target.files[0])}/>
-            </div>
-          )}
-          {!tf&&!usedSavedId&&(
-            <div style={{background:"rgba(90,143,192,0.08)",border:`1px solid rgba(90,143,192,0.2)`,borderRadius:10,padding:"12px 14px",marginTop:10}}>
-              <div style={{fontSize:13,fontWeight:600,color:C.blu,marginBottom:4}}>Don't have a template yet?</div>
-              <p style={{fontSize:12,color:C.lt,lineHeight:1.5,margin:0}}>Use any AI (ChatGPT, Gemini, etc.) and ask it: <em style={{color:C.org}}>"Create a fillable PDF daily report template for construction inspection. Include Date, Project Name, Inspector, Report Number, Weather, Notes, and Signature. Single page, 8.5x11."</em> Then upload the PDF it gives you.</p>
-              <p style={{fontSize:11,color:C.mut,marginTop:6,margin:0}}>Or email support@mydailyreports.org and we'll help.</p>
             </div>
           )}
           {tf&&(
