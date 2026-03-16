@@ -434,7 +434,7 @@ var calFeedURL=inspSlug
     ? SB+'/functions/v1/calendar-feed?slug='+encodeURIComponent(inspSlug)
     : SB+'/functions/v1/calendar-feed?project='+encodeURIComponent(PROJ);
 function updateCalFeedURL(){
-    if(OWNER_USER_ID) calFeedURL=SB+'/functions/v1/calendar-feed?user_id='+OWNER_USER_ID;
+    // slug-based URL is already set above
 }
 function copyCalendarURL(){ navigator.clipboard.writeText(calFeedURL); document.getElementById('copyBtn').textContent='✅ URL Copied!'; }
 function switchTab(t){

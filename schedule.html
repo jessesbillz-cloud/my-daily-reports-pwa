@@ -428,11 +428,7 @@ fetch(SB+'/functions/v1/update-inspection',{method:'POST',headers:{'Authorizatio
 var calFeedURL=inspSlug
     ? SB+'/functions/v1/calendar-feed?slug='+encodeURIComponent(inspSlug)
     : SB+'/functions/v1/calendar-feed?project='+encodeURIComponent(PROJ);
-// Update displayed URL once we have user_id (prefer user_id for a stable subscription URL)
 function updateCalFeedURL(){
-    if(OWNER_USER_ID){
-        calFeedURL=SB+'/functions/v1/calendar-feed?user_id='+OWNER_USER_ID;
-    }
     var el=document.getElementById('calURLText');if(el)el.textContent=calFeedURL;
 }
 setTimeout(updateCalFeedURL,200);
