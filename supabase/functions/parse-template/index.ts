@@ -218,6 +218,15 @@ serve(async (req) => {
     const body = await req.json();
     const { text_items, file_name, docx_base64 } = body;
 
+    // Reject oversized DOCX payloads before processing (~10MB raw = ~13.3MB base64)
+    const MAX_DOCX_B64_LENGTH = 13.3 * 1024 * 1024;
+    if (docx_base64 && docx_base64.length > MAX_DOCX_B64_LENGTH) {
+      return new Response(
+        JSON.stringify({ error: "Document too large. Maximum size is 10MB." }),
+        { status: 413, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
     // Two paths: PDF sends text_items, DOCX sends docx_base64
     let resolvedItems = text_items;
     let fileType = "pdf";
@@ -586,6 +595,7 @@ serve(async (req) => {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (error) {
+    console.error("[parse-template] Uncaught error:", error.message, error.stack);
     return new Response(JSON.stringify({ error: error.message }), {
       status: 500,
       headers: { ...corsHeaders, "Content-Type": "application/json" },

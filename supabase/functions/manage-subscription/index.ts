@@ -20,8 +20,17 @@ serve(async (req) => {
     const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const supabase = createClient(supabaseUrl, supabaseKey);
 
-    const { user_id, action } = await req.json();
-    if (!user_id || !action) throw new Error("Missing user_id or action");
+    // Verify the caller's identity via JWT instead of trusting user_id from body
+    const authHeader = req.headers.get("Authorization");
+    if (!authHeader) throw new Error("Missing Authorization header");
+    const { data: { user: authUser }, error: authError } = await supabase.auth.getUser(
+      authHeader.replace("Bearer ", "")
+    );
+    if (authError || !authUser) throw new Error("Unauthorized");
+
+    const { action } = await req.json();
+    if (!action) throw new Error("Missing action");
+    const user_id = authUser.id;
 
     // Get user's Stripe customer ID
     const { data: profile } = await supabase
@@ -78,6 +87,7 @@ serve(async (req) => {
 
     throw new Error(`Unknown action: ${action}`);
   } catch (error) {
+    console.error("[manage-subscription] Error:", error.message);
     return new Response(
       JSON.stringify({ success: false, error: error.message }),
       {

@@ -43,18 +43,38 @@ serve(async (req) => {
     const flexibleDisplay = inspectionTime === "flexible" ? "flexible" : "";
     const actualTime = inspectionTime === "flexible" ? "08:00" : inspectionTime;
 
-    // Upload files
+    // Upload files — with server-side size and type validation
+    const ALLOWED_TYPES = new Set([
+      "application/pdf", "image/jpeg", "image/png", "image/webp", "image/heic", "image/heif",
+    ]);
+    const MAX_FILE_SIZE = 25 * 1024 * 1024; // 25MB for PDFs
+    const MAX_IMAGE_SIZE = 10 * 1024 * 1024; // 10MB for images
+
     const fileUrls: string[] = [];
     const fileKeys = [...formData.keys()].filter((k) => k.startsWith("file_"));
     for (const key of fileKeys) {
       const file = formData.get(key) as File;
       if (!file || !file.name) continue;
+
+      // Validate file type
+      if (!ALLOWED_TYPES.has(file.type)) {
+        console.warn(`[submit-inspection] Rejected file type: ${file.type} for ${file.name}`);
+        continue;
+      }
+
+      // Validate file size
+      const maxSize = file.type === "application/pdf" ? MAX_FILE_SIZE : MAX_IMAGE_SIZE;
+      if (file.size > maxSize) {
+        console.warn(`[submit-inspection] Rejected oversized file: ${file.name} (${(file.size / 1024 / 1024).toFixed(1)}MB)`);
+        continue;
+      }
+
       const timestamp = Date.now();
       const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
       const storagePath = `${project}/${timestamp}_${safeName}`;
       const arrayBuffer = await file.arrayBuffer();
       const { error: uploadError } = await supabase.storage.from("scheduling-attachments").upload(storagePath, arrayBuffer, { contentType: file.type, upsert: false });
-      if (uploadError) { console.error(`Upload error for ${file.name}:`, uploadError.message); continue; }
+      if (uploadError) { console.error(`[submit-inspection] Upload error for ${file.name}:`, uploadError.message); continue; }
       const { data: { publicUrl } } = supabase.storage.from("scheduling-attachments").getPublicUrl(storagePath);
       fileUrls.push(publicUrl);
     }

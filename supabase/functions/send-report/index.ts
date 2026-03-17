@@ -16,6 +16,16 @@ serve(async (req) => {
     const { to, subject, body, html_body, pdf_base64, pdf_filename, sender_name } = await req.json();
     console.log("[send-report] Recipients:", JSON.stringify(to), "Subject:", subject?.slice(0, 60), "Has PDF:", !!pdf_base64, "PDF size:", pdf_base64?.length || 0);
 
+    // Reject oversized PDF attachments before they hit Resend (~10MB raw = ~13.3MB base64)
+    const MAX_PDF_B64_LENGTH = 13.3 * 1024 * 1024;
+    if (pdf_base64 && pdf_base64.length > MAX_PDF_B64_LENGTH) {
+      console.error("[send-report] PDF attachment too large:", pdf_base64.length);
+      return new Response(
+        JSON.stringify({ error: "PDF attachment too large. Maximum size is 10MB." }),
+        { status: 413, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
     if (!to || !to.length) {
       console.error("[send-report] No recipients provided");
       return new Response(JSON.stringify({ error: "No recipients" }), {

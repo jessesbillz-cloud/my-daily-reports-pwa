@@ -28,12 +28,27 @@ serve(async (req) => {
       );
     }
 
+    // Strip Data URL prefix if present (e.g. "data:image/jpeg;base64,...")
+    // This is common when the frontend sends a FileReader result directly
+    const base64Data = image_base64.includes(",")
+      ? image_base64.split(",")[1]
+      : image_base64;
+
+    // Reject oversized images before they hit the API (~5MB base64 ≈ ~3.75MB raw)
+    const MAX_IMAGE_B64_LENGTH = 7 * 1024 * 1024; // ~5MB raw
+    if (base64Data.length > MAX_IMAGE_B64_LENGTH) {
+      return new Response(
+        JSON.stringify({ error: "Image too large. Please use an image under 5MB." }),
+        { status: 413, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
     // Detect media type from base64 header or default to jpeg
     let mediaType = "image/jpeg";
-    if (image_base64.startsWith("/9j/")) mediaType = "image/jpeg";
-    else if (image_base64.startsWith("iVBOR")) mediaType = "image/png";
-    else if (image_base64.startsWith("R0lG")) mediaType = "image/gif";
-    else if (image_base64.startsWith("UklG")) mediaType = "image/webp";
+    if (base64Data.startsWith("/9j/")) mediaType = "image/jpeg";
+    else if (base64Data.startsWith("iVBOR")) mediaType = "image/png";
+    else if (base64Data.startsWith("R0lG")) mediaType = "image/gif";
+    else if (base64Data.startsWith("UklG")) mediaType = "image/webp";
 
     const systemPrompt = `You write photo descriptions for construction daily reports. Technical language only. 1-2 sentences max.
 
@@ -49,7 +64,7 @@ Rules:
       ? `Describe this photo for a daily report. Context: ${context}`
       : "Describe this photo for a professional daily report.";
 
-    console.log("[describe-photo] Calling Claude API, image size:", image_base64.length, "context:", context?.slice(0, 80));
+    console.log("[describe-photo] Calling Claude API, image size:", base64Data.length, "context:", context?.slice(0, 80));
 
     const apiBody = JSON.stringify({
       model: "claude-haiku-4-5-20251001",
@@ -64,7 +79,7 @@ Rules:
               source: {
                 type: "base64",
                 media_type: mediaType,
-                data: image_base64,
+                data: base64Data,
               },
             },
             {

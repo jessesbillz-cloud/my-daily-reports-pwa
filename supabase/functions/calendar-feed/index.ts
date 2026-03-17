@@ -15,6 +15,20 @@ function escapeICS(text: string): string {
     .replace(/\n/g, "\\n");
 }
 
+// RFC 5545 requires lines to be no longer than 75 octets.
+// Fold long lines to prevent breaking Outlook / old Apple Calendar.
+function foldLine(line: string): string {
+  if (line.length <= 75) return line;
+  const parts: string[] = [];
+  parts.push(line.substring(0, 75));
+  let rest = line.substring(75);
+  while (rest.length > 0) {
+    parts.push(" " + rest.substring(0, 74));
+    rest = rest.substring(74);
+  }
+  return parts.join("\r\n");
+}
+
 function formatICSDate(dateStr: string, timeStr?: string): string {
   const d = dateStr.replace(/-/g, "");
   if (timeStr) {
@@ -39,6 +53,7 @@ serve(async (req) => {
     const userId = url.searchParams.get("user_id");
     const slug = url.searchParams.get("slug");
     const project = url.searchParams.get("project");
+    const token = url.searchParams.get("token");
 
     if (!userId && !slug && !project) {
       return new Response("Missing user_id, slug, or project parameter", {
@@ -50,6 +65,30 @@ serve(async (req) => {
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const supabase = createClient(supabaseUrl, supabaseKey);
+
+    // Token-based security: if the profile has a calendar_token set,
+    // require it as a query parameter to prevent unauthorized access
+    const lookupId = userId || null;
+    if (lookupId || slug) {
+      let profileId = lookupId;
+      if (slug && !profileId) {
+        const { data: p } = await supabase.from("profiles").select("id").eq("slug", slug).single();
+        if (p) profileId = p.id;
+      }
+      if (profileId) {
+        const { data: tokenCheck } = await supabase
+          .from("profiles")
+          .select("calendar_token")
+          .eq("id", profileId)
+          .single();
+        if (tokenCheck?.calendar_token && tokenCheck.calendar_token !== token) {
+          return new Response("Unauthorized — invalid or missing calendar token", {
+            status: 401,
+            headers: corsHeaders,
+          });
+        }
+      }
+    }
 
     let calendarName = "My Daily Reports";
     let requests: any[] = [];
@@ -199,7 +238,7 @@ serve(async (req) => {
         lines.push(`DTEND;VALUE=DATE:${formatICSDate(nd)}`);
       }
 
-      lines.push(`SUMMARY:${escapeICS(statusEmoji + summary)}`);
+      lines.push(foldLine(`SUMMARY:${escapeICS(statusEmoji + summary)}`));
 
       const descParts: string[] = [];
       if (r.inspection_identifier)
@@ -214,16 +253,16 @@ serve(async (req) => {
       descParts.push(`Duration: ${duration} min`);
       if (isFlexible) descParts.push("Time: Flexible — anytime today");
       if (r.notes) descParts.push(`Notes: ${r.notes}`);
-      lines.push(`DESCRIPTION:${escapeICS(descParts.join("\n"))}`);
+      lines.push(foldLine(`DESCRIPTION:${escapeICS(descParts.join("\n"))}`));
 
       if (siteAddr) {
-        lines.push(`LOCATION:${escapeICS(siteAddr)}`);
+        lines.push(foldLine(`LOCATION:${escapeICS(siteAddr)}`));
       }
 
       // Attach file URLs if present
       const attachUrls = r.file_urls || [];
       for (const url of attachUrls) {
-        if (url) lines.push(`ATTACH:${url}`);
+        if (url) lines.push(foldLine(`ATTACH:${url}`));
       }
 
       if (r.status === "scheduled" || r.status === "confirmed") {

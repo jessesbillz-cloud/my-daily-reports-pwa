@@ -17,6 +17,24 @@ serve(async (req) => {
     const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const supabase = createClient(supabaseUrl, supabaseKey);
 
+    // Verify the caller's identity via JWT
+    const authHeader = req.headers.get("Authorization");
+    if (!authHeader) {
+      return new Response(
+        JSON.stringify({ success: false, error: "Missing Authorization header" }),
+        { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+    const { data: { user: authUser }, error: authError } = await supabase.auth.getUser(
+      authHeader.replace("Bearer ", "")
+    );
+    if (authError || !authUser) {
+      return new Response(
+        JSON.stringify({ success: false, error: "Unauthorized" }),
+        { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
     const body = await req.json();
     const { request_id, action, action_by, reason, new_date, new_time, new_duration, new_notes } = body;
 
@@ -74,7 +92,7 @@ serve(async (req) => {
         const { data: authUser } = await supabase.auth.admin.getUserById(lookupId);
         if (authUser?.user?.email) ownerEmail = authUser.user.email;
       } catch (e) {
-        console.error("Owner lookup failed:", e);
+        console.error("[update-inspection] Owner lookup failed for request_id:", request_id, e);
       }
     }
 
@@ -100,7 +118,7 @@ serve(async (req) => {
           if (authUser?.user?.email) ownerEmail = authUser.user.email;
         }
       } catch (e) {
-        console.error("Fallback owner lookup failed:", e);
+        console.error("[update-inspection] Fallback owner lookup failed for request_id:", request_id, e);
       }
     }
 
@@ -341,6 +359,7 @@ serve(async (req) => {
       );
     }
   } catch (error) {
+    console.error("[update-inspection] Uncaught error:", error.message, error.stack);
     return new Response(
       JSON.stringify({ success: false, error: error.message }),
       {

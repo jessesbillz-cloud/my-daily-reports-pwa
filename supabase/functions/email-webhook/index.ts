@@ -106,13 +106,31 @@ serve(async (req) => {
       });
     }
 
-    console.log("[email-webhook] Event:", eventType, "Email ID:", data.email_id || data.id);
+    const resendEmailId = data.email_id || data.id || null;
+    console.log("[email-webhook] Event:", eventType, "Email ID:", resendEmailId);
 
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
 
+    // Replay protection: check if we've already processed this exact event
+    if (resendEmailId) {
+      const { data: existingEvent } = await supabase
+        .from("email_events")
+        .select("id")
+        .eq("resend_email_id", resendEmailId)
+        .eq("event_type", eventType)
+        .maybeSingle();
+
+      if (existingEvent) {
+        console.log("[email-webhook] Duplicate event skipped:", eventType, resendEmailId);
+        return new Response(JSON.stringify({ received: true, duplicate: true }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+    }
+
     // Log every event
     await supabase.from("email_events").insert({
-      resend_email_id: data.email_id || data.id || null,
+      resend_email_id: resendEmailId,
       event_type: eventType,
       to_email: Array.isArray(data.to) ? data.to[0] : data.to || null,
       from_email: data.from || null,
@@ -124,13 +142,13 @@ serve(async (req) => {
 
     // On bounce or complaint, flag the email address
     if (eventType === "email.bounced" || eventType === "email.complained") {
-      const badEmail = Array.isArray(data.to) ? data.to[0] : data.to;
+      const badEmail = (Array.isArray(data.to) ? data.to[0] : data.to) || data.recipient || data.email;
       if (badEmail) {
         const normalized = badEmail.toLowerCase().trim();
         const reason = eventType === "email.bounced" ? "bounce" : "complaint";
         const bounceType = data.bounce?.type || data.complaint?.type || null;
 
-        // Upsert into suppression list
+        // Upsert into suppression list — this creates or updates the record
         await supabase.from("email_suppressions").upsert(
           {
             email: normalized,
@@ -143,18 +161,20 @@ serve(async (req) => {
           { onConflict: "email" }
         );
 
-        // Increment count for existing records
-        const { data: existing } = await supabase
-          .from("email_suppressions")
-          .select("event_count")
-          .eq("email", normalized)
-          .single();
+        // Atomic increment via RPC to avoid race conditions on concurrent webhooks
+        // Falls back to manual increment if the RPC doesn't exist yet
+        const { error: rpcError } = await supabase.rpc("increment_suppression_count", {
+          p_email: normalized,
+          p_reason: reason,
+          p_bounce_type: bounceType || "unknown",
+        });
 
-        if (existing && existing.event_count > 0) {
+        if (rpcError) {
+          // Fallback: direct update (still better than read-then-write)
+          console.warn("[email-webhook] RPC increment_suppression_count not available, using direct update:", rpcError.message);
           await supabase
             .from("email_suppressions")
             .update({
-              event_count: existing.event_count + 1,
               last_event_at: new Date().toISOString(),
               reason,
               bounce_type: bounceType,
@@ -162,7 +182,7 @@ serve(async (req) => {
             .eq("email", normalized);
         }
 
-        console.warn(`Email ${eventType}: ${normalized} — ${bounceType || "unknown"}`);
+        console.warn(`[email-webhook] ${eventType}: ${normalized} — ${bounceType || "unknown"}`);
       }
     }
 
@@ -170,7 +190,7 @@ serve(async (req) => {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (error) {
-    console.error("Webhook error:", error);
+    console.error("[email-webhook] Uncaught error:", error.message, error.stack);
     return new Response(JSON.stringify({ error: error.message }), {
       status: 500,
       headers: { ...corsHeaders, "Content-Type": "application/json" },

@@ -36,11 +36,13 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.9/babel.min.js"></script>
-<!-- pdf-lib for PDF generation, pdf.js for text extraction -->
-<script src="https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/mammoth@1.6.0/mammoth.browser.min.js"></script>
-<script>if(window.pdfjsLib){window.pdfjsLib.GlobalWorkerOptions.workerSrc="";window.pdfjsLib.GlobalWorkerOptions.workerPort=null;window.pdfjsLib.disableWorker=true;}</script>
+<!-- pdf-lib, pdf.js, mammoth: lazy-loaded on first use (saves ~250KB initial load) -->
+<script>
+function loadScript(src){return new Promise((res,rej)=>{const s=document.createElement("script");s.src=src;s.onload=res;s.onerror=rej;document.head.appendChild(s);})}
+async function ensurePdfLib(){if(!window.PDFLib){await loadScript("https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js");}return window.PDFLib;}
+async function ensurePdfJs(){if(!window.pdfjsLib){await loadScript("https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js");window.pdfjsLib.GlobalWorkerOptions.workerSrc="";window.pdfjsLib.GlobalWorkerOptions.workerPort=null;window.pdfjsLib.disableWorker=true;}return window.pdfjsLib;}
+async function ensureMammoth(){if(!window.mammoth){await loadScript("https://cdn.jsdelivr.net/npm/mammoth@1.6.0/mammoth.browser.min.js");}return window.mammoth;}
+</script>
 <script type="text/babel">
 const { useState, useEffect, useRef, useCallback, useMemo } = React;
 const SB_URL = "https://wluvkmpncafugdbunlkw.supabase.co";
@@ -51,6 +53,7 @@ let AUTH_TOKEN = null;
 // Extract real text positions from PDF using pdf.js getTextContent()
 // Returns array of {str, x, y, w, h, page, fontSize} in top-left origin coordinates
 async function extractPdfTextStructure(pdfData){
+  await ensurePdfJs();
   if(!window.pdfjsLib)throw new Error("pdf.js not loaded");
   // Always work on a copy so the caller's buffer isn't detached
   const safeCopy=new Uint8Array(pdfData instanceof ArrayBuffer?new Uint8Array(pdfData):pdfData);
@@ -98,6 +101,7 @@ async function extractPdfTextStructure(pdfData){
 
 // ── Read AcroForm fields from fillable PDFs (client-side with pdf-lib) ──
 async function readAcroFormFields(pdfData){
+  await ensurePdfLib();
   if(!window.PDFLib)throw new Error("pdf-lib not loaded");
   const bytes=pdfData instanceof ArrayBuffer?new Uint8Array(pdfData):pdfData;
   const pdfDoc=await PDFLib.PDFDocument.load(bytes,{ignoreEncryption:true});
@@ -1369,9 +1373,10 @@ function TemplateFieldEditor({pdfBase64,initialFields,onDone,onCancel}){
 
   // Load PDF
   useEffect(()=>{
-    if(!pdfBase64||!window.pdfjsLib)return;
+    if(!pdfBase64)return;
     (async()=>{
       try{
+        await ensurePdfJs();
         const raw=atob(pdfBase64);const u8=new Uint8Array(raw.length);
         for(let i=0;i<raw.length;i++)u8[i]=raw.charCodeAt(i);
         const doc=await window.pdfjsLib.getDocument({data:u8}).promise;
@@ -2087,8 +2092,9 @@ function CreateJob({user, onBack, onCreated}){
           const tplData={user_id:user.id,job_id:job.id,name:tf.name,original_filename:tf.name,file_type:ext,storage_path:sp,field_config:fields.length?fields:[]};
           await db.mkTpl(tplData);
           // Render PDF pages to images for preview cache — fire-and-forget (don't block job creation)
-          if(ext==="pdf"&&window.pdfjsLib){
+          if(ext==="pdf"){
             (async()=>{try{
+              await ensurePdfJs();
               const renderBuf=fileBuf.slice(0);
               const pjDoc=await window.pdfjsLib.getDocument({data:renderBuf}).promise;
               const imgs=[];
@@ -3364,6 +3370,7 @@ function WorkLogEditor({job, user, onBack, reportDate}){
     setViewLoading(true);
     try{
       const pdfBytes=await generateWorkLogPdf();
+      await ensurePdfJs();
       if(!window.pdfjsLib)throw new Error("PDF viewer not loaded.");
       const pjDoc=await window.pdfjsLib.getDocument({data:pdfBytes}).promise;
       const pages=[];
@@ -4455,6 +4462,7 @@ function ReportEditor({job, user, onBack, reportDate}){
         if(genData.error)throw new Error(genData.error);
         // Decode filled DOCX and render with mammoth for preview
         const filledBytes=Uint8Array.from(atob(genData.docx_base64),c=>c.charCodeAt(0));
+        await ensureMammoth();
         if(window.mammoth){
           const result=await window.mammoth.convertToHtml({arrayBuffer:filledBytes.buffer});
           setViewDocxHtml(result.value);
@@ -4471,6 +4479,7 @@ function ReportEditor({job, user, onBack, reportDate}){
       if(!headerStr.startsWith("%PDF")){
         throw new Error("Template file is not a valid PDF. Please re-upload a PDF template.");
       }
+      await ensurePdfJs();
       if(!window.pdfjsLib)throw new Error("PDF viewer not loaded.");
       const allFields=buildEditableFields();
       const pjDoc=await window.pdfjsLib.getDocument({data:tplBytes}).promise;

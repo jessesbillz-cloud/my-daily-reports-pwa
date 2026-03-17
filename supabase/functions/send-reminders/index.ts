@@ -34,7 +34,7 @@ serve(async (req) => {
     // 1. Get all jobs with reminders enabled
     const { data: jobs, error: jobsErr } = await supabase
       .from("jobs")
-      .select("id, user_id, name, schedule, schedule_days, reminder_enabled, reminder_time, reminder_hours_before")
+      .select("id, user_id, name, schedule, schedule_days, reminder_enabled, reminder_time, reminder_hours_before, last_reminder_sent_at")
       .eq("reminder_enabled", true)
       .eq("is_archived", false);
 
@@ -75,8 +75,13 @@ serve(async (req) => {
           const nowMinutes = now.getHours() * 60 + now.getMinutes();
 
           // Send if we're in the reminder window (between reminder time and deadline)
+          // AND we haven't already sent a reminder today (prevents duplicate notifications)
           if (nowMinutes >= reminderMinutes && nowMinutes <= deadlineMinutes) {
-            dueJobs.push(job);
+            const lastSent = job.last_reminder_sent_at ? new Date(job.last_reminder_sent_at) : null;
+            const alreadySentToday = lastSent && lastSent.toISOString().split("T")[0] === todayISO;
+            if (!alreadySentToday) {
+              dueJobs.push(job);
+            }
           }
         }
       }
@@ -124,11 +129,11 @@ serve(async (req) => {
 
     let sentCount = 0;
 
-    // 5. Check dedup — don't send the same reminder twice in one window
-    // Use a simple table or just rely on ntfy's idempotency tag
-    for (const profile of (profiles || [])) {
+    // 5. Send notifications in parallel using Promise.allSettled
+    // One failure doesn't block the rest
+    const sendResults = await Promise.allSettled((profiles || []).map(async (profile) => {
       const jobs = userJobs[profile.id];
-      if (!jobs || jobs.length === 0) continue;
+      if (!jobs || jobs.length === 0) return;
 
       const jobNames = jobs.map(j => j.name).join(", ");
       const title = "Report Reminder";
@@ -169,6 +174,20 @@ serve(async (req) => {
           console.error("Web push failed for", profile.id, e);
         }
       }
+
+      // Mark these jobs as reminded today to prevent duplicate notifications
+      const jobIdsForUser = jobs.map(j => j.id);
+      for (const jobId of jobIdsForUser) {
+        await supabase
+          .from("jobs")
+          .update({ last_reminder_sent_at: new Date().toISOString() })
+          .eq("id", jobId);
+      }
+    }));
+
+    // Log any failures
+    for (const r of sendResults) {
+      if (r.status === "rejected") console.error("[send-reminders] Notification batch error:", r.reason);
     }
 
     return new Response(JSON.stringify({ sent: sentCount, checked: needsReminder.length }), {
