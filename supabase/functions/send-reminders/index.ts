@@ -1,21 +1,14 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
-/**
- * send-reminders — Runs on a cron schedule (e.g., every 30 min).
- * Checks all jobs with reminder_enabled=true, determines if today is a
- * scheduled report day, and sends ntfy push notifications to users who
- * haven't submitted their report yet.
- *
- * Deploy: supabase functions deploy send-reminders --no-verify-jwt
- * Cron:   Set up via Supabase Dashboard > Database > Extensions > pg_cron
- *         SELECT cron.schedule('send-reminders', '*/30 * * * *',
- *           $$SELECT net.http_post(
- *             url := 'https://wluvkmpncafugdbunlkw.supabase.co/functions/v1/send-reminders',
- *             headers := '{"Authorization": "Bearer <service_role_key>"}'::jsonb
- *           )$$
- *         );
- */
+// send-reminders — Runs on a cron schedule (every 30 min).
+// Checks all jobs with reminder_enabled=true, determines if today is a
+// scheduled report day, and sends ntfy push notifications to users who
+// have not submitted their report yet.
+//
+// Deploy: supabase functions deploy send-reminders --no-verify-jwt
+// Cron: Set up via Supabase Dashboard > Database > pg_cron
+//   See README for cron.schedule SQL snippet.
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
