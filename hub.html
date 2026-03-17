@@ -42,6 +42,8 @@ body { font-family: 'Segoe UI', Roboto, -apple-system, sans-serif; background: #
 </div>
 
 <script>
+function esc(s){var d=document.createElement('div');d.textContent=s;return d.innerHTML;}
+
 var SB='https://wluvkmpncafugdbunlkw.supabase.co';
 var AK='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndsdXZrbXBuY2FmdWdkYnVubGt3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzIzMDU1MTUsImV4cCI6MjA4Nzg4MTUxNX0.HZpQ2xVGpf4EQ0BVDmIEuPqW5T_eNG5OqBNAqT03rH8';
 var hdrs={headers:{'apikey':AK,'Authorization':'Bearer '+AK}};
@@ -82,7 +84,7 @@ function renderHub(profile,jobs){
   var name=profile.full_name||'Inspector';
   var html='';
   html+='<div class="header">';
-  html+='<h1>'+name+'</h1>';
+  html+='<h1>'+esc(name)+'</h1>';
   html+='<p>Scheduling Request</p>';
   html+='</div>';
 
@@ -96,8 +98,8 @@ function renderHub(profile,jobs){
       var url='schedule.html?i='+encodeURIComponent(inspSlug)+'&project='+encodeURIComponent(projSlug)+'&job_id='+job.id+(isAdmin?'&admin=true':'');
       html+='<a href="'+url+'" class="project-btn">';
       html+='<div class="project-info">';
-      html+='<span class="project-name">'+job.name+'</span>';
-      if(job.site_address) html+='<span class="project-location">'+job.site_address+'</span>';
+      html+='<span class="project-name">'+esc(job.name)+'</span>';
+      if(job.site_address) html+='<span class="project-location">'+esc(job.site_address)+'</span>';
       html+='</div>';
       html+='<div class="chevron">&rsaquo;</div>';
       html+='</a>';

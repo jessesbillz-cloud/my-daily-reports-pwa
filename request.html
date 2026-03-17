@@ -245,6 +245,8 @@ if(inspSlug){
 // Booked time slots per date: { "2026-03-10": [{start:480,end:600,type:"Regular"}, ...] }
 // Times stored as minutes from midnight (e.g. 8:00 AM = 480)
 var bookedSlots={};
+// Global HTML escape function for XSS prevention
+function esc(s){var d=document.createElement('div');d.textContent=s;return d.innerHTML;}
 // Toast notification function
 function showToast(msg){
   var t=document.createElement('div');
@@ -253,6 +255,39 @@ function showToast(msg){
   document.body.appendChild(t);
   requestAnimationFrame(function(){t.style.opacity='1';});
   setTimeout(function(){t.style.opacity='0';setTimeout(function(){t.remove();},300);},3000);
+}
+// Prompt modal function to replace native prompt()
+function showPromptModal(label,callback){
+  var overlay=document.createElement('div');
+  overlay.style.cssText='position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.8);z-index:1001;display:flex;align-items:center;justify-content:center;padding:20px;';
+  var modal=document.createElement('div');
+  modal.style.cssText='background:#1e1e1e;border-radius:12px;padding:30px;max-width:350px;width:100%;border:2px solid #e8742a;';
+  var titleEl=document.createElement('div');
+  titleEl.style.cssText='color:#e8742a;font-size:16px;font-weight:bold;margin-bottom:20px;';
+  titleEl.textContent=label;
+  modal.appendChild(titleEl);
+  var input=document.createElement('input');
+  input.type='text';
+  input.style.cssText='width:100%;padding:12px;font-size:14px;border:1px solid #444;border-radius:6px;margin-bottom:20px;background:#222;color:#fff;box-sizing:border-box;';
+  input.placeholder='(optional)';
+  modal.appendChild(input);
+  var btnContainer=document.createElement('div');
+  btnContainer.style.cssText='display:flex;gap:10px;';
+  var cancelBtn=document.createElement('button');
+  cancelBtn.textContent='Cancel';
+  cancelBtn.style.cssText='flex:1;background:#333;color:#fff;padding:12px;border:none;border-radius:8px;cursor:pointer;font-weight:600;';
+  cancelBtn.onclick=function(){overlay.remove();callback('');};
+  btnContainer.appendChild(cancelBtn);
+  var submitBtn=document.createElement('button');
+  submitBtn.textContent='Submit';
+  submitBtn.style.cssText='flex:1;background:#e8742a;color:#fff;padding:12px;border:none;border-radius:8px;cursor:pointer;font-weight:600;';
+  submitBtn.onclick=function(){overlay.remove();callback(input.value);};
+  btnContainer.appendChild(submitBtn);
+  modal.appendChild(btnContainer);
+  overlay.appendChild(modal);
+  document.body.appendChild(overlay);
+  input.focus();
+  input.onkeypress=function(e){if(e.key==='Enter'){submitBtn.click();}};
 }
 function handleFileSelection(input) {
     var files=Array.from(input.files);
@@ -272,7 +307,10 @@ function renderFileGrid(){
         var item=document.createElement('div');
         item.className='file-item';
         if(file.type==='application/pdf'){
-            item.innerHTML='<div class="pdf-indicator">PDF<br>'+file.name.substring(0,8)+'...</div>';
+            var pdfDiv=document.createElement('div');
+            pdfDiv.className='pdf-indicator';
+            pdfDiv.textContent='PDF\n'+file.name.substring(0,8)+'...';
+            item.appendChild(pdfDiv);
         } else {
             var img=document.createElement('img');
             img.src=URL.createObjectURL(file); item.appendChild(img);
@@ -367,25 +405,67 @@ function showDay(d){
     if(evts.length===0){
         list.innerHTML='<div style="color:#888;padding:10px;">No inspections scheduled</div>';
     } else {
-        var html='';
+        list.innerHTML='';
         evts.forEach(function(e){
-            html+='<div class="evt-row">';
-            html+='<span class="evt-time">'+(e.flexible_display==='flexible'?'Flexible':e.inspection_time.substring(0,5))+'</span>';
-            html+=' — <span class="evt-type">'+(e.inspection_types||[]).join(', ')+'</span>';
-            if(e.project!==PROJ) html+=' <span style="color:#888;font-size:11px;">('+e.project+')</span>';
-            if(e.inspection_identifier) html+='<div style="color:#e8742a;font-weight:700;font-size:13px;margin:4px 0;">'+e.inspection_identifier+'</div>';
-            html+='<div style="font-size:11px;color:#888;margin-top:4px;">By: '+e.submitted_by+'</div>';
-            if(e.status==='scheduled') html+='<div style="color:#4a4;font-size:12px;font-weight:700;margin-top:4px;">✅ Scheduled</div>';
-            if(e.project===PROJ){
-                html+='<div class="evt-actions">';
-                html+='<button class="btn-edit" onclick="editInsp(\''+e.id+'\',\''+e.inspection_date+'\',\''+e.inspection_time.substring(0,5)+'\')">Edit</button>';
-                html+='<button class="btn-cancel" onclick="cancelInsp(\''+e.id+'\',\''+e.project+'\',\'Regular\',\''+e.inspection_date+'\',\''+e.inspection_time.substring(0,5)+'\')">Cancel</button>';
-                if(isAdmin && e.status!=='scheduled') html+='<button class="btn-scheduled" onclick="scheduleInsp(\''+e.id+'\')">Scheduled</button>';
-                html+='</div>';
+            var evt=document.createElement('div');
+            evt.className='evt-row';
+            var timeSpan=document.createElement('span');
+            timeSpan.className='evt-time';
+            timeSpan.textContent=e.flexible_display==='flexible'?'Flexible':e.inspection_time.substring(0,5);
+            evt.appendChild(timeSpan);
+            var sep=document.createElement('span');
+            sep.textContent=' — ';
+            evt.appendChild(sep);
+            var typeSpan=document.createElement('span');
+            typeSpan.className='evt-type';
+            typeSpan.textContent=(e.inspection_types||[]).join(', ');
+            evt.appendChild(typeSpan);
+            if(e.project!==PROJ){
+                var projSpan=document.createElement('span');
+                projSpan.style.cssText='color:#888;font-size:11px;';
+                projSpan.textContent=' ('+e.project+')';
+                evt.appendChild(projSpan);
             }
-            html+='</div>';
+            if(e.inspection_identifier){
+                var idDiv=document.createElement('div');
+                idDiv.style.cssText='color:#e8742a;font-weight:700;font-size:13px;margin:4px 0;';
+                idDiv.textContent=e.inspection_identifier;
+                evt.appendChild(idDiv);
+            }
+            var byDiv=document.createElement('div');
+            byDiv.style.cssText='font-size:11px;color:#888;margin-top:4px;';
+            byDiv.textContent='By: '+e.submitted_by;
+            evt.appendChild(byDiv);
+            if(e.status==='scheduled'){
+                var schedDiv=document.createElement('div');
+                schedDiv.style.cssText='color:#4a4;font-size:12px;font-weight:700;margin-top:4px;';
+                schedDiv.textContent='✅ Scheduled';
+                evt.appendChild(schedDiv);
+            }
+            if(e.project===PROJ){
+                var actionsDiv=document.createElement('div');
+                actionsDiv.className='evt-actions';
+                var editBtn=document.createElement('button');
+                editBtn.className='btn-edit';
+                editBtn.textContent='Edit';
+                editBtn.onclick=(function(eid,edate,etime){return function(){editInsp(eid,edate,etime);};})(e.id,e.inspection_date,e.inspection_time.substring(0,5));
+                actionsDiv.appendChild(editBtn);
+                var cancelBtn=document.createElement('button');
+                cancelBtn.className='btn-cancel';
+                cancelBtn.textContent='Cancel';
+                cancelBtn.onclick=(function(eid,eproj,etype,edate,etime){return function(){cancelInsp(eid,eproj,etype,edate,etime);};})(e.id,e.project,'Regular',e.inspection_date,e.inspection_time.substring(0,5));
+                actionsDiv.appendChild(cancelBtn);
+                if(isAdmin && e.status!=='scheduled'){
+                    var schedBtn=document.createElement('button');
+                    schedBtn.className='btn-scheduled';
+                    schedBtn.textContent='Scheduled';
+                    schedBtn.onclick=(function(eid){return function(){scheduleInsp(eid);};})(e.id);
+                    actionsDiv.appendChild(schedBtn);
+                }
+                evt.appendChild(actionsDiv);
+            }
+            list.appendChild(evt);
         });
-        list.innerHTML=html;
     }
     document.getElementById('dayDetail').style.display='block';
 }
@@ -397,7 +477,7 @@ box.style.cssText='background:#1a1a1a;border:1px solid #333;border-radius:10px;p
 var h=document.createElement('div'); h.style.cssText='font-size:14px;font-weight:bold;color:#fff;margin-bottom:12px;'; h.textContent=title; box.appendChild(h);
 names.forEach(function(n){
 var btn=document.createElement('button'); btn.style.cssText='display:block;width:100%;padding:12px;margin-bottom:8px;font-size:14px;font-weight:600;color:#fff;background:#222;border:1px solid #444;border-radius:6px;cursor:pointer;text-align:left;'; btn.textContent=n;
-btn.onclick=function(){document.body.removeChild(overlay);callback(n);}; box.appendChild(btn);
+btn.onclick=(function(name){return function(){document.body.removeChild(overlay);callback(name);};})(n); box.appendChild(btn);
 });
 var cancel=document.createElement('button'); cancel.style.cssText='display:block;width:100%;padding:10px;font-size:13px;color:#888;background:transparent;border:1px solid #333;border-radius:6px;cursor:pointer;margin-top:4px;'; cancel.textContent='Never mind';
 cancel.onclick=function(){document.body.removeChild(overlay);}; box.appendChild(cancel);
@@ -406,9 +486,10 @@ overlay.appendChild(box); document.body.appendChild(overlay);
 function cancelInsp(id,proj,ty,date,time){
 var team=savedContacts.map(function(c){return c.name;}); if(team.length===0) team=["(no saved contacts)"];
 showActionModal('Who is cancelling this?',team,function(who){
-var reason=prompt('Reason (optional):');
+showPromptModal('Reason (optional):',function(reason){
 fetch(SB+'/functions/v1/update-inspection',{method:'POST',headers:{'Authorization':'Bearer '+AK,'apikey':AK,'Content-Type':'application/json'},body:JSON.stringify({request_id:id,action:'cancel',action_by:who,reason:reason||'',notify:true})})
 .then(function(r){return r.json();}).then(function(data){if(data.success){showToast('Cancelled. Notifications sent.'); loadMD();} else {showToast('Error — try again');}});
+});
 });
 }
 function editInsp(id,oldDate,oldTime){
@@ -418,10 +499,18 @@ showActionModal('Who is editing this?',team,function(who){ showEditModal(id,oldD
 function showEditModal(id,oldDate,oldTime,who){
 var overlay=document.createElement('div'); overlay.style.cssText='position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.8);z-index:1000;display:flex;align-items:center;justify-content:center;padding:20px;';
 var modal=document.createElement('div'); modal.style.cssText='background:#1a1a1a;border-radius:12px;padding:30px;max-width:400px;width:100%;border:1px solid #333;';
-modal.innerHTML='<h3 style="color:#e8742a;margin-bottom:20px;">Edit Scheduling Request</h3><label style="color:#ccc;font-size:13px;">New Date</label><input type="date" id="eDate" value="'+oldDate+'" class="field-input"><label style="color:#ccc;font-size:13px;">New Time</label><input type="time" id="eTime" value="'+oldTime+'" class="field-input"><div style="display:flex;gap:10px;margin-top:20px;"><button id="cEdit" style="flex:1;background:#333;color:#fff;padding:12px;border:none;border-radius:8px;">Cancel</button><button id="sEdit" style="flex:1;background:#e8742a;color:#fff;padding:12px;border:none;border-radius:8px;">Save</button></div>';
+var h3=document.createElement('h3'); h3.style.cssText='color:#e8742a;margin-bottom:20px;'; h3.textContent='Edit Scheduling Request'; modal.appendChild(h3);
+var label1=document.createElement('label'); label1.style.cssText='color:#ccc;font-size:13px;'; label1.textContent='New Date'; modal.appendChild(label1);
+var dateInput=document.createElement('input'); dateInput.type='date'; dateInput.id='eDate'; dateInput.value=oldDate; dateInput.className='field-input'; modal.appendChild(dateInput);
+var label2=document.createElement('label'); label2.style.cssText='color:#ccc;font-size:13px;'; label2.textContent='New Time'; modal.appendChild(label2);
+var timeInput=document.createElement('input'); timeInput.type='time'; timeInput.id='eTime'; timeInput.value=oldTime; timeInput.className='field-input'; modal.appendChild(timeInput);
+var btnDiv=document.createElement('div'); btnDiv.style.cssText='display:flex;gap:10px;margin-top:20px;';
+var cancelBtn=document.createElement('button'); cancelBtn.id='cEdit'; cancelBtn.style.cssText='flex:1;background:#333;color:#fff;padding:12px;border:none;border-radius:8px;'; cancelBtn.textContent='Cancel';
+var saveBtn=document.createElement('button'); saveBtn.id='sEdit'; saveBtn.style.cssText='flex:1;background:#e8742a;color:#fff;padding:12px;border:none;border-radius:8px;'; saveBtn.textContent='Save';
+btnDiv.appendChild(cancelBtn); btnDiv.appendChild(saveBtn); modal.appendChild(btnDiv);
 overlay.appendChild(modal); document.body.appendChild(overlay);
-document.getElementById('cEdit').onclick=function(){overlay.remove();};
-document.getElementById('sEdit').onclick=function(){
+cancelBtn.onclick=function(){overlay.remove();};
+saveBtn.onclick=function(){
 var nD=document.getElementById('eDate').value, nT=document.getElementById('eTime').value;
 // Check if new date/time conflicts with existing bookings
 if(nD!==oldDate||nT!==oldTime){
@@ -497,23 +586,42 @@ function renderCal(){
         var hasBookings=dateHasBookings(s);
         var todayStr=ds(new Date().getFullYear(),new Date().getMonth(),new Date().getDate());
         c.className='day-cell'+(fullyBooked?' blocked':'')+(s===todayStr?' today':'');
-        c.innerHTML='<span class="day-num">'+d+'</span>';
+        var dayNumSpan=document.createElement('span');
+        dayNumSpan.className='day-num';
+        dayNumSpan.textContent=d;
+        c.appendChild(dayNumSpan);
         if(mD[s]){
             var active=mD[s].filter(function(e){return e.status!=='cancelled';});
             if(active.length>0){
                 var hasScheduled=active.some(function(e){return e.status==='scheduled';});
                 var hasPending=active.some(function(e){return e.status!=='scheduled'&&e.status!=='cancelled';});
-                var dots='<div style="display:flex;justify-content:center;gap:3px;margin-top:1px;">';
-                if(hasScheduled) dots+='<span style="color:#22c55e;font-size:10px;">✓</span>';
-                if(hasPending) dots+='<span style="font-size:8px;color:#e8742a;">●</span>';
-                dots+='</div>';
-                c.innerHTML+=dots;
+                var dotsDiv=document.createElement('div');
+                dotsDiv.style.cssText='display:flex;justify-content:center;gap:3px;margin-top:1px;';
+                if(hasScheduled){
+                    var schedSpan=document.createElement('span');
+                    schedSpan.style.cssText='color:#22c55e;font-size:10px;';
+                    schedSpan.textContent='✓';
+                    dotsDiv.appendChild(schedSpan);
+                }
+                if(hasPending){
+                    var pendSpan=document.createElement('span');
+                    pendSpan.style.cssText='font-size:8px;color:#e8742a;';
+                    pendSpan.textContent='●';
+                    dotsDiv.appendChild(pendSpan);
+                }
+                c.appendChild(dotsDiv);
             }
         }
         if(fullyBooked){
-            c.innerHTML+='<div style="font-size:8px;color:#ef4444;font-weight:700;">FULL</div>';
+            var fullDiv=document.createElement('div');
+            fullDiv.style.cssText='font-size:8px;color:#ef4444;font-weight:700;';
+            fullDiv.textContent='FULL';
+            c.appendChild(fullDiv);
         } else if(hasBookings){
-            c.innerHTML+='<div style="font-size:8px;color:#e8742a;font-weight:600;">partial</div>';
+            var partDiv=document.createElement('div');
+            partDiv.style.cssText='font-size:8px;color:#e8742a;font-weight:600;';
+            partDiv.textContent='partial';
+            c.appendChild(partDiv);
         }
         c.onclick=(function(x){return function(){showDay(x);};})(s);
         g.appendChild(c);
@@ -671,7 +779,19 @@ function renderContacts(rows){
         addedEmails[m.email.toLowerCase()]=true;
         var lbl=document.createElement('label');
         lbl.className='email-row';
-        lbl.innerHTML='<input type="checkbox" value="'+m.email+'" class="emailCheck" checked> '+m.name+' <span style="font-size:10px;color:#5a8fc0;font-weight:600;">(Saved)</span>';
+        var checkbox=document.createElement('input');
+        checkbox.type='checkbox';
+        checkbox.value=m.email;
+        checkbox.className='emailCheck';
+        checkbox.checked=true;
+        lbl.appendChild(checkbox);
+        var nameSpan=document.createElement('span');
+        nameSpan.textContent=' '+m.name+' ';
+        lbl.appendChild(nameSpan);
+        var badge=document.createElement('span');
+        badge.style.cssText='font-size:10px;color:#5a8fc0;font-weight:600;';
+        badge.textContent='(Saved)';
+        lbl.appendChild(badge);
         container.appendChild(lbl);
     });
     // Saved contacts (skip duplicates)
@@ -680,7 +800,17 @@ function renderContacts(rows){
         addedEmails[c.email.toLowerCase()]=true;
         var lbl=document.createElement('label');
         lbl.className='email-row';
-        lbl.innerHTML='<input type="checkbox" value="'+c.email+'" class="emailCheck" checked>'+c.name+(c.company?' ('+c.company+')':'');
+        var checkbox=document.createElement('input');
+        checkbox.type='checkbox';
+        checkbox.value=c.email;
+        checkbox.className='emailCheck';
+        checkbox.checked=true;
+        lbl.appendChild(checkbox);
+        var nameText=' '+c.name;
+        if(c.company) nameText+=' ('+c.company+')';
+        var nameSpan=document.createElement('span');
+        nameSpan.textContent=nameText;
+        lbl.appendChild(nameSpan);
         container.appendChild(lbl);
     });
 }

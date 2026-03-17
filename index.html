@@ -303,6 +303,25 @@ function MDRLogo({size=36}){
   return <img src="logo.jpg" alt="My Daily Reports" style={{width:size,height:size,borderRadius:size>40?8:4,objectFit:"contain"}}/>;
 }
 
+/* ── Confirm Dialog (replaces browser confirm()) ── */
+let _cfmResolve=null,_cfmSet=null;
+function askConfirm(msg){return new Promise(res=>{_cfmResolve=res;if(_cfmSet)_cfmSet(msg);});}
+function ConfirmOverlay(){
+  const [msg,setMsg]=useState("");
+  useEffect(()=>{_cfmSet=setMsg;},[]);
+  const handle=(v)=>{setMsg("");if(_cfmResolve){_cfmResolve(v);_cfmResolve=null;}};
+  if(!msg)return null;
+  return(<div onClick={()=>handle(false)} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:99999,padding:20}}>
+    <div onClick={e=>e.stopPropagation()} style={{background:C.card,border:`1px solid ${C.brd}`,borderRadius:14,padding:"24px 20px",maxWidth:340,width:"100%",textAlign:"center"}}>
+      <div style={{fontSize:15,color:C.txt,lineHeight:1.5,marginBottom:20}}>{msg}</div>
+      <div style={{display:"flex",gap:10}}>
+        <button onClick={()=>handle(false)} style={{flex:1,padding:"12px 0",background:C.inp,border:`1px solid ${C.brd}`,borderRadius:8,color:C.lt,fontSize:14,fontWeight:600,cursor:"pointer"}}>Cancel</button>
+        <button onClick={()=>handle(true)} style={{flex:1,padding:"12px 0",background:C.err,border:"none",borderRadius:8,color:"#fff",fontSize:14,fontWeight:700,cursor:"pointer"}}>Confirm</button>
+      </div>
+    </div>
+  </div>);
+}
+
 /* ── Support Chat Widget ── */
 function SupportChat({user}){
   const [scToast,setScToast]=useState("");
@@ -966,7 +985,7 @@ function AccountSettings({user, onBack, onLogout}){
     finally{setUploadingTpl(false);if(tplInputRef.current)tplInputRef.current.value="";}
   };
   const handleDeleteTpl=async(tpl)=>{
-    if(!confirm(`Remove "${tpl.template_name}" from company templates?`))return;
+    if(!await askConfirm(`Remove "${tpl.template_name}" from company templates?`))return;
     try{
       await db.deleteCompanyTemplate(tpl.id);
       flash("Template removed");
@@ -2275,7 +2294,7 @@ function CreateJob({user, onBack, onCreated}){
                         </div>
                         <span style={{color:C.blu,fontSize:12,fontWeight:600}}>Use</span>
                       </div>
-                      <button onClick={async(e)=>{e.stopPropagation();const btn=e.currentTarget;if(btn.disabled)return;btn.disabled=true;if(!confirm("Delete this saved template?")){btn.disabled=false;return;}try{await db.deleteSavedTemplate(t.id);setSavedTpls(p=>p.filter(x=>x.id!==t.id));}catch(err){showToast("Delete failed");btn.disabled=false;}}} style={{background:"none",border:"none",color:C.err,fontSize:14,cursor:"pointer",padding:"4px 6px",flexShrink:0}}>🗑️</button>
+                      <button onClick={async(e)=>{e.stopPropagation();const btn=e.currentTarget;if(btn.disabled)return;btn.disabled=true;if(!await askConfirm("Delete this saved template?")){btn.disabled=false;return;}try{await db.deleteSavedTemplate(t.id);setSavedTpls(p=>p.filter(x=>x.id!==t.id));}catch(err){showToast("Delete failed");btn.disabled=false;}}} style={{background:"none",border:"none",color:C.err,fontSize:14,cursor:"pointer",padding:"4px 6px",flexShrink:0}}>🗑️</button>
                     </div>
                   ))}
                 </div>
@@ -2713,8 +2732,8 @@ function WorkLogEditor({job, user, onBack, reportDate}){
     setContractors(p=>p.map(c=>c.id===id?{...c,[field]:val}:c));
   };
 
-  const removeContractor=(id)=>{
-    if(!confirm("Remove this contractor?"))return;
+  const removeContractor=async(id)=>{
+    if(!await askConfirm("Remove this contractor?"))return;
     setContractors(p=>p.filter(c=>c.id!==id));
     if(activeId===id)setActiveId(null);
   };
@@ -5350,7 +5369,7 @@ function ReportEditor({job, user, onBack, reportDate}){
           </div>
 
           {/* Big camera button */}
-          <button onClick={()=>{fieldPhotoRef.current.setAttribute("capture","environment");fieldPhotoRef.current.click();}} style={{width:"100%",padding:"20px 0",background:C.org,border:"none",borderRadius:14,color:"#fff",fontSize:18,fontWeight:700,cursor:"pointer",marginBottom:16,display:"flex",alignItems:"center",justifyContent:"center",gap:10}}>
+          <button onClick={()=>{fieldPhotoRef.current?.setAttribute("capture","environment");fieldPhotoRef.current?.click();}} style={{width:"100%",padding:"20px 0",background:C.org,border:"none",borderRadius:14,color:"#fff",fontSize:18,fontWeight:700,cursor:"pointer",marginBottom:16,display:"flex",alignItems:"center",justifyContent:"center",gap:10}}>
             <span style={{fontSize:28}}>📷</span> SNAP PHOTO
           </button>
           <input ref={fieldPhotoRef} type="file" accept="image/*" capture="environment" multiple onChange={handlePhoto} style={{display:"none"}}/>
@@ -5444,7 +5463,7 @@ function ReportEditor({job, user, onBack, reportDate}){
             <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:10}}>
               <div style={{fontSize:12,fontWeight:700,color:C.org,textTransform:"uppercase",letterSpacing:1}}>Fill In Today</div>
               {editFields.filter(f=>!f.autoFill&&vals[f.name]).length>1&&(
-                <button onClick={()=>{const toLock=editFields.filter(f=>!f.autoFill&&vals[f.name]&&!skippedFields[f.name]);if(toLock.length===0)return;if(!confirm("Lock "+toLock.length+" filled field"+(toLock.length!==1?"s":"")+"? They'll keep their current values for all future reports."))return;toLock.forEach(f=>relockField(f.name));}} style={{padding:"4px 10px",fontSize:11,fontWeight:700,borderRadius:6,border:`1px solid ${C.blu}`,background:C.blu+"22",color:C.blu,cursor:"pointer"}}>🔒 Lock All Filled</button>
+                <button onClick={async()=>{const toLock=editFields.filter(f=>!f.autoFill&&vals[f.name]&&!skippedFields[f.name]);if(toLock.length===0)return;if(!await askConfirm("Lock "+toLock.length+" filled field"+(toLock.length!==1?"s":"")+"? They'll keep their current values for all future reports."))return;toLock.forEach(f=>relockField(f.name));}} style={{padding:"4px 10px",fontSize:11,fontWeight:700,borderRadius:6,border:`1px solid ${C.blu}`,background:C.blu+"22",color:C.blu,cursor:"pointer"}}>🔒 Lock All Filled</button>
               )}
             </div>
             {editFields.map(f=>{
@@ -5512,10 +5531,10 @@ function ReportEditor({job, user, onBack, reportDate}){
 
           {/* Two photo buttons */}
           <div style={{display:"flex",gap:10}}>
-            <button onClick={()=>{photoRef.current.setAttribute("capture","environment");photoRef.current.click();}} style={{flex:1,padding:"14px 0",background:C.card,border:`1px solid ${C.brd}`,borderRadius:10,color:C.lt,fontSize:14,fontWeight:600,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",gap:8}}>
+            <button onClick={()=>{photoRef.current?.setAttribute("capture","environment");photoRef.current?.click();}} style={{flex:1,padding:"14px 0",background:C.card,border:`1px solid ${C.brd}`,borderRadius:10,color:C.lt,fontSize:14,fontWeight:600,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",gap:8}}>
               <span>📷</span> Take Photo
             </button>
-            <button onClick={()=>{photoRef.current.removeAttribute("capture");photoRef.current.click();}} style={{flex:1,padding:"14px 0",background:C.card,border:`1px solid ${C.brd}`,borderRadius:10,color:C.lt,fontSize:14,fontWeight:600,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",gap:8}}>
+            <button onClick={()=>{photoRef.current?.removeAttribute("capture");photoRef.current?.click();}} style={{flex:1,padding:"14px 0",background:C.card,border:`1px solid ${C.brd}`,borderRadius:10,color:C.lt,fontSize:14,fontWeight:600,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",gap:8}}>
               + Library
             </button>
           </div>
@@ -5875,7 +5894,7 @@ function JobDetail({job, user, onBack, onDeleted}){
                   </div>
                   <div style={{color:C.org,fontSize:20,flexShrink:0}}>›</div>
                 </button>
-                <button onClick={async(e)=>{e.stopPropagation();if(!confirm("Delete this draft and start over?"))return;const btn=e.currentTarget;btn.disabled=true;btn.style.opacity="0.4";try{await db.deleteReport(r.id,job.id,r.report_date);showToast("Draft deleted");loadReports();}catch(err){showToast("Delete failed");btn.disabled=false;btn.style.opacity="1";}}} style={{padding:"10px 14px",background:"none",border:"none",color:C.err,fontSize:16,cursor:"pointer",flexShrink:0}} title="Delete draft">🗑</button>
+                <button onClick={async(e)=>{e.stopPropagation();if(!await askConfirm("Delete this draft and start over?"))return;const btn=e.currentTarget;btn.disabled=true;btn.style.opacity="0.4";try{await db.deleteReport(r.id,job.id,r.report_date);showToast("Draft deleted");loadReports();}catch(err){showToast("Delete failed");btn.disabled=false;btn.style.opacity="1";}}} style={{padding:"10px 14px",background:"none",border:"none",color:C.err,fontSize:16,cursor:"pointer",flexShrink:0}} title="Delete draft">🗑</button>
               </div>);})
 
           )}
@@ -7023,7 +7042,7 @@ function Dashboard({user, onLogout}){
                               Edit
                             </button>
                           )}
-                          <button onClick={async(e)=>{e.stopPropagation();if(!confirm("Delete this request?"))return;const btn=e.currentTarget;btn.disabled=true;btn.style.opacity="0.5";try{await db.deleteRequest(rq.id);await loadRequests();}catch(er){showToast("Error — try again");btn.disabled=false;btn.style.opacity="1";}}} style={{padding:"7px 12px",fontSize:12,fontWeight:700,borderRadius:6,background:"transparent",border:`1px solid #ef4444`,color:"#ef4444",cursor:"pointer"}}>
+                          <button onClick={async(e)=>{e.stopPropagation();if(!await askConfirm("Delete this request?"))return;const btn=e.currentTarget;btn.disabled=true;btn.style.opacity="0.5";try{await db.deleteRequest(rq.id);await loadRequests();}catch(er){showToast("Error — try again");btn.disabled=false;btn.style.opacity="1";}}} style={{padding:"7px 12px",fontSize:12,fontWeight:700,borderRadius:6,background:"transparent",border:`1px solid #ef4444`,color:"#ef4444",cursor:"pointer"}}>
                             Delete
                           </button>
                         </div>
@@ -7782,7 +7801,7 @@ function App(){
   if(setupDone===false)return<SetupWizard user={user} inviteCompany={inviteCompany} onComplete={()=>setSetupDone(true)}/>;
 
   // Fully set up — show dashboard
-  return<><Dashboard user={user} onLogout={handleLogout}/><InstallBanner/></>;
+  return<><Dashboard user={user} onLogout={handleLogout}/><InstallBanner/><ConfirmOverlay/></>;
 }
 ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
 </script>

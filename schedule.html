@@ -270,6 +270,15 @@ document.title=(cleanName||'Schedule')+' - Scheduling Request';
 var allFiles=[], inspType='', inspDur='', cM=new Date().getMonth(), cY=new Date().getFullYear(), mD={};
 var savedContacts=[];
 
+// ══════════════════════════════════════════════════════════════════
+// SECURITY: HTML Escape function for safe innerHTML insertion
+// ══════════════════════════════════════════════════════════════════
+function esc(s){
+  var d=document.createElement('div');
+  d.textContent=s;
+  return d.innerHTML;
+}
+
 // Toast notification function
 function showToast(msg){
   var t=document.createElement('div');
@@ -278,6 +287,71 @@ function showToast(msg){
   document.body.appendChild(t);
   requestAnimationFrame(function(){t.style.opacity='1';});
   setTimeout(function(){t.style.opacity='0';setTimeout(function(){t.remove();},300);},3000);
+}
+
+// ══════════════════════════════════════════════════════════════════
+// UX: Modal functions to replace prompt() and confirm()
+// ══════════════════════════════════════════════════════════════════
+function showPromptModal(label, callback){
+  var overlay=document.createElement('div');
+  overlay.style.cssText='position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.8);z-index:1001;display:flex;align-items:center;justify-content:center;padding:20px;';
+  var modal=document.createElement('div');
+  modal.style.cssText='background:#1e1e1e;border-radius:12px;padding:30px;max-width:400px;width:100%;border:1px solid #333;';
+  var title=document.createElement('h3');
+  title.style.cssText='color:#e8742a;margin-bottom:20px;';
+  title.textContent=label;
+  modal.appendChild(title);
+  var input=document.createElement('input');
+  input.type='text';
+  input.className='field-input';
+  input.style.cssText='width:100%;padding:10px;font-size:15px;border:1px solid #444;border-radius:6px;margin-bottom:20px;background:#222;color:#fff;';
+  modal.appendChild(input);
+  var btnContainer=document.createElement('div');
+  btnContainer.style.cssText='display:flex;gap:10px;';
+  var cancelBtn=document.createElement('button');
+  cancelBtn.textContent='Cancel';
+  cancelBtn.style.cssText='flex:1;background:#333;color:#fff;padding:12px;border:none;border-radius:8px;cursor:pointer;font-weight:600;';
+  cancelBtn.onclick=function(){overlay.remove();document.removeEventListener('keydown',escHandler);callback(null);};
+  var okBtn=document.createElement('button');
+  okBtn.textContent='OK';
+  okBtn.style.cssText='flex:1;background:#e8742a;color:#fff;padding:12px;border:none;border-radius:8px;cursor:pointer;font-weight:600;';
+  okBtn.onclick=function(){overlay.remove();document.removeEventListener('keydown',escHandler);callback(input.value);};
+  btnContainer.appendChild(cancelBtn);
+  btnContainer.appendChild(okBtn);
+  modal.appendChild(btnContainer);
+  var escHandler=function(e){if(e.key==='Escape'){overlay.remove();document.removeEventListener('keydown',escHandler);callback(null);}};
+  document.addEventListener('keydown',escHandler);
+  overlay.appendChild(modal);
+  document.body.appendChild(overlay);
+  input.focus();
+}
+
+function showConfirmModal(msg, callback){
+  var overlay=document.createElement('div');
+  overlay.style.cssText='position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.8);z-index:1001;display:flex;align-items:center;justify-content:center;padding:20px;';
+  var modal=document.createElement('div');
+  modal.style.cssText='background:#1e1e1e;border-radius:12px;padding:30px;max-width:400px;width:100%;border:1px solid #333;';
+  var msgEl=document.createElement('div');
+  msgEl.style.cssText='color:#ccc;font-size:15px;margin-bottom:25px;line-height:1.5;white-space:pre-wrap;word-wrap:break-word;';
+  msgEl.textContent=msg;
+  modal.appendChild(msgEl);
+  var btnContainer=document.createElement('div');
+  btnContainer.style.cssText='display:flex;gap:10px;';
+  var cancelBtn=document.createElement('button');
+  cancelBtn.textContent='Cancel';
+  cancelBtn.style.cssText='flex:1;background:#333;color:#fff;padding:12px;border:none;border-radius:8px;cursor:pointer;font-weight:600;';
+  cancelBtn.onclick=function(){overlay.remove();document.removeEventListener('keydown',escHandler);callback(false);};
+  var okBtn=document.createElement('button');
+  okBtn.textContent='OK';
+  okBtn.style.cssText='flex:1;background:#e8742a;color:#fff;padding:12px;border:none;border-radius:8px;cursor:pointer;font-weight:600;';
+  okBtn.onclick=function(){overlay.remove();document.removeEventListener('keydown',escHandler);callback(true);};
+  btnContainer.appendChild(cancelBtn);
+  btnContainer.appendChild(okBtn);
+  modal.appendChild(btnContainer);
+  var escHandler=function(e){if(e.key==='Escape'){overlay.remove();document.removeEventListener('keydown',escHandler);callback(false);}};
+  document.addEventListener('keydown',escHandler);
+  overlay.appendChild(modal);
+  document.body.appendChild(overlay);
 }
 
 function handleFileSelection(input) {
@@ -298,7 +372,7 @@ function renderFileGrid(){
         var item=document.createElement('div');
         item.className='file-item';
         if(file.type==='application/pdf'){
-            item.innerHTML='<div class="pdf-indicator">PDF<br>'+file.name.substring(0,8)+'...</div>';
+            item.innerHTML='<div class="pdf-indicator">PDF<br>'+esc(file.name.substring(0,8))+'...</div>';
         } else {
             var img=document.createElement('img');
             img.src=URL.createObjectURL(file); item.appendChild(img);
@@ -326,11 +400,11 @@ function showDay(d){
             var rowStyle=isCancelled?'opacity:0.45;text-decoration:line-through;':'';
             html+='<div class="evt-row" style="'+rowStyle+'">';
             html+='<span class="evt-time">'+(e.flexible_display==='flexible'?'Flexible':e.inspection_time.substring(0,5))+'</span>';
-            html+=' — <span class="evt-type">'+(e.inspection_types||[]).join(', ')+'</span>';
-            if(e.project!==PROJ) html+=' <span style="color:#888;font-size:11px;">('+e.project+')</span>';
-            if(e.inspection_identifier) html+='<div style="color:#e8742a;font-weight:700;font-size:13px;margin:4px 0;">'+e.inspection_identifier+'</div>';
-            html+='<div style="font-size:11px;color:#888;margin-top:4px;">By: '+e.submitted_by+'</div>';
-            if(e.location_detail) html+='<div style="font-size:11px;color:#5a8fc0;margin-top:2px;">📍 '+e.location_detail+'</div>';
+            html+=' — <span class="evt-type">'+esc((e.inspection_types||[]).join(', '))+'</span>';
+            if(e.project!==PROJ) html+=' <span style="color:#888;font-size:11px;">('+esc(e.project)+')</span>';
+            if(e.inspection_identifier) html+='<div style="color:#e8742a;font-weight:700;font-size:13px;margin:4px 0;">'+esc(e.inspection_identifier)+'</div>';
+            html+='<div style="font-size:11px;color:#888;margin-top:4px;">By: '+esc(e.submitted_by)+'</div>';
+            if(e.location_detail) html+='<div style="font-size:11px;color:#5a8fc0;margin-top:2px;">📍 '+esc(e.location_detail)+'</div>';
             if(e.duration) html+='<div style="font-size:11px;color:#888;margin-top:2px;">Duration: '+(e.duration>=60?(e.duration/60)+'hr':e.duration+'min')+'</div>';
             if(isCancelled){
                 html+='<div style="color:#c44;font-size:12px;font-weight:600;margin-top:4px;">Cancelled</div>';
@@ -386,11 +460,12 @@ var team=teamMembers.map(function(m){return m.name;}).filter(Boolean).concat(sav
 team=team.filter(function(n,i){return team.indexOf(n)===i;}); // deduplicate
 if(team.length===0) team=["(no saved contacts)"];
 showActionModal('Who is cancelling this?',team,function(who){
-var reason=prompt('Reason (optional):');
+showPromptModal('Reason (optional):', function(reason){
 var btns=document.querySelectorAll('.evt-actions button');btns.forEach(function(b){b.disabled=true;b.style.opacity='0.5';});
 fetch(SB+'/functions/v1/update-inspection',{method:'POST',headers:{'Authorization':'Bearer '+AK,'apikey':AK,'Content-Type':'application/json'},body:JSON.stringify({request_id:id,action:'cancel',action_by:who,reason:reason||'',notify:true})})
 .then(function(r){return r.json();}).then(function(data){if(data.success){showToast('Cancelled. Notifications sent.'); loadMD();} else {showToast('Error — try again');btns.forEach(function(b){b.disabled=false;b.style.opacity='1';});}})
 .catch(function(err){showToast('Failed — try again');btns.forEach(function(b){b.disabled=false;b.style.opacity='1';});});
+});
 });
 }
 function editInsp(id,oldDate,oldTime){
@@ -402,7 +477,7 @@ showActionModal('Who is editing this?',team,function(who){ showEditModal(id,oldD
 function showEditModal(id,oldDate,oldTime,who){
 var overlay=document.createElement('div'); overlay.style.cssText='position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.8);z-index:1000;display:flex;align-items:center;justify-content:center;padding:20px;';
 var modal=document.createElement('div'); modal.style.cssText='background:#1a1a1a;border-radius:12px;padding:30px;max-width:400px;width:100%;border:1px solid #333;';
-modal.innerHTML='<h3 style="color:#e8742a;margin-bottom:20px;">Edit Request</h3><label style="color:#ccc;font-size:13px;">New Date</label><input type="date" id="eDate" value="'+oldDate+'" class="field-input"><label style="color:#ccc;font-size:13px;">New Time</label><input type="time" id="eTime" value="'+oldTime+'" class="field-input"><div style="display:flex;gap:10px;margin-top:20px;"><button id="cEdit" style="flex:1;background:#333;color:#fff;padding:12px;border:none;border-radius:8px;">Cancel</button><button id="sEdit" style="flex:1;background:#e8742a;color:#fff;padding:12px;border:none;border-radius:8px;">Save</button></div>';
+modal.innerHTML='<h3 style="color:#e8742a;margin-bottom:20px;">Edit Request</h3><label style="color:#ccc;font-size:13px;">New Date</label><input type="date" id="eDate" value="'+esc(oldDate)+'" class="field-input"><label style="color:#ccc;font-size:13px;">New Time</label><input type="time" id="eTime" value="'+esc(oldTime)+'" class="field-input"><div style="display:flex;gap:10px;margin-top:20px;"><button id="cEdit" style="flex:1;background:#333;color:#fff;padding:12px;border:none;border-radius:8px;">Cancel</button><button id="sEdit" style="flex:1;background:#e8742a;color:#fff;padding:12px;border:none;border-radius:8px;">Save</button></div>';
 overlay.onclick=function(e){if(e.target===overlay){overlay.remove();document.removeEventListener('keydown',editEsc);}};
 var editEsc=function(e){if(e.key==='Escape'){overlay.remove();document.removeEventListener('keydown',editEsc);}};
 document.addEventListener('keydown',editEsc);
@@ -428,8 +503,8 @@ var durHtml='<select id="eDur" class="field-input">';
 durOpts.forEach(function(v,i){durHtml+='<option value="'+v+'"'+(v===oldDur?' selected':'')+'>'+durLabels[i]+'</option>';});
 durHtml+='</select>';
 modal.innerHTML='<h3 style="color:#e8742a;margin-bottom:20px;">Edit Request</h3>'
-+'<label style="color:#ccc;font-size:13px;">Date</label><input type="date" id="eaDate" value="'+oldDate+'" class="field-input">'
-+'<label style="color:#ccc;font-size:13px;">Time</label><input type="time" id="eaTime" value="'+oldTime+'" class="field-input">'
++'<label style="color:#ccc;font-size:13px;">Date</label><input type="date" id="eaDate" value="'+esc(oldDate)+'" class="field-input">'
++'<label style="color:#ccc;font-size:13px;">Time</label><input type="time" id="eaTime" value="'+esc(oldTime)+'" class="field-input">'
 +'<label style="color:#ccc;font-size:13px;">Duration</label>'+durHtml
 +'<label style="color:#ccc;font-size:13px;">Notes</label><textarea id="eaNotes" class="field-input" rows="3" placeholder="Optional notes"></textarea>'
 +'<div style="display:flex;gap:10px;margin-top:20px;"><button id="caEdit" style="flex:1;background:#333;color:#fff;padding:12px;border:none;border-radius:8px;cursor:pointer;">Cancel</button><button id="saEdit" style="flex:1;background:#e8742a;color:#fff;padding:12px;border:none;border-radius:8px;cursor:pointer;">Save</button></div>';
@@ -445,11 +520,13 @@ fetch(SB+'/functions/v1/update-inspection',{method:'POST',headers:{'Authorizatio
 };
 }
 function deleteInsp(id){
-if(!confirm('Delete this scheduling request? This cannot be undone.')) return;
+showConfirmModal('Delete this scheduling request? This cannot be undone.', function(confirmed){
+if(!confirmed) return;
 var btns=document.querySelectorAll('.evt-actions button');btns.forEach(function(b){b.disabled=true;b.style.opacity='0.5';});
 fetch(SB+'/functions/v1/update-inspection',{method:'POST',headers:{'Authorization':'Bearer '+AK,'apikey':AK,'Content-Type':'application/json'},body:JSON.stringify({request_id:id,action:'delete',action_by:'Admin'})})
 .then(function(r){return r.json();}).then(function(data){if(data.success){loadMD();} else {showToast('Error — try again');btns.forEach(function(b){b.disabled=false;b.style.opacity='1';});}})
 .catch(function(err){showToast('Failed — try again');btns.forEach(function(b){b.disabled=false;b.style.opacity='1';});});
+});
 }
 var calFeedURL=SB+'/functions/v1/calendar-feed?project='+encodeURIComponent(PROJ);
 setTimeout(function(){var el=document.getElementById('calURLText');if(el)el.textContent=calFeedURL;},100);
@@ -509,15 +586,15 @@ function renderCal(){
     for(var d=1;d<=ld;d++){
         var s=ds(cY,cM,d),c=document.createElement('div');
         var todayStr=ds(new Date().getFullYear(),new Date().getMonth(),new Date().getDate());
-        c.className='day-cell'+(s===todayStr?' today':'');c.innerHTML='<span class="day-num">'+d+'</span>';
+        c.className='day-cell'+(s===todayStr?' today':'');c.innerHTML='<span class="day-num">'+esc(String(d))+'</span>';
         if(mD[s]){
             var active=mD[s].filter(function(e){return e.status!=='cancelled';});
             if(active.length>0){
                 var scheduled=active.filter(function(e){return e.status==='scheduled';}).length;
                 var pending=active.length-scheduled;
                 var dots='';
-                if(scheduled>0) dots+='<span style="color:#4a4;">✅ '+scheduled+'</span> ';
-                if(pending>0) dots+='<span style="color:#e8742a;">⏳ '+pending+'</span>';
+                if(scheduled>0) dots+='<span style="color:#4a4;">✅ '+esc(String(scheduled))+'</span> ';
+                if(pending>0) dots+='<span style="color:#e8742a;">⏳ '+esc(String(pending))+'</span>';
                 c.innerHTML+='<div style="font-size:10px;font-weight:700;line-height:1.4;">'+dots+'</div>';
             }
         }
@@ -573,8 +650,8 @@ function renderTeamList(){
         row.className='add-person-row';
         row.innerHTML='<div class="person-icon">👤</div>'
             +'<div class="person-info">'
-            +'<div class="person-name">'+c.name+(c.company?' ('+c.company+')':'')+'</div>'
-            +(c.email?'<div class="person-detail">'+c.email+'</div>':'')
+            +'<div class="person-name">'+esc(c.name)+(c.company?' ('+esc(c.company)+')':'')+'</div>'
+            +(c.email?'<div class="person-detail">'+esc(c.email)+'</div>':'')
             +'</div>'
             +'<button class="remove-person" onclick="removePersonFromTeam('+i+')">✕</button>';
         container.appendChild(row);
@@ -594,7 +671,7 @@ function refreshDropdownAndEmails(){
         addedNames[m.name.toLowerCase()]=true;
         var o=document.createElement('option');
         o.value=m.name;
-        o.textContent=m.name;
+        o.textContent=esc(m.name);
         sel.appendChild(o);
     });
     savedContacts.forEach(function(c){
@@ -602,7 +679,7 @@ function refreshDropdownAndEmails(){
         addedNames[c.name.toLowerCase()]=true;
         var o=document.createElement('option');
         o.value=c.name;
-        o.textContent=c.name+(c.company?' ('+c.company+')':'');
+        o.textContent=esc(c.name)+(c.company?' ('+esc(c.company)+')':'');
         sel.appendChild(o);
     });
     // Restore selection if still valid
@@ -624,7 +701,7 @@ function refreshDropdownAndEmails(){
         addedEmails[m.email.toLowerCase()]=true;
         var lbl=document.createElement('label');
         lbl.className='email-row';
-        lbl.innerHTML='<input type="checkbox" value="'+m.email+'" class="emailCheck" checked> '+m.name+' <span style="font-size:10px;color:#5a8fc0;font-weight:600;">(Saved)</span>';
+        lbl.innerHTML='<input type="checkbox" value="'+esc(m.email)+'" class="emailCheck" checked> '+esc(m.name)+' <span style="font-size:10px;color:#5a8fc0;font-weight:600;">(Saved)</span>';
         emailContainer.appendChild(lbl);
     });
     // Saved contacts (skip duplicates already added from team)
@@ -633,7 +710,7 @@ function refreshDropdownAndEmails(){
         addedEmails[c.email.toLowerCase()]=true;
         var lbl=document.createElement('label');
         lbl.className='email-row';
-        lbl.innerHTML='<input type="checkbox" value="'+c.email+'" class="emailCheck" checked>'+c.name+(c.company?' ('+c.company+')':'');
+        lbl.innerHTML='<input type="checkbox" value="'+esc(c.email)+'" class="emailCheck" checked>'+esc(c.name)+(c.company?' ('+esc(c.company)+')':'');
         emailContainer.appendChild(lbl);
     });
 }
@@ -679,16 +756,16 @@ function saveAdditionalRecipients(){
 function renderAdditionalRecipients(){
     var container=document.getElementById('addlEmailList');
     var countEl=document.getElementById('addlCount');
-    if(countEl)countEl.textContent=additionalRecipients.length>0?'('+additionalRecipients.length+')':'';
+    if(countEl)countEl.textContent=additionalRecipients.length>0?'('+esc(String(additionalRecipients.length))+')':'';
     if(!container)return;
     if(additionalRecipients.length===0){container.innerHTML='';return;}
     var html='';
     additionalRecipients.forEach(function(r,i){
         html+='<div style="display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid #333;">';
-        html+='<input type="checkbox" class="addlCheck" value="'+r.email+'" '+(r.checked!==false?'checked':'')+' onchange="toggleAddlRecipient('+i+',this.checked)" style="flex-shrink:0;">';
+        html+='<input type="checkbox" class="addlCheck" value="'+esc(r.email)+'" '+(r.checked!==false?'checked':'')+' onchange="toggleAddlRecipient('+i+',this.checked)" style="flex-shrink:0;">';
         html+='<div style="flex:1;min-width:0;">';
-        html+='<div style="font-size:13px;color:#ccc;font-weight:600;">'+r.name+'</div>';
-        html+='<div style="font-size:11px;color:#888;word-break:break-all;">'+r.email+'</div>';
+        html+='<div style="font-size:13px;color:#ccc;font-weight:600;">'+esc(r.name)+'</div>';
+        html+='<div style="font-size:11px;color:#888;word-break:break-all;">'+esc(r.email)+'</div>';
         html+='</div>';
         html+='<button onclick="removeAdditionalRecipient('+i+')" style="background:none;border:none;color:#c44;cursor:pointer;font-size:14px;padding:0 4px;flex-shrink:0;">✕</button>';
         html+='</div>';
@@ -743,9 +820,16 @@ function submitIR(){
     if(t!=='flexible'){
         var conflicts=checkSchedulingConflicts(d,t,[inspType],inspDur);
         if(conflicts){
-            if(!confirm('Scheduling conflict detected:\n\n'+conflicts.join('\n')+'\n\nSubmit anyway?')) return;
+            showConfirmModal('Scheduling conflict detected:\n\n'+conflicts.join('\n')+'\n\nSubmit anyway?', function(confirmed){
+                if(!confirmed) return;
+                submitIRContinue(d,t,nm);
+            });
+            return;
         }
     }
+    submitIRContinue(d,t,nm);
+}
+function submitIRContinue(d,t,nm){
     var emails=[];
     document.querySelectorAll('.emailCheck:checked').forEach(function(cb){emails.push(cb.value);});
     // Add checked additional recipients
