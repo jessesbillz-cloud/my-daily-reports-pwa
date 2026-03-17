@@ -1213,17 +1213,13 @@ function AccountSettings({user, onBack, onLogout}){
                   Notifications
                 </div>
                 <div style={{fontSize:13,color:C.mut,lineHeight:1.6,marginBottom:14}}>
-                  Email reminders are sent based on your per-job reminder settings. Push notifications deliver real-time scheduling alerts directly to your device.
+                  Get push notifications on your phone when scheduling requests come in and when reports are due.
                 </div>
-                <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"12px 0",borderTop:`1px solid ${C.brd}`}}>
-                  <div><div style={{fontSize:14,fontWeight:600,color:C.lt}}>Email Reminders</div><div style={{fontSize:11,color:C.mut}}>Configured per-job in job settings</div></div>
-                  <div style={{fontSize:12,fontWeight:600,color:C.ok}}>Active</div>
-                </div>
-                
-                <div style={{padding:"14px 0 0",borderTop:`1px solid ${C.brd}`,marginTop:12}}>
+
+                <div>
                   <div style={{fontSize:14,fontWeight:600,color:C.lt,marginBottom:8}}>Push Notifications</div>
                   <div style={{fontSize:12,color:C.mut,lineHeight:1.6,marginBottom:10}}>
-                    Get instant push notifications on your phone when scheduling requests come in. No extra apps needed.
+                    Scheduling alerts and report reminders delivered directly to your device. No extra apps needed.
                   </div>
                   <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
                     <div><div style={{fontSize:13,fontWeight:600,color:pushEnabled?C.ok:C.lt}}>{pushEnabled?"Notifications Enabled":"Notifications Off"}</div><div style={{fontSize:11,color:C.mut}}>{pushEnabled?"You will receive alerts for new requests":"Tap to enable push alerts"}</div></div>
@@ -5692,6 +5688,48 @@ function JobDetail({job, user, onBack, onDeleted}){
 
   const tz=Intl.DateTimeFormat().resolvedOptions().timeZone;
   const today=new Date().toLocaleDateString("en-CA",{timeZone:tz});
+
+  // Auto-create report stubs for scheduled days with no report
+  const autoCreatedRef=useRef(false);
+  useEffect(()=>{
+    if(loading||autoCreatedRef.current)return;
+    const sched=job.schedule||"as_needed";
+    if(sched==="as_needed")return;
+    // Determine which days of week are scheduled
+    const dayMap={Sun:0,Mon:1,Tue:2,Wed:3,Thu:4,Fri:5,Sat:6};
+    let scheduledDOW=[];
+    if(sched==="daily_7")scheduledDOW=[0,1,2,3,4,5,6];
+    else if(sched==="daily_mf")scheduledDOW=[1,2,3,4,5];
+    else if(sched==="custom"&&job.schedule_days?.length)scheduledDOW=job.schedule_days.map(d=>dayMap[d]).filter(n=>n!=null);
+    else return; // weekly or unknown — skip auto-create
+    if(scheduledDOW.length===0)return;
+    // Find existing report dates
+    const existingDates=new Set(rpts.map(r=>r.report_date));
+    // Walk from 30 days ago (or job created_at) to today
+    const startDate=new Date();
+    startDate.setDate(startDate.getDate()-30);
+    if(job.created_at){const jc=new Date(job.created_at);if(jc>startDate)startDate.setTime(jc.getTime());}
+    const todayD=new Date(today+"T12:00:00");
+    const missing=[];
+    const cur=new Date(startDate);cur.setHours(12,0,0,0);
+    while(cur<=todayD){
+      const dow=cur.getDay();
+      if(scheduledDOW.includes(dow)){
+        const ds=cur.toLocaleDateString("en-CA",{timeZone:tz});
+        if(!existingDates.has(ds))missing.push(ds);
+      }
+      cur.setDate(cur.getDate()+1);
+    }
+    if(missing.length===0)return;
+    autoCreatedRef.current=true;
+    // Create stubs in background
+    (async()=>{
+      for(const dt of missing){
+        try{await db.saveReport({job_id:job.id,user_id:user.id,report_date:dt,status:"working",content:{}});}catch(e){console.warn("Auto-create stub failed for",dt,e);}
+      }
+      loadReports(); // Refresh to show new stubs
+    })();
+  },[loading,rpts,job,user.id,today,tz,loadReports]);
   const todayRpt=rpts.find(r=>r.report_date===today);
   const submitted=rpts.filter(r=>r.status==="submitted");
   const working=rpts.filter(r=>r.status!=="submitted");
@@ -6067,7 +6105,7 @@ function JobDetail({job, user, onBack, onDeleted}){
             {jdEffSch()!=="as_needed"&&(
               <div style={{marginBottom:16}}>
                 <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"12px 14px",background:C.inp,border:`1px solid ${C.brd}`,borderRadius:8,marginBottom:10}}>
-                  <span style={{fontSize:14,fontWeight:600,color:C.lt}}>Email Reminders</span>
+                  <span style={{fontSize:14,fontWeight:600,color:C.lt}}>Report Reminders</span>
                   <button onClick={()=>setJdRemOn(!jdRemOn)} style={{width:48,height:26,borderRadius:13,border:"none",background:jdRemOn?C.ok:C.brd,cursor:"pointer",position:"relative",transition:"background 0.2s"}}>
                     <div style={{width:20,height:20,borderRadius:"50%",background:"#fff",position:"absolute",top:3,left:jdRemOn?25:3,transition:"left 0.2s"}}/>
                   </button>
