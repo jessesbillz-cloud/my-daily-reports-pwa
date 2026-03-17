@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <meta name="theme-color" content="#0f0f0f" />
@@ -20,7 +20,9 @@
   <link rel="icon" type="image/png" href="icon-192.png" />
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
-    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0f0f0f; color: #fff; min-height: 100vh; -webkit-font-smoothing: antialiased; }
+    html { overflow-x: hidden; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0f0f0f; color: #fff; min-height: 100vh; -webkit-font-smoothing: antialiased; overflow-x: hidden; position: relative; width: 100%; }
+    html, body { overscroll-behavior-x: none; touch-action: pan-y; }
     #root { min-height: 100vh; }
     input:focus, select:focus, textarea:focus { border-color: #e8742a !important; outline: none; }
     .btn-o:hover:not(:disabled) { background: #b8570f !important; }
@@ -43,7 +45,7 @@
 const { useState, useEffect, useRef, useCallback, useMemo } = React;
 const SB_URL = "https://wluvkmpncafugdbunlkw.supabase.co";
 const SB_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndsdXZrbXBuY2FmdWdkYnVubGt3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzIzMDU1MTUsImV4cCI6MjA4Nzg4MTUxNX0.HZpQ2xVGpf4EQ0BVDmIEuPqW5T_eNG5OqBNAqT03rH8";
-const C = {bg:"#0f0f0f",card:"#1a1a1a",brd:"#333",inp:"#222",org:"#d4651a",orgH:"#b8570f",blu:"#5a8fc0",txt:"#fff",mut:"#888",lt:"#ccc",err:"#ef4444",ok:"#22c55e"};
+const C = {bg:"#0f0f0f",card:"#1a1a1a",brd:"#333",inp:"#222",org:"#b85a15",orgH:"#a04e10",blu:"#4778a5",txt:"#fff",mut:"#999",lt:"#ccc",err:"#ef4444",ok:"#22c55e"};
 let AUTH_TOKEN = null;
 
 // Extract real text positions from PDF using pdf.js getTextContent()
@@ -3131,7 +3133,9 @@ function WorkLogEditor({job, user, onBack, reportDate}){
     const drawTextSection=(title,text)=>{
       if(!text||!text.trim()){return;}
       // Split into lines, each non-empty line becomes a bullet
-      const rawLines=text.split("\n").filter(l=>l.trim());
+      let rawLines=text.split("\n").filter(l=>l.trim());
+      // If dictated as one block (no newlines), split by sentences so each gets its own bullet
+      if(rawLines.length===1){const sentences=rawLines[0].split(/(?<=\.)\s+/).filter(s=>s.trim());if(sentences.length>1)rawLines=sentences;}
       const fontSize=11;
       const lineHeight=16; // spacing within a wrapped bullet
       const bulletGap=18; // double-space between separate bullets
@@ -3389,13 +3393,14 @@ function WorkLogEditor({job, user, onBack, reportDate}){
       const pdfBlob=new Blob([pdfBytes],{type:"application/pdf"});
       const pdfFilename=`${(job.name||"WorkLog").replace(/[^a-zA-Z0-9_ -]/g,"")}_${submitDate}.pdf`;
 
-      // Upload PDF to storage
+      // Upload PDF to storage (with timeout for flaky connections)
       setWlSubmitStep("Uploading report...");
       const storagePath=`${user.id}/${job.id}/submitted/${submitDate}_worklog.pdf`;
-      let upR=await fetch(`${SB_URL}/storage/v1/object/report-source-docs/${storagePath}`,{
+      const fetchWithTimeout=async(url,opts,ms=20000)=>{const c=new AbortController();const t=setTimeout(()=>c.abort(),ms);try{const r=await fetch(url,{...opts,signal:c.signal});clearTimeout(t);return r;}catch(e){clearTimeout(t);throw e;}};
+      let upR=await fetchWithTimeout(`${SB_URL}/storage/v1/object/report-source-docs/${storagePath}`,{
         method:"POST",headers:{apikey:SB_KEY,Authorization:`Bearer ${AUTH_TOKEN||SB_KEY}`,"Content-Type":"application/pdf"},body:pdfBlob
       });
-      if(!upR.ok){upR=await fetch(`${SB_URL}/storage/v1/object/report-source-docs/${storagePath}`,{
+      if(!upR.ok){upR=await fetchWithTimeout(`${SB_URL}/storage/v1/object/report-source-docs/${storagePath}`,{
         method:"PUT",headers:{apikey:SB_KEY,Authorization:`Bearer ${AUTH_TOKEN||SB_KEY}`,"Content-Type":"application/pdf"},body:pdfBlob
       });}
 
@@ -3403,12 +3408,13 @@ function WorkLogEditor({job, user, onBack, reportDate}){
       const u8=new Uint8Array(pdfBytes);const ch=[];for(let i=0;i<u8.length;i+=8192)ch.push(String.fromCharCode.apply(null,u8.subarray(i,i+8192)));
       const pdfBase64=btoa(ch.join(""));
 
-      // Save report data
+      // Save report data (with timeout)
       setWlSubmitStep("Saving report...");
-      await db.saveReport({
+      const saveP=db.saveReport({
         job_id:job.id,user_id:user.id,report_date:submitDate,status:"submitted",
         content:buildContent()
       });
+      await Promise.race([saveP,new Promise((_,rej)=>setTimeout(()=>rej(new Error("Save timed out")),15000))]);
 
       // Build email
       const todayDisp=new Date(todayISO+"T12:00:00").toLocaleDateString("en-US",{weekday:"long",month:"long",day:"numeric",year:"numeric",timeZone:tz});
@@ -3478,13 +3484,30 @@ function WorkLogEditor({job, user, onBack, reportDate}){
     setSaving(true);
     try{
       const saveDate=reportDate||new Date().toLocaleDateString("en-CA",{timeZone:tz});
-      await db.saveReport({
+      // Wrap save in a timeout so spotty network can't hang forever
+      const savePromise=db.saveReport({
         job_id:job.id,user_id:user.id,report_date:saveDate,status:wlReportStatus||"working_copy",
         content:buildContent()
       });
-    }catch(e){console.error("Save failed:",e);}
+      const timeout=new Promise((_,rej)=>setTimeout(()=>rej(new Error("Save timed out")),15000));
+      await Promise.race([savePromise,timeout]);
+    }catch(e){console.error("Save failed:",e);showToast&&showToast("Save failed — check connection");}
     finally{savingRef.current=false;setSaving(false);}
   };
+
+  // Safety valve: if saving state gets stuck for >20s, force-reset it
+  useEffect(()=>{
+    if(!saving)return;
+    const t=setTimeout(()=>{savingRef.current=false;setSaving(false);console.warn("Force-reset stuck saving state");},20000);
+    return()=>clearTimeout(t);
+  },[saving]);
+
+  // Safety valve: if submitting state gets stuck for >45s, force-reset it
+  useEffect(()=>{
+    if(!submitting)return;
+    const t=setTimeout(()=>{setSubmitting(false);console.warn("Force-reset stuck submitting state");showToast&&showToast("Submit timed out — please try again");},45000);
+    return()=>clearTimeout(t);
+  },[submitting]);
 
   // Auto-save every 30 seconds if content changed (skip after submit)
   const lastSaveHash=useRef("");
@@ -3545,6 +3568,7 @@ function WorkLogEditor({job, user, onBack, reportDate}){
           <div style={{width:48,height:48,border:"3px solid "+C.brd,borderTopColor:C.org,borderRadius:"50%",animation:"spin 1s linear infinite"}}/>
           <div style={{fontSize:16,fontWeight:700,color:C.txt}}>{wlSubmitStep||"Submitting..."}</div>
           <div style={{fontSize:13,color:C.mut}}>Please don't close this screen</div>
+          <button onClick={()=>{savingRef.current=false;setSaving(false);setSubmitting(false);}} style={{marginTop:12,padding:"10px 24px",background:"transparent",border:`1px solid ${C.brd}`,borderRadius:8,color:C.mut,fontSize:13,cursor:"pointer"}}>Cancel</button>
           <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
         </div>
       )}
@@ -3653,6 +3677,7 @@ function WorkLogEditor({job, user, onBack, reportDate}){
       {fieldMode&&(
         <div style={{position:"fixed",bottom:0,left:0,right:0,padding:"10px 20px",borderTop:`1px solid ${C.brd}`,background:C.card,zIndex:100}}>
           <div style={{display:"flex",gap:10,maxWidth:560,margin:"0 auto"}}>
+            <button onClick={()=>{savingRef.current=false;setSaving(false);setSubmitting(false);onBack();}} style={{padding:"14px 16px",background:"transparent",border:`1px solid ${C.brd}`,borderRadius:10,color:C.mut,fontSize:13,fontWeight:600,cursor:"pointer"}}>Exit</button>
             <button onClick={async()=>{await saveWorking();onBack();}} disabled={saving} style={{flex:1,padding:"14px 0",background:C.org,border:"none",borderRadius:10,color:"#fff",fontSize:14,fontWeight:700,cursor:saving?"default":"pointer",opacity:saving?0.7:1,display:"flex",alignItems:"center",justifyContent:"center",gap:6}}>
               <span>✓</span> {saving?"Saving...":"Save & Exit"}
             </button>
@@ -4273,7 +4298,9 @@ function ReportEditor({job, user, onBack, reportDate}){
       reader.readAsDataURL(file);
     });
     // Reset input so same file can be re-selected
+    e.target.value="";
     if(photoRef.current)photoRef.current.value="";
+    if(fieldPhotoRef.current)fieldPhotoRef.current.value="";
   };
 
   const reSavingRef=useRef(false);
@@ -4285,7 +4312,7 @@ function ReportEditor({job, user, onBack, reportDate}){
       // Always use fresh date (not stale closure if app was open overnight)
       const saveDate=reportDate||new Date().toLocaleDateString("en-CA",{timeZone:tz});
       const content={vals,lockVals,photos,photoLayout,lockFields,editFields,sigTimestamps};
-      await db.saveReport({
+      const savePromise=db.saveReport({
         job_id:job.id,
         user_id:user.id,
         report_date:saveDate,
@@ -4293,16 +4320,32 @@ function ReportEditor({job, user, onBack, reportDate}){
         content:JSON.stringify(content),
         updated_at:new Date().toISOString()
       });
+      const timeout=new Promise((_,rej)=>setTimeout(()=>rej(new Error("Save timed out")),15000));
+      await Promise.race([savePromise,timeout]);
     }catch(e){
       console.error("Save error:",e);
-      showToast("Save failed — try again");
+      showToast("Save failed — check connection");
     }finally{reSavingRef.current=false;setSaving(false);}
   };
+
+  // Safety valve: if saving state gets stuck for >20s, force-reset it
+  useEffect(()=>{
+    if(!saving)return;
+    const t=setTimeout(()=>{reSavingRef.current=false;setSaving(false);console.warn("Force-reset stuck saving state");},20000);
+    return()=>clearTimeout(t);
+  },[saving]);
 
   const [submitting,setSubmitting]=useState(false);
   const [submitStep,setSubmitStep]=useState("");
   const [viewLoading,setViewLoading]=useState(false);
   const busyRef=useRef(false); // prevent View+Submit overlap
+
+  // Safety valve: if submitting state gets stuck for >45s, force-reset it
+  useEffect(()=>{
+    if(!submitting)return;
+    const t=setTimeout(()=>{busyRef.current=false;setSubmitting(false);console.warn("Force-reset stuck submitting state");showToast("Submit timed out — please try again");},45000);
+    return()=>clearTimeout(t);
+  },[submitting]);
   const [viewingReport,setViewingReport]=useState(null); // array of page image data URLs
   const [viewDocxHtml,setViewDocxHtml]=useState(null); // HTML string for DOCX preview
   const [editablePreview,setEditablePreview]=useState(null); // {pages:[{imgUrl,w,h}],fields:[...]} for desktop interactive edit
@@ -5340,6 +5383,7 @@ function ReportEditor({job, user, onBack, reportDate}){
           <div style={{width:48,height:48,border:"3px solid "+C.brd,borderTopColor:C.org,borderRadius:"50%",animation:"spin 1s linear infinite"}}/>
           <div style={{fontSize:16,fontWeight:700,color:C.txt}}>{submitStep||"Generating Report..."}</div>
           <div style={{fontSize:13,color:C.mut}}>Please don't close this screen</div>
+          <button onClick={()=>{reSavingRef.current=false;setSaving(false);busyRef.current=false;setSubmitting(false);}} style={{marginTop:12,padding:"10px 24px",background:"transparent",border:`1px solid ${C.brd}`,borderRadius:8,color:C.mut,fontSize:13,cursor:"pointer"}}>Cancel</button>
           <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
         </div>
       )}
@@ -5397,6 +5441,7 @@ function ReportEditor({job, user, onBack, reportDate}){
           {/* Bottom bar */}
           <div style={{position:"fixed",bottom:0,left:0,right:0,padding:"12px 20px",borderTop:`1px solid ${C.brd}`,background:C.card,zIndex:100}}>
             <div style={{maxWidth:600,margin:"0 auto",display:"flex",gap:10}}>
+              <button onClick={()=>{reSavingRef.current=false;setSaving(false);busyRef.current=false;setSubmitting(false);onBack();}} style={{padding:"14px 12px",background:"transparent",border:`1px solid ${C.brd}`,borderRadius:10,color:C.mut,fontSize:13,fontWeight:600,cursor:"pointer"}}>Exit</button>
               <button onClick={async()=>{await saveWorking();showToast("Saved!");}} disabled={saving} style={{flex:1,padding:"14px 0",background:C.blu,border:"none",borderRadius:10,color:"#fff",fontSize:14,fontWeight:700,cursor:saving?"default":"pointer",opacity:saving?0.6:1}}>{saving?"Saving...":"Save Draft"}</button>
               <button onClick={submitReport} disabled={submitting||viewLoading} className="btn-o" style={{flex:1,padding:"14px 0",background:C.org,border:"none",borderRadius:10,color:"#fff",fontSize:14,fontWeight:700,cursor:submitting?"default":"pointer",opacity:submitting?0.6:1}}>{submitting?"...":"Submit"}</button>
             </div>
@@ -6874,7 +6919,7 @@ function Dashboard({user, onLogout}){
     <div style={{minHeight:"100vh",background:C.bg,color:C.txt,position:"relative"}} onClick={e=>{if(showSet&&!e.target.closest('[data-s]'))setShowSet(false);if(showDD&&!e.target.closest('[data-d]'))setShowDD(false);}}>
       {dashToast&&<div style={{position:"fixed",bottom:30,left:"50%",transform:"translateX(-50%)",background:"#333",color:"#fff",padding:"10px 20px",borderRadius:8,fontSize:13,zIndex:99999}}>{dashToast}</div>}
       {/* Ghosted MDR watermark */}
-      <div style={{position:"fixed",top:"50%",left:"50%",transform:"translate(-50%,-50%)",opacity:0.03,pointerEvents:"none",zIndex:0,display:"flex",flexDirection:"column",alignItems:"center",gap:8}}>
+      <div aria-hidden="true" role="presentation" style={{position:"fixed",top:"50%",left:"50%",transform:"translate(-50%,-50%)",opacity:0.03,pointerEvents:"none",zIndex:0,display:"flex",flexDirection:"column",alignItems:"center",gap:8}}>
         <img src="logo.jpg" alt="" style={{width:180,height:180,borderRadius:16,objectFit:"contain"}}/>
         <div style={{fontSize:22,fontWeight:800,letterSpacing:1,color:C.txt,whiteSpace:"nowrap"}}>My Daily Reports</div>
       </div>
@@ -7890,7 +7935,7 @@ function App(){
   if(setupDone===false)return<SetupWizard user={user} inviteCompany={inviteCompany} onComplete={()=>setSetupDone(true)}/>;
 
   // Fully set up — show dashboard
-  return<><OfflineBanner/><Dashboard user={user} onLogout={handleLogout}/><InstallBanner/><ConfirmOverlay/></>;
+  return<><OfflineBanner/><main><Dashboard user={user} onLogout={handleLogout}/></main><InstallBanner/><ConfirmOverlay/></>;
 }
 ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
 </script>
