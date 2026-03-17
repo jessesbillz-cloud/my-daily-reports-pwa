@@ -6516,6 +6516,9 @@ function Dashboard({user, onLogout}){
   const [calYear,setCalYear]=useState(new Date().getFullYear());
   const [calMonth,setCalMonth]=useState(new Date().getMonth());
   const [editReq,setEditReq]=useState(null);
+  const [editReqDate,setEditReqDate]=useState("");
+  const [editReqTime,setEditReqTime]=useState("");
+  const [editReqSaving,setEditReqSaving]=useState(false);
   const [showSubDash,setShowSubDash]=useState(false);
   const [shareCopied,setShareCopied]=useState(false);
   const [navRestored,setNavRestored]=useState(false);
@@ -7075,11 +7078,9 @@ function Dashboard({user, onLogout}){
                               Confirm Schedule
                             </button>
                           )}
-                          {rq.status==="scheduled"&&(
-                            <button onClick={async(e)=>{e.stopPropagation();const btn=e.currentTarget;if(btn.disabled)return;btn.disabled=true;btn.style.opacity="0.5";try{await db.updateRequest(rq.id,{status:"pending"});await loadRequests();}catch(er){showToast("Error — try again");btn.disabled=false;btn.style.opacity="1";}}} style={{flex:1,padding:"7px 0",fontSize:12,fontWeight:700,borderRadius:6,background:C.org,border:"none",color:"#fff",cursor:"pointer"}}>
-                              Edit
-                            </button>
-                          )}
+                          <button onClick={(e)=>{e.stopPropagation();setEditReq(rq);setEditReqDate(rq.requested_date||"");setEditReqTime((rq.inspection_time||"").substring(0,5));}} style={{padding:"7px 12px",fontSize:12,fontWeight:700,borderRadius:6,background:"transparent",border:`1px solid ${C.blu}`,color:C.blu,cursor:"pointer"}}>
+                            Edit
+                          </button>
                           <button onClick={async(e)=>{e.stopPropagation();if(!await askConfirm("Delete this request?"))return;const btn=e.currentTarget;btn.disabled=true;btn.style.opacity="0.5";try{await db.deleteRequest(rq.id);await loadRequests();}catch(er){showToast("Error — try again");btn.disabled=false;btn.style.opacity="1";}}} style={{padding:"7px 12px",fontSize:12,fontWeight:700,borderRadius:6,background:"transparent",border:`1px solid #ef4444`,color:"#ef4444",cursor:"pointer"}}>
                             Delete
                           </button>
@@ -7108,6 +7109,39 @@ function Dashboard({user, onLogout}){
             </div>
           );
         })()}
+
+        {/* ── Edit Request Modal ── */}
+        {editReq&&(
+          <div onClick={()=>{if(!editReqSaving)setEditReq(null);}} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:99999,padding:20}}>
+            <div onClick={e=>e.stopPropagation()} style={{background:C.card,border:`1px solid ${C.brd}`,borderRadius:14,padding:"24px 20px",maxWidth:360,width:"100%"}}>
+              <div style={{fontSize:16,fontWeight:700,color:C.txt,marginBottom:4}}>Edit Request</div>
+              <div style={{fontSize:12,color:C.mut,marginBottom:16}}>{editReq.jobs?.name||"Job"} — {editReq.requester_name||editReq.submitted_by||""}</div>
+              <div style={{marginBottom:12}}>
+                <div style={{fontSize:12,fontWeight:600,color:C.lt,marginBottom:4}}>Date</div>
+                <input type="date" value={editReqDate} onChange={e=>setEditReqDate(e.target.value)} style={{width:"100%",padding:"10px 12px",background:C.inp,border:`1px solid ${C.brd}`,borderRadius:8,color:C.txt,fontSize:14}}/>
+              </div>
+              <div style={{marginBottom:20}}>
+                <div style={{fontSize:12,fontWeight:600,color:C.lt,marginBottom:4}}>Time</div>
+                <input type="time" value={editReqTime} onChange={e=>setEditReqTime(e.target.value)} style={{width:"100%",padding:"10px 12px",background:C.inp,border:`1px solid ${C.brd}`,borderRadius:8,color:C.txt,fontSize:14}}/>
+              </div>
+              <div style={{display:"flex",gap:10}}>
+                <button onClick={()=>setEditReq(null)} disabled={editReqSaving} style={{flex:1,padding:"12px 0",background:C.inp,border:`1px solid ${C.brd}`,borderRadius:8,color:C.lt,fontSize:14,fontWeight:600,cursor:"pointer"}}>Cancel</button>
+                <button onClick={async()=>{
+                  if(!editReqDate||!editReqTime){showToast("Pick a date and time");return;}
+                  setEditReqSaving(true);
+                  try{
+                    await db.updateRequest(editReq.id,{requested_date:editReqDate,inspection_date:editReqDate,inspection_time:editReqTime+":00"});
+                    await loadRequests();
+                    setEditReq(null);
+                    setSelCalDay(editReqDate);
+                    showToast("Request updated");
+                  }catch(er){showToast("Error — try again");}
+                  finally{setEditReqSaving(false);}
+                }} disabled={editReqSaving} style={{flex:1,padding:"12px 0",background:C.blu,border:"none",borderRadius:8,color:"#fff",fontSize:14,fontWeight:700,cursor:editReqSaving?"default":"pointer",opacity:editReqSaving?0.6:1}}>{editReqSaving?"Saving...":"Save"}</button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* ── Subscribe to Calendar section ── */}
         {showSubDash&&(()=>{
