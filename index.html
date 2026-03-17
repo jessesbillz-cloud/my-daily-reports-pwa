@@ -835,6 +835,7 @@ const db = {
 
 /* ── Account Settings Page ── */
 function AccountSettings({user, onBack, onLogout}){
+  const [showSupport,setShowSupport]=useState(false);
   const [profile,setProfile]=useState(null);
   const [loading,setLoading]=useState(true);
   const [saving,setSaving]=useState(false);
@@ -1029,7 +1030,7 @@ function AccountSettings({user, onBack, onLogout}){
       {/* Header */}
       <div style={{borderBottom:`1px solid ${C.brd}`,background:C.card,padding:"14px 16px"}}>
       <div style={{display:"flex",alignItems:"center",gap:10,maxWidth:600,margin:"0 auto"}}>
-        <button onClick={onBack} style={{background:"none",border:"none",color:C.mut,fontSize:28,cursor:"pointer",lineHeight:1,minWidth:48,minHeight:48,display:"flex",alignItems:"center",justifyContent:"center"}}>←</button>
+        <button onClick={onBack} style={{background:C.inp,border:`1px solid ${C.brd}`,borderRadius:10,color:C.lt,fontSize:22,cursor:"pointer",lineHeight:1,width:48,height:48,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>←</button>
         <span style={{fontWeight:700,fontSize:17}}>Account Settings</span>
       </div>
       </div>
@@ -1323,7 +1324,8 @@ function AccountSettings({user, onBack, onLogout}){
         )}
       </div>
     </div>
-  );
+    <SupportChat user={user}/>
+  </>;
 }
 
 /* ── Click-to-Place Template Field Editor ── */
@@ -2133,7 +2135,7 @@ function CreateJob({user, onBack, onCreated}){
       {cjToast&&<div style={{position:"fixed",bottom:30,left:"50%",transform:"translateX(-50%)",background:"#333",color:"#fff",padding:"10px 20px",borderRadius:8,fontSize:13,zIndex:99999}}>{cjToast}</div>}
       <div style={{borderBottom:`1px solid ${C.brd}`,background:C.card,padding:"14px 16px"}}>
       <div style={{display:"flex",alignItems:"center",gap:10,maxWidth:600,margin:"0 auto"}}>
-        <button onClick={onBack} style={{background:"none",border:"none",color:C.mut,fontSize:28,cursor:"pointer",lineHeight:1,minWidth:48,minHeight:48,display:"flex",alignItems:"center",justifyContent:"center"}}>←</button>
+        <button onClick={onBack} style={{background:C.inp,border:`1px solid ${C.brd}`,borderRadius:10,color:C.lt,fontSize:22,cursor:"pointer",lineHeight:1,width:48,height:48,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>←</button>
         <span style={{fontWeight:700,fontSize:17}}>New Job</span>
       </div>
       </div>
@@ -2450,7 +2452,7 @@ function ArchivedJobs({jobs, onBack, onSelect}){
     <div className="page-in" style={{minHeight:"100vh",background:C.bg,color:C.txt}}>
       <div style={{borderBottom:`1px solid ${C.brd}`,background:C.card,padding:"14px 16px"}}>
       <div style={{display:"flex",alignItems:"center",gap:10,maxWidth:600,margin:"0 auto"}}>
-        <button onClick={onBack} style={{background:"none",border:"none",color:C.mut,fontSize:28,cursor:"pointer",lineHeight:1,minWidth:48,minHeight:48,display:"flex",alignItems:"center",justifyContent:"center"}}>←</button>
+        <button onClick={onBack} style={{background:C.inp,border:`1px solid ${C.brd}`,borderRadius:10,color:C.lt,fontSize:22,cursor:"pointer",lineHeight:1,width:48,height:48,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>←</button>
         <span style={{fontWeight:700,fontSize:17}}>Archived Jobs</span>
         <span style={{fontSize:13,color:C.mut,marginLeft:"auto"}}>{jobs.length} job{jobs.length!==1?"s":""}</span>
       </div>
@@ -3496,7 +3498,7 @@ function WorkLogEditor({job, user, onBack, reportDate}){
     return(
       <div style={{minHeight:"100vh",background:C.bg,color:C.txt,display:"flex",flexDirection:"column"}}>
         <div style={{display:"flex",alignItems:"center",gap:10,padding:"12px 16px",borderBottom:`1px solid ${C.brd}`,background:C.card}}>
-          <button onClick={()=>setViewingPreview(null)} style={{background:"none",border:"none",color:C.mut,fontSize:28,cursor:"pointer",padding:"10px 14px",lineHeight:1,borderRadius:8,minWidth:48,minHeight:48,display:"flex",alignItems:"center",justifyContent:"center"}}>←</button>
+          <button onClick={()=>setViewingPreview(null)} style={{background:C.inp,border:`1px solid ${C.brd}`,borderRadius:10,color:C.lt,fontSize:22,cursor:"pointer",lineHeight:1,width:48,height:48,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>←</button>
           <div style={{flex:1}}>
             <div style={{fontWeight:700,fontSize:17}}>Report Preview</div>
             <div style={{fontSize:12,color:C.mut}}>{viewingPreview.length} page{viewingPreview.length>1?"s":""}</div>
@@ -3534,7 +3536,7 @@ function WorkLogEditor({job, user, onBack, reportDate}){
       {/* Header */}
       <div style={{borderBottom:`1px solid ${C.brd}`,background:C.card,padding:"14px 16px"}}>
       <div style={{display:"flex",alignItems:"center",gap:12,maxWidth:600,margin:"0 auto"}}>
-        <button onClick={async()=>{await saveWorking();onBack();}} style={{background:"none",border:"none",color:C.mut,fontSize:28,cursor:"pointer",padding:"10px 14px",lineHeight:1,borderRadius:8,minWidth:48,minHeight:48,display:"flex",alignItems:"center",justifyContent:"center"}}>←</button>
+        <button onClick={async()=>{await saveWorking();onBack();}} style={{background:C.inp,border:`1px solid ${C.brd}`,borderRadius:10,color:C.lt,fontSize:22,cursor:"pointer",lineHeight:1,width:48,height:48,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>←</button>
         <div style={{flex:1,minWidth:0}}>
           <div style={{fontWeight:700,fontSize:16,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{job.name}</div>
           <div style={{fontSize:12,color:C.mut}}>Work Log — {new Date(todayISO+"T12:00:00").toLocaleDateString("en-US",{weekday:"short",month:"short",day:"numeric",timeZone:tz})}</div>
@@ -3583,7 +3585,7 @@ function WorkLogEditor({job, user, onBack, reportDate}){
               <div>
                 {/* Work description textarea */}
                 <div style={{marginBottom:14}}>
-                  <textarea value={selCon.description||""} onChange={e=>{const v=e.target.value;setContractors(p=>p.map(c=>c.id===selCon.id?{...c,description:v}:c));}} placeholder="Tap mic or type work notes..." style={{width:"100%",minHeight:130,padding:"14px 16px",background:C.card,border:`1px solid ${C.brd}`,borderRadius:12,color:C.txt,fontSize:16,lineHeight:1.5,resize:"vertical",boxSizing:"border-box",fontFamily:"inherit"}}/>
+                  <textarea value={selCon.description||""} onChange={e=>{const v=e.target.value;setContractors(p=>p.map(c=>c.id===selCon.id?{...c,description:v}:c));}} placeholder="Tap mic or type work notes..." style={{width:"100%",minHeight:220,padding:"14px 16px",background:C.card,border:`1px solid ${C.brd}`,borderRadius:12,color:C.txt,fontSize:16,lineHeight:1.5,resize:"vertical",boxSizing:"border-box",fontFamily:"inherit"}}/>
                 </div>
 
                 {/* Hours + Quantity row */}
@@ -3636,9 +3638,6 @@ function WorkLogEditor({job, user, onBack, reportDate}){
       {fieldMode&&(
         <div style={{position:"fixed",bottom:0,left:0,right:0,padding:"10px 20px",borderTop:`1px solid ${C.brd}`,background:C.card,zIndex:100}}>
           <div style={{display:"flex",gap:10,maxWidth:560,margin:"0 auto"}}>
-            <button onClick={()=>{saveWorking();setFieldMode(false);}} style={{flex:1,padding:"14px 0",background:C.inp,border:`1px solid ${C.brd}`,borderRadius:10,color:C.lt,fontSize:14,fontWeight:700,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",gap:6}}>
-              <span>📋</span> Full Editor
-            </button>
             <button onClick={async()=>{await saveWorking();onBack();}} disabled={saving} style={{flex:1,padding:"14px 0",background:C.org,border:"none",borderRadius:10,color:"#fff",fontSize:14,fontWeight:700,cursor:saving?"default":"pointer",opacity:saving?0.7:1,display:"flex",alignItems:"center",justifyContent:"center",gap:6}}>
               <span>✓</span> {saving?"Saving...":"Save & Exit"}
             </button>
@@ -5199,7 +5198,7 @@ function ReportEditor({job, user, onBack, reportDate}){
     return(
       <div style={{minHeight:"100vh",background:C.bg,color:C.txt,display:"flex",flexDirection:"column"}}>
         <div style={{display:"flex",alignItems:"center",gap:10,padding:"12px 16px",borderBottom:`1px solid ${C.brd}`,background:C.card}}>
-          <button onClick={()=>{setViewingReport(null);setViewDocxHtml(null);setEditablePreview(null);}} style={{background:"none",border:"none",color:C.mut,fontSize:28,cursor:"pointer",padding:"10px 14px",lineHeight:1,borderRadius:8,minWidth:48,minHeight:48,display:"flex",alignItems:"center",justifyContent:"center"}}>←</button>
+          <button onClick={()=>{setViewingReport(null);setViewDocxHtml(null);setEditablePreview(null);}} style={{background:C.inp,border:`1px solid ${C.brd}`,borderRadius:10,color:C.lt,fontSize:22,cursor:"pointer",lineHeight:1,width:48,height:48,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>←</button>
           <div style={{flex:1}}>
             <div style={{fontWeight:700,fontSize:17}}>{useEditable?"Edit on Preview":"Report Preview"}</div>
             <div style={{fontSize:12,color:C.mut}}>{useEditable?"Click any field to edit directly on the PDF":"This is how your report will look"}</div>
@@ -5333,7 +5332,7 @@ function ReportEditor({job, user, onBack, reportDate}){
       {toast&&<div style={{position:"fixed",top:60,left:"50%",transform:"translateX(-50%)",background:C.card,border:`1px solid ${C.ok}`,borderRadius:10,padding:"10px 20px",fontSize:14,fontWeight:600,color:C.ok,zIndex:9999}}>{toast}</div>}
       {/* Header */}
       <div style={{display:"flex",alignItems:"center",gap:12,padding:"14px 16px",borderBottom:`1px solid ${C.brd}`,background:C.card}}>
-        <button onClick={async()=>{await saveWorking();onBack();}} style={{background:"none",border:"none",color:C.mut,fontSize:28,cursor:"pointer",padding:"10px 14px",lineHeight:1,borderRadius:8,minWidth:48,minHeight:48,display:"flex",alignItems:"center",justifyContent:"center"}}>←</button>
+        <button onClick={async()=>{await saveWorking();onBack();}} style={{background:C.inp,border:`1px solid ${C.brd}`,borderRadius:10,color:C.lt,fontSize:22,cursor:"pointer",lineHeight:1,width:48,height:48,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>←</button>
         <div style={{flex:1,minWidth:0}}>
           <div style={{fontWeight:700,fontSize:17}}>{reportStatus==="submitted"?"Submitted Report":"Today's Report"}</div>
           <div style={{fontSize:12,color:C.mut,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{job.name}</div>
@@ -5373,7 +5372,7 @@ function ReportEditor({job, user, onBack, reportDate}){
             <div key={f.name} style={{marginBottom:14}}>
               <label style={{fontSize:13,fontWeight:600,color:C.lt,marginBottom:6,display:"block"}}>{f.name}</label>
               {f.voiceEnabled?(
-                <textarea value={vals[f.name]||""} onChange={e=>setVal(f.name,e.target.value)} placeholder="Tap here and use your keyboard mic to dictate..." rows={4} style={{width:"100%",boxSizing:"border-box",background:C.inp,border:`1px solid ${C.brd}`,borderRadius:10,padding:"12px 14px",fontSize:15,color:C.lt,resize:"vertical",minHeight:100,lineHeight:1.5}}/>
+                <textarea value={vals[f.name]||""} onChange={e=>setVal(f.name,e.target.value)} placeholder="Tap here and use your keyboard mic to dictate..." rows={6} style={{width:"100%",boxSizing:"border-box",background:C.inp,border:`1px solid ${C.brd}`,borderRadius:10,padding:"12px 14px",fontSize:15,color:C.lt,resize:"vertical",minHeight:200,lineHeight:1.5}}/>
               ):(
                 <input type="text" value={vals[f.name]||""} onChange={e=>setVal(f.name,e.target.value)} placeholder={"Enter "+f.name+"..."} style={{width:"100%",boxSizing:"border-box",background:C.inp,border:`1px solid ${C.brd}`,borderRadius:10,padding:"12px 14px",fontSize:15,color:C.lt}}/>
               )}
@@ -5383,7 +5382,6 @@ function ReportEditor({job, user, onBack, reportDate}){
           {/* Bottom bar */}
           <div style={{position:"fixed",bottom:0,left:0,right:0,padding:"12px 20px",borderTop:`1px solid ${C.brd}`,background:C.card,zIndex:100}}>
             <div style={{maxWidth:600,margin:"0 auto",display:"flex",gap:10}}>
-              <button onClick={()=>setFieldMode(false)} style={{flex:1,padding:"14px 0",background:C.card,border:`1px solid ${C.brd}`,borderRadius:10,color:C.mut,fontSize:14,fontWeight:700,cursor:"pointer"}}>📋 Full Editor</button>
               <button onClick={async()=>{await saveWorking();showToast("Saved!");}} disabled={saving} style={{flex:1,padding:"14px 0",background:C.blu,border:"none",borderRadius:10,color:"#fff",fontSize:14,fontWeight:700,cursor:saving?"default":"pointer",opacity:saving?0.6:1}}>{saving?"Saving...":"Save Draft"}</button>
               <button onClick={submitReport} disabled={submitting||viewLoading} className="btn-o" style={{flex:1,padding:"14px 0",background:C.org,border:"none",borderRadius:10,color:"#fff",fontSize:14,fontWeight:700,cursor:submitting?"default":"pointer",opacity:submitting?0.6:1}}>{submitting?"...":"Submit"}</button>
             </div>
@@ -5819,7 +5817,7 @@ function JobDetail({job, user, onBack, onDeleted}){
       {/* Header */}
       <div style={{borderBottom:`1px solid ${C.brd}`,background:C.card,padding:"14px 16px"}}>
       <div style={{display:"flex",alignItems:"center",gap:12,maxWidth:600,margin:"0 auto"}}>
-        <button onClick={onBack} style={{background:"none",border:"none",color:C.mut,fontSize:28,cursor:"pointer",padding:"10px 14px",lineHeight:1,borderRadius:8,minWidth:48,minHeight:48,display:"flex",alignItems:"center",justifyContent:"center"}}>←</button>
+        <button onClick={onBack} style={{background:C.inp,border:`1px solid ${C.brd}`,borderRadius:10,color:C.lt,fontSize:22,cursor:"pointer",lineHeight:1,width:48,height:48,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>←</button>
         <div style={{flex:1,minWidth:0}}>
           <div style={{fontWeight:700,fontSize:17,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{job.name}</div>
           {job.site_address&&<div style={{fontSize:12,color:C.mut,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{job.site_address}</div>}
@@ -6326,7 +6324,7 @@ function TrainingCenter({onBack}){
     return(
       <div style={{minHeight:"100vh",background:C.bg,color:C.txt,display:"flex",flexDirection:"column"}}>
         <div style={{display:"flex",alignItems:"center",gap:12,padding:"14px 16px",borderBottom:`1px solid ${C.brd}`,background:C.card}}>
-          <button onClick={()=>{setSelGuide(null);setStep(0);}} style={{background:"none",border:"none",color:C.mut,fontSize:28,cursor:"pointer",padding:"10px 14px",lineHeight:1,borderRadius:8,minWidth:48,minHeight:48,display:"flex",alignItems:"center",justifyContent:"center"}}>←</button>
+          <button onClick={()=>{setSelGuide(null);setStep(0);}} style={{background:C.inp,border:`1px solid ${C.brd}`,borderRadius:10,color:C.lt,fontSize:22,cursor:"pointer",lineHeight:1,width:48,height:48,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>←</button>
           <span style={{fontWeight:700,fontSize:17,flex:1}}>{g.title}</span>
         </div>
         <div style={{display:"flex",gap:4,padding:"16px 20px 8px"}}>
@@ -6413,7 +6411,7 @@ function TrainingCenter({onBack}){
     <div className="page-in" style={{minHeight:"100vh",background:C.bg,color:C.txt}}>
       <div style={{borderBottom:`1px solid ${C.brd}`,background:C.card,padding:"14px 16px"}}>
       <div style={{display:"flex",alignItems:"center",gap:10,maxWidth:600,margin:"0 auto"}}>
-        <button onClick={onBack} style={{background:"none",border:"none",color:C.mut,fontSize:28,cursor:"pointer",lineHeight:1,minWidth:48,minHeight:48,display:"flex",alignItems:"center",justifyContent:"center"}}>←</button>
+        <button onClick={onBack} style={{background:C.inp,border:`1px solid ${C.brd}`,borderRadius:10,color:C.lt,fontSize:22,cursor:"pointer",lineHeight:1,width:48,height:48,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>←</button>
         <span style={{fontWeight:700,fontSize:17}}>Training Center</span>
       </div>
       </div>
@@ -6525,7 +6523,7 @@ function Dashboard({user, onLogout}){
   if(showFairUse)return(
     <div style={{minHeight:"100vh",background:C.bg,color:C.txt}}>
       <div style={{display:"flex",alignItems:"center",gap:10,padding:"14px 16px",borderBottom:`1px solid ${C.brd}`,background:C.card}}>
-        <button onClick={()=>setShowFairUse(false)} style={{background:"none",border:"none",color:C.mut,fontSize:28,cursor:"pointer",lineHeight:1,minWidth:48,minHeight:48,display:"flex",alignItems:"center",justifyContent:"center"}}>←</button>
+        <button onClick={()=>setShowFairUse(false)} style={{background:C.inp,border:`1px solid ${C.brd}`,borderRadius:10,color:C.lt,fontSize:22,cursor:"pointer",lineHeight:1,width:48,height:48,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>←</button>
         <span style={{fontWeight:700,fontSize:17}}>Fair Use Agreement</span>
       </div>
       <div style={{maxWidth:600,margin:"0 auto",padding:"24px 20px"}}>
@@ -6574,7 +6572,7 @@ function Dashboard({user, onLogout}){
   if(showTos)return(
     <div style={{minHeight:"100vh",background:C.bg,color:C.txt}}>
       <div style={{display:"flex",alignItems:"center",gap:10,padding:"14px 16px",borderBottom:`1px solid ${C.brd}`,background:C.card}}>
-        <button onClick={()=>setShowTos(false)} style={{background:"none",border:"none",color:C.mut,fontSize:28,cursor:"pointer",lineHeight:1,minWidth:48,minHeight:48,display:"flex",alignItems:"center",justifyContent:"center"}}>←</button>
+        <button onClick={()=>setShowTos(false)} style={{background:C.inp,border:`1px solid ${C.brd}`,borderRadius:10,color:C.lt,fontSize:22,cursor:"pointer",lineHeight:1,width:48,height:48,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>←</button>
         <div><span style={{fontWeight:700,fontSize:17}}>Terms of Service</span><div style={{fontSize:11,color:C.mut}}>Last updated: January 11, 2025</div></div>
       </div>
       <div style={{maxWidth:600,margin:"0 auto",padding:"24px 20px"}}>
@@ -6667,7 +6665,7 @@ function Dashboard({user, onLogout}){
   if(showPriv)return(
     <div style={{minHeight:"100vh",background:C.bg,color:C.txt}}>
       <div style={{display:"flex",alignItems:"center",gap:10,padding:"14px 16px",borderBottom:`1px solid ${C.brd}`,background:C.card}}>
-        <button onClick={()=>setShowPriv(false)} style={{background:"none",border:"none",color:C.mut,fontSize:28,cursor:"pointer",lineHeight:1,minWidth:48,minHeight:48,display:"flex",alignItems:"center",justifyContent:"center"}}>←</button>
+        <button onClick={()=>setShowPriv(false)} style={{background:C.inp,border:`1px solid ${C.brd}`,borderRadius:10,color:C.lt,fontSize:22,cursor:"pointer",lineHeight:1,width:48,height:48,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>←</button>
         <div><span style={{fontWeight:700,fontSize:17}}>Privacy Policy</span><div style={{fontSize:11,color:C.mut}}>Last updated: January 11, 2025</div></div>
       </div>
       <div style={{maxWidth:600,margin:"0 auto",padding:"24px 20px"}}>
@@ -7784,7 +7782,7 @@ function App(){
   if(setupDone===false)return<SetupWizard user={user} inviteCompany={inviteCompany} onComplete={()=>setSetupDone(true)}/>;
 
   // Fully set up — show dashboard
-  return<><Dashboard user={user} onLogout={handleLogout}/><InstallBanner/><SupportChat user={user}/></>;
+  return<><Dashboard user={user} onLogout={handleLogout}/><InstallBanner/></>;
 }
 ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
 </script>
