@@ -7760,6 +7760,23 @@ function InstallBanner(){
   );
 }
 
+function OfflineBanner(){
+  const [offline,setOffline]=useState(!navigator.onLine);
+  const [synced,setSynced]=useState(false);
+  useEffect(()=>{
+    const on=()=>{setOffline(false);setSynced(false);};
+    const off=()=>{setOffline(true);setSynced(false);};
+    const syncDone=()=>{setSynced(true);setTimeout(()=>setSynced(false),3000);};
+    window.addEventListener('online',on);
+    window.addEventListener('offline',off);
+    document.addEventListener('mdr-synced',syncDone);
+    return()=>{window.removeEventListener('online',on);window.removeEventListener('offline',off);document.removeEventListener('mdr-synced',syncDone);};
+  },[]);
+  if(synced)return(<div style={{position:"fixed",top:0,left:0,right:0,padding:"6px 0",background:C.ok,color:"#fff",textAlign:"center",fontSize:12,fontWeight:700,zIndex:99998}}>Changes synced successfully</div>);
+  if(!offline)return null;
+  return(<div style={{position:"fixed",top:0,left:0,right:0,padding:"6px 0",background:C.org,color:"#fff",textAlign:"center",fontSize:12,fontWeight:700,zIndex:99998}}>Offline — changes will sync when you reconnect</div>);
+}
+
 function App(){
   const [user,setUser]=useState(null);
   const [booting,setBooting]=useState(true);
@@ -7839,7 +7856,7 @@ function App(){
   if(setupDone===false)return<SetupWizard user={user} inviteCompany={inviteCompany} onComplete={()=>setSetupDone(true)}/>;
 
   // Fully set up — show dashboard
-  return<><Dashboard user={user} onLogout={handleLogout}/><InstallBanner/><ConfirmOverlay/></>;
+  return<><OfflineBanner/><Dashboard user={user} onLogout={handleLogout}/><InstallBanner/><ConfirmOverlay/></>;
 }
 ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
 </script>
@@ -7859,6 +7876,23 @@ if('serviceWorker' in navigator){
       });
     });
   }).catch(e=>console.log('SW registration failed:',e));
+  // Listen for offline sync completion
+  navigator.serviceWorker.addEventListener('message',e=>{
+    if(e.data?.type==='offline-sync-complete'){
+      console.log('[App] Offline sync complete, remaining:',e.data.remaining);
+      if(e.data.remaining===0){
+        // All queued writes synced — show toast if app has one
+        try{document.dispatchEvent(new CustomEvent('mdr-synced'));}catch(ex){}
+      }
+    }
+  });
+  // When we come back online, tell SW to replay queued writes
+  window.addEventListener('online',()=>{
+    console.log('[App] Back online — replaying offline queue');
+    if(navigator.serviceWorker.controller){
+      navigator.serviceWorker.controller.postMessage('replay-offline-queue');
+    }
+  });
 }
 </script>
 </body>
