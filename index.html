@@ -23,7 +23,7 @@
     body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0f0f0f; color: #fff; min-height: 100vh; -webkit-font-smoothing: antialiased; }
     #root { min-height: 100vh; }
     input:focus, select:focus, textarea:focus { border-color: #e8742a !important; outline: none; }
-    .btn-o:hover:not(:disabled) { background: #d4691f !important; }
+    .btn-o:hover:not(:disabled) { background: #b8570f !important; }
     button, input, select, textarea { transition: all 0.2s ease; }
     @keyframes fadeSlideIn{from{opacity:0;transform:translateX(12px)}to{opacity:1;transform:translateX(0)}}
     .page-in{animation:fadeSlideIn 0.18s ease-out}
@@ -43,7 +43,7 @@
 const { useState, useEffect, useRef, useCallback, useMemo } = React;
 const SB_URL = "https://wluvkmpncafugdbunlkw.supabase.co";
 const SB_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndsdXZrbXBuY2FmdWdkYnVubGt3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzIzMDU1MTUsImV4cCI6MjA4Nzg4MTUxNX0.HZpQ2xVGpf4EQ0BVDmIEuPqW5T_eNG5OqBNAqT03rH8";
-const C = {bg:"#0f0f0f",card:"#1a1a1a",brd:"#333",inp:"#222",org:"#e8742a",orgH:"#d4691f",blu:"#5a8fc0",txt:"#fff",mut:"#888",lt:"#ccc",err:"#ef4444",ok:"#22c55e"};
+const C = {bg:"#0f0f0f",card:"#1a1a1a",brd:"#333",inp:"#222",org:"#d4651a",orgH:"#b8570f",blu:"#5a8fc0",txt:"#fff",mut:"#888",lt:"#ccc",err:"#ef4444",ok:"#22c55e"};
 let AUTH_TOKEN = null;
 
 // Extract real text positions from PDF using pdf.js getTextContent()
@@ -5879,7 +5879,7 @@ function JobDetail({job, user, onBack, onDeleted}){
           <div style={{fontWeight:700,fontSize:17,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{job.name}</div>
           {job.site_address&&<div style={{fontSize:12,color:C.mut,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{job.site_address}</div>}
         </div>
-        <button onClick={()=>setShowJobSet(!showJobSet)} style={{width:34,height:34,borderRadius:8,background:C.inp,border:`1px solid ${showJobSet?C.org:C.brd}`,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",fontSize:12,fontWeight:700,color:C.mut}}>⚙</button>
+        <button onClick={()=>setShowJobSet(!showJobSet)} style={{width:44,height:44,borderRadius:8,background:C.inp,border:`1px solid ${showJobSet?C.org:C.brd}`,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",fontSize:14,fontWeight:700,color:C.mut}}>⚙</button>
       </div>
       </div>
 
@@ -6886,8 +6886,8 @@ function Dashboard({user, onLogout}){
           {dashLogoUrl&&<img src={dashLogoUrl} alt="" style={{width:34,height:34,borderRadius:8,objectFit:"contain",background:"#fff",border:`1px solid ${C.brd}`}}/>}
         </div>
         <div style={{display:"flex",alignItems:"center",gap:8}}>
-          <button onClick={()=>{const s=profileSlug||user?.user_metadata?.full_name?.toLowerCase().replace(/\s+/g,"-")||"inspector";window.open(`${window.location.origin}${window.location.pathname.replace(/index\.html$/,"").replace(/\/$/,"")}/hub.html?i=${s}`,"_blank");}} style={{width:34,height:34,borderRadius:8,background:C.inp,border:`1px solid ${C.brd}`,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",fontSize:14,color:C.mut}} title="Open scheduling hub">↗</button>
-          <button onClick={()=>setShowSet(!showSet)} style={{width:34,height:34,borderRadius:8,background:C.inp,border:`1px solid ${C.brd}`,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",fontSize:14,color:C.mut}}>⚙️</button>
+          <button onClick={()=>{const s=profileSlug||user?.user_metadata?.full_name?.toLowerCase().replace(/\s+/g,"-")||"inspector";window.open(`${window.location.origin}${window.location.pathname.replace(/index\.html$/,"").replace(/\/$/,"")}/hub.html?i=${s}`,"_blank");}} style={{width:44,height:44,borderRadius:8,background:C.inp,border:`1px solid ${C.brd}`,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",fontSize:16,color:C.mut}} title="Open scheduling hub">↗</button>
+          <button onClick={()=>setShowSet(!showSet)} style={{width:44,height:44,borderRadius:8,background:C.inp,border:`1px solid ${C.brd}`,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",fontSize:16,color:C.mut}}>⚙️</button>
         </div>
       </div>
       </div>
