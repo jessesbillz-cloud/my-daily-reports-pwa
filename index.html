@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <meta name="theme-color" content="#0f0f0f" />
@@ -2044,7 +2044,7 @@ function CreateJob({user, onBack, onCreated}){
     const active=fields.find(f=>f.name===fieldName)?.mode===mode;
     return(
       <button onClick={()=>setFieldMode(fieldName,mode)} style={{
-        padding:"3px 8px",fontSize:10,fontWeight:700,borderRadius:4,cursor:"pointer",
+        padding:"6px 10px",fontSize:11,fontWeight:700,borderRadius:6,cursor:"pointer",minHeight:32,
         background:active?color:"transparent",
         border:`1px solid ${active?color:C.brd}`,
         color:active?"#fff":(color===C.brd?C.mut:color),
@@ -3628,7 +3628,7 @@ function WorkLogEditor({job, user, onBack, reportDate}){
                     {selCon.photos.map((p,pi)=>(
                       <div key={pi} style={{position:"relative",flexShrink:0}}>
                         <img src={p.data||p} style={{width:72,height:72,objectFit:"cover",borderRadius:10,border:`2px solid ${C.brd}`}} alt=""/>
-                        <button onClick={()=>{setContractors(prev=>prev.map(c=>{if(c.id!==selCon.id)return c;const ph=[...(c.photos||[])];ph.splice(pi,1);return{...c,photos:ph};}));}} style={{position:"absolute",top:-6,right:-6,width:22,height:22,borderRadius:"50%",background:C.err,border:"2px solid "+C.bg,color:"#fff",fontSize:12,fontWeight:700,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",padding:0,lineHeight:1}}>✕</button>
+                        <button onClick={()=>{setContractors(prev=>prev.map(c=>{if(c.id!==selCon.id)return c;const ph=[...(c.photos||[])];ph.splice(pi,1);return{...c,photos:ph};}));}} style={{position:"absolute",top:-8,right:-8,width:30,height:30,borderRadius:"50%",background:C.err,border:"2px solid "+C.bg,color:"#fff",fontSize:14,fontWeight:700,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",padding:0,lineHeight:1}}>✕</button>
                       </div>
                     ))}
                   </div>
@@ -3774,7 +3774,7 @@ function WorkLogEditor({job, user, onBack, reportDate}){
                       {c.photos.map((ph,i)=>{const aiKey="c-"+c.id+"-"+i;return(
                         <div key={i} style={{width:72,height:72,borderRadius:8,overflow:"hidden",position:"relative",border:`1px solid ${C.brd}`}}>
                           <img src={ph.data} style={{width:"100%",height:"100%",objectFit:"cover"}}/>
-                          <button onClick={()=>removePhoto(c.id,i)} style={{position:"absolute",top:2,right:2,width:20,height:20,borderRadius:"50%",background:"rgba(0,0,0,0.6)",border:"none",color:"#fff",fontSize:12,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}>✕</button>
+                          <button onClick={()=>removePhoto(c.id,i)} style={{position:"absolute",top:2,right:2,width:30,height:30,borderRadius:"50%",background:"rgba(0,0,0,0.6)",border:"none",color:"#fff",fontSize:14,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}>✕</button>
                           {job.field_config?.aiPhotos&&<button disabled={aiDescribing[aiKey]||aiLimitReached} onClick={async()=>{const desc=await describePhoto(ph.data,`Contractor: ${c.name}, Job: ${job?.name||""}`,aiKey);if(desc)updateContractor(c.id,"description",(c.description?c.description+"\n":"")+desc);}} style={{position:"absolute",bottom:2,left:2,padding:"2px 5px",borderRadius:4,background:aiLimitReached?"#666":aiDescribing[aiKey]?C.blu:C.org,border:"none",color:"#fff",fontSize:9,fontWeight:700,cursor:aiDescribing[aiKey]?"wait":aiLimitReached?"not-allowed":"pointer",opacity:aiDescribing[aiKey]||aiLimitReached?0.7:0.9}}>{aiDescribing[aiKey]?"···":aiLimitReached?"—":"AI"}</button>}
                         </div>
                       );})}
@@ -3845,7 +3845,7 @@ function WorkLogEditor({job, user, onBack, reportDate}){
                     {(sectionPhotos[sec.key]||[]).map((ph,pi)=>{const aiKey="s-"+sec.key+"-"+pi;return(
                       <div key={pi} style={{position:"relative",width:60,height:60,borderRadius:6,overflow:"hidden",border:`1px solid ${C.brd}`}}>
                         <img src={ph.data} alt="" style={{width:"100%",height:"100%",objectFit:"cover"}}/>
-                        <button onClick={()=>removeSectionPhoto(sec.key,pi)} style={{position:"absolute",top:1,right:1,background:"rgba(0,0,0,0.6)",border:"none",color:"#fff",fontSize:10,width:16,height:16,borderRadius:"50%",cursor:"pointer",lineHeight:1,padding:0}}>✕</button>
+                        <button onClick={()=>removeSectionPhoto(sec.key,pi)} style={{position:"absolute",top:2,right:2,background:"rgba(0,0,0,0.6)",border:"none",color:"#fff",fontSize:13,width:28,height:28,borderRadius:"50%",cursor:"pointer",lineHeight:1,padding:0,display:"flex",alignItems:"center",justifyContent:"center"}}>✕</button>
                         {job.field_config?.aiPhotos&&<button disabled={aiDescribing[aiKey]||aiLimitReached} onClick={async()=>{const desc=await describePhoto(ph.data,`Section: ${sec.title}, Job: ${job?.name||""}`,aiKey);if(desc)sec.set((sec.val?sec.val+"\n":"")+desc);}} style={{position:"absolute",bottom:1,left:1,padding:"1px 4px",borderRadius:3,background:aiLimitReached?"#666":aiDescribing[aiKey]?C.blu:C.org,border:"none",color:"#fff",fontSize:8,fontWeight:700,cursor:aiDescribing[aiKey]?"wait":aiLimitReached?"not-allowed":"pointer",opacity:aiDescribing[aiKey]||aiLimitReached?0.7:0.9}}>{aiDescribing[aiKey]?"···":aiLimitReached?"—":"AI"}</button>}
                       </div>
                     );})}
@@ -5443,7 +5443,7 @@ function ReportEditor({job, user, onBack, reportDate}){
                     {lockEditing&&(
                       <div style={{display:"flex",gap:8,alignItems:"center"}}>
                         <input type="text" value={lockVals[f.name]||""} onChange={e=>setLockVal(f.name,e.target.value)} style={{...fs,flex:1,padding:"8px 10px",fontSize:13}}/>
-                        <button onClick={()=>unlockField(f.name)} title="Permanently unlock this field" style={{padding:"6px 10px",fontSize:10,fontWeight:700,borderRadius:6,border:`1px solid ${C.org}`,background:"transparent",color:C.org,cursor:"pointer",whiteSpace:"nowrap"}}>Unlock</button>
+                        <button onClick={()=>unlockField(f.name)} title="Permanently unlock this field" style={{padding:"6px 12px",fontSize:11,fontWeight:700,borderRadius:6,border:`1px solid ${C.org}`,background:"transparent",color:C.org,cursor:"pointer",whiteSpace:"nowrap",minHeight:32}}>Unlock</button>
                       </div>
                     )}
                   </div>
@@ -5459,7 +5459,7 @@ function ReportEditor({job, user, onBack, reportDate}){
             <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:10}}>
               <div style={{fontSize:12,fontWeight:700,color:C.org,textTransform:"uppercase",letterSpacing:1}}>Fill In Today</div>
               {editFields.filter(f=>!f.autoFill&&vals[f.name]).length>1&&(
-                <button onClick={async()=>{const toLock=editFields.filter(f=>!f.autoFill&&vals[f.name]&&!skippedFields[f.name]);if(toLock.length===0)return;if(!await askConfirm("Lock "+toLock.length+" filled field"+(toLock.length!==1?"s":"")+"? They'll keep their current values for all future reports."))return;toLock.forEach(f=>relockField(f.name));}} style={{padding:"4px 10px",fontSize:11,fontWeight:700,borderRadius:6,border:`1px solid ${C.blu}`,background:C.blu+"22",color:C.blu,cursor:"pointer"}}>🔒 Lock All Filled</button>
+                <button onClick={async()=>{const toLock=editFields.filter(f=>!f.autoFill&&vals[f.name]&&!skippedFields[f.name]);if(toLock.length===0)return;if(!await askConfirm("Lock "+toLock.length+" filled field"+(toLock.length!==1?"s":"")+"? They'll keep their current values for all future reports."))return;toLock.forEach(f=>relockField(f.name));}} style={{padding:"6px 12px",fontSize:11,fontWeight:700,borderRadius:6,border:`1px solid ${C.blu}`,background:C.blu+"22",color:C.blu,cursor:"pointer",minHeight:32}}>🔒 Lock All Filled</button>
               )}
             </div>
             {editFields.map(f=>{
@@ -5475,10 +5475,10 @@ function ReportEditor({job, user, onBack, reportDate}){
                       {f.autoFill==="name"&&<span style={{fontSize:10,fontWeight:700,color:C.blu,background:C.blu+"22",padding:"2px 8px",borderRadius:4}}>AUTO-NAME</span>}
                       {f.voiceEnabled&&!isSkipped&&<span style={{fontSize:10,fontWeight:700,color:C.org,background:C.org+"22",padding:"2px 8px",borderRadius:4}}>VOICE</span>}
                       {!isAuto&&!isSkipped&&vals[f.name]&&(
-                        <button onClick={()=>relockField(f.name)} title="Lock this field with current value for all future reports" style={{padding:"2px 8px",fontSize:10,fontWeight:700,borderRadius:4,border:`1px solid ${C.blu}`,background:C.blu+"22",color:C.blu,cursor:"pointer"}}>🔒 Lock</button>
+                        <button onClick={()=>relockField(f.name)} title="Lock this field with current value for all future reports" style={{padding:"6px 10px",fontSize:11,fontWeight:700,borderRadius:6,border:`1px solid ${C.blu}`,background:C.blu+"22",color:C.blu,cursor:"pointer",minHeight:32}}>🔒 Lock</button>
                       )}
                       {!isAuto&&(
-                        <button onClick={()=>toggleSkipField(f.name)} title={isSkipped?"Bring back this field":"Skip this field for today"} style={{padding:"2px 8px",fontSize:10,fontWeight:700,borderRadius:4,border:`1px solid ${isSkipped?C.ok:C.brd}`,background:isSkipped?C.ok+"22":"transparent",color:isSkipped?C.ok:C.mut,cursor:"pointer"}}>{isSkipped?"+ Use":"− Skip"}</button>
+                        <button onClick={()=>toggleSkipField(f.name)} title={isSkipped?"Bring back this field":"Skip this field for today"} style={{padding:"6px 10px",fontSize:11,fontWeight:700,borderRadius:6,border:`1px solid ${isSkipped?C.ok:C.brd}`,background:isSkipped?C.ok+"22":"transparent",color:isSkipped?C.ok:C.mut,cursor:"pointer",minHeight:32}}>{isSkipped?"+ Use":"− Skip"}</button>
                       )}
                     </div>
                   </div>
@@ -5507,7 +5507,7 @@ function ReportEditor({job, user, onBack, reportDate}){
             <div style={{fontSize:12,fontWeight:700,color:C.org,textTransform:"uppercase",letterSpacing:1}}>Photos</div>
             <div style={{display:"flex",gap:4}}>
               {layouts.map(({k,l})=>(
-                <button key={k} onClick={()=>setPhotoLayout(k)} style={{padding:"3px 8px",fontSize:10,fontWeight:700,borderRadius:4,cursor:"pointer",background:photoLayout===k?C.org:"transparent",border:`1px solid ${photoLayout===k?C.org:C.brd}`,color:photoLayout===k?"#fff":C.mut}}>{l}</button>
+                <button key={k} onClick={()=>setPhotoLayout(k)} style={{padding:"6px 10px",fontSize:11,fontWeight:700,borderRadius:6,cursor:"pointer",minHeight:32,background:photoLayout===k?C.org:"transparent",border:`1px solid ${photoLayout===k?C.org:C.brd}`,color:photoLayout===k?"#fff":C.mut}}>{l}</button>
               ))}
             </div>
           </div>
@@ -5518,7 +5518,7 @@ function ReportEditor({job, user, onBack, reportDate}){
               {photos.map(p=>{const aiKey="fr-"+p.id;return(
                 <div key={p.id} style={{position:"relative",borderRadius:8,overflow:"hidden",border:`1px solid ${C.brd}`,aspectRatio:photoLayout==="1"?"auto":"1"}}>
                   <img src={p.src} alt={p.name} style={{width:"100%",height:"100%",objectFit:"cover",display:"block"}}/>
-                  <button onClick={()=>setPhotos(prev=>prev.filter(x=>x.id!==p.id))} style={{position:"absolute",top:4,right:4,width:22,height:22,borderRadius:"50%",background:"rgba(0,0,0,0.7)",border:"none",color:"#fff",fontSize:12,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}>✕</button>
+                  <button onClick={()=>setPhotos(prev=>prev.filter(x=>x.id!==p.id))} style={{position:"absolute",top:4,right:4,width:32,height:32,borderRadius:"50%",background:"rgba(0,0,0,0.7)",border:"none",color:"#fff",fontSize:14,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}>✕</button>
                   {job.field_config?.aiPhotos&&<button disabled={aiDescribing[aiKey]||aiLimitReached} onClick={async()=>{const notesF=editFields.find(f=>f.voiceEnabled&&/notes|observations|comments/i.test(f.name));const desc=await describePhoto(p.src,`Job: ${job?.name||""}`,aiKey);if(desc&&notesF)setVals(v=>({...v,[notesF.name]:(v[notesF.name]?v[notesF.name]+"\n":"")+desc}));else if(desc)showToast("AI: "+desc.slice(0,80));}} style={{position:"absolute",bottom:4,left:4,padding:"3px 7px",borderRadius:5,background:aiLimitReached?"#666":aiDescribing[aiKey]?C.blu:C.org,border:"none",color:"#fff",fontSize:10,fontWeight:700,cursor:aiDescribing[aiKey]?"wait":aiLimitReached?"not-allowed":"pointer",opacity:aiDescribing[aiKey]||aiLimitReached?0.7:0.9}}>{aiDescribing[aiKey]?"···":aiLimitReached?"—":"AI"}</button>}
                 </div>
               );})}
@@ -5546,15 +5546,15 @@ function ReportEditor({job, user, onBack, reportDate}){
         <div style={{maxWidth:600,margin:"0 auto",display:"flex",flexDirection:"column",gap:8}}>
           <div style={{display:"flex",gap:10}}>
             {reportStatus!=="submitted"&&(
-              <button onClick={async()=>{await saveWorking();showToast("Draft saved");}} disabled={saving||submitting||viewLoading} style={{flex:1,padding:"12px 0",background:C.blu,border:"none",borderRadius:10,color:"#fff",fontSize:14,fontWeight:700,cursor:saving?"default":"pointer",opacity:saving?0.6:1}}>
+              <button onClick={async()=>{await saveWorking();showToast("Draft saved");}} disabled={saving||submitting||viewLoading} style={{flex:1,padding:"14px 0",background:C.blu,border:"none",borderRadius:10,color:"#fff",fontSize:14,fontWeight:700,cursor:saving?"default":"pointer",opacity:saving?0.6:1,minHeight:44}}>
                 {saving?"Saving...":"Save Draft"}
               </button>
             )}
-            <button onClick={viewReport} disabled={viewLoading||submitting} style={{flex:1,padding:"12px 0",background:"transparent",border:`1px solid ${C.brd}`,borderRadius:10,color:C.lt,fontSize:14,fontWeight:700,cursor:viewLoading?"default":"pointer",opacity:viewLoading?0.6:1}}>
+            <button onClick={viewReport} disabled={viewLoading||submitting} style={{flex:1,padding:"14px 0",background:"transparent",border:`1px solid ${C.brd}`,borderRadius:10,color:C.lt,fontSize:14,fontWeight:700,cursor:viewLoading?"default":"pointer",opacity:viewLoading?0.6:1,minHeight:44}}>
               {viewLoading?"Loading...":"View Report"}
             </button>
           </div>
-          <button onClick={submitReport} disabled={submitting||viewLoading} className="btn-o" style={{width:"100%",padding:"12px 0",background:C.org,border:"none",borderRadius:10,color:"#fff",fontSize:15,fontWeight:700,cursor:submitting?"default":"pointer",opacity:submitting?0.6:1}}>
+          <button onClick={submitReport} disabled={submitting||viewLoading} className="btn-o" style={{width:"100%",padding:"14px 0",background:C.org,border:"none",borderRadius:10,color:"#fff",fontSize:15,fontWeight:700,cursor:submitting?"default":"pointer",opacity:submitting?0.6:1,minHeight:44}}>
             {submitting?"Submitting...":reportStatus==="submitted"?"Update & Resubmit":"Submit Report"}
           </button>
         </div>
