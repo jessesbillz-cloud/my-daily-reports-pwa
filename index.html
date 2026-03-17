@@ -1131,7 +1131,7 @@ function AccountSettings({user, onBack, onLogout}){
                     <label style={ls}>Company Templates</label>
                     <div style={{fontSize:11,color:C.mut,marginBottom:8}}>Upload PDF templates for all {selectedCompany.name} employees</div>
                     {companyTemplates.length>0&&(
-                      <div style={{marginBottom:8}}>
+                      <div style={{marginBottom:8,maxHeight:240,overflowY:"auto",WebkitOverflowScrolling:"touch"}}>
                         {companyTemplates.map(t=>(
                           <div key={t.id} style={{display:"flex",alignItems:"center",gap:8,padding:"8px 10px",background:C.inp,border:`1px solid ${C.brd}`,borderRadius:8,marginBottom:4}}>
                             <span style={{fontSize:18}}>📄</span>
@@ -1162,7 +1162,7 @@ function AccountSettings({user, onBack, onLogout}){
                   <label style={ls}>Calendar Display Name</label>
                   <input type="text" value={slug} onChange={e=>setSlug(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g,""))} placeholder="jesse-saltzman" style={fs}/>
                   <div style={{fontSize:12,color:C.mut,marginTop:6,lineHeight:1.4}}>This is how your name appears at the end of your scheduling URL</div>
-                  <div style={{fontSize:12,color:C.blu,marginTop:4,fontWeight:600}}>hub.html?i={slug||"your-name"}</div>
+                  <a href={`${window.location.origin}${window.location.pathname.replace(/index\.html$/,"").replace(/\/$/,"")}/hub.html?i=${slug||"your-name"}`} target="_blank" rel="noopener" style={{fontSize:12,color:C.blu,marginTop:4,fontWeight:600,display:"block",cursor:"pointer"}}>hub.html?i={slug||"your-name"}</a>
                 </div>
               </div>
             </div>
@@ -1275,7 +1275,7 @@ function AccountSettings({user, onBack, onLogout}){
             </div>
 
             {/* Save Button */}
-            <button className="btn-o" onClick={saveProfile} disabled={saving} style={{width:"100%",padding:"14px 0",background:C.org,border:`1px solid ${C.blu}`,borderRadius:10,color:"#fff",fontSize:16,fontWeight:700,cursor:saving?"default":"pointer",opacity:saving?0.7:1,marginBottom:28}}>
+            <button className="btn-o" onClick={saveProfile} disabled={saving} style={{width:"100%",padding:"14px 0",background:C.org,border:"none",borderRadius:10,color:"#fff",fontSize:16,fontWeight:700,cursor:saving?"default":"pointer",opacity:saving?0.7:1,marginBottom:28}}>
               {saving?"Saving...":"Save Settings"}
             </button>
 
