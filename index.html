@@ -25,6 +25,7 @@
     html, body { overscroll-behavior-x: none; touch-action: pan-y; }
     #root { min-height: 100vh; }
     input:focus, select:focus, textarea:focus { border-color: #e8742a !important; outline: none; }
+    button:focus-visible { outline: 2px solid #e8742a; outline-offset: 2px; }
     .btn-o:hover:not(:disabled) { background: #b8570f !important; }
     button, input, select, textarea { transition: all 0.2s ease; }
     @keyframes fadeSlideIn{from{opacity:0;transform:translateX(12px)}to{opacity:1;transform:translateX(0)}}
@@ -6167,20 +6168,20 @@ function JobDetail({job, user, onBack, onDeleted}){
 
         {/* ── Frequency & Reminders Panel ── */}
         {showFreqSet&&(
-          <div style={{background:C.card,border:`1px solid ${C.org}`,borderRadius:12,padding:20,marginBottom:16}}>
+          <div id="freq-reminders-panel" role="region" aria-labelledby="freq-reminders-heading" style={{background:C.card,border:`1px solid ${C.org}`,borderRadius:12,padding:20,marginBottom:16}}>
             <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:6}}>
-              <div style={{fontWeight:700,fontSize:15,color:C.org,display:"flex",alignItems:"center",gap:8}}>
+              <h3 id="freq-reminders-heading" style={{fontWeight:700,fontSize:15,color:C.org,display:"flex",alignItems:"center",gap:8,margin:0}}>
                 <span>🔔</span> Frequency & Reminders
-              </div>
-              <button onClick={()=>setShowFreqSet(false)} style={{background:"none",border:"none",color:C.mut,cursor:"pointer",fontSize:20,padding:"0 4px"}}>✕</button>
+              </h3>
+              <button type="button" aria-label="Close Frequency & Reminders" onClick={()=>setShowFreqSet(false)} style={{background:"none",border:"none",color:C.mut,cursor:"pointer",fontSize:20,padding:"0 4px"}}>✕</button>
             </div>
             <div style={{fontSize:12,color:C.mut,marginBottom:16,lineHeight:1.5}}>Set how often you file reports and when to get reminded.</div>
-            <div style={{fontSize:13,fontWeight:600,color:C.lt,marginBottom:8}}>Report Days</div>
-            <div style={{display:"flex",gap:6,marginBottom:10,flexWrap:"wrap"}}>
-              {["Mon","Tue","Wed","Thu","Fri","Sat","Sun"].map(d=>{const a=jdDays.includes(d);return<button key={d} onClick={()=>jdTogDay(d)} style={{width:42,height:42,borderRadius:"50%",border:a?`2px solid ${C.org}`:`1px solid ${C.brd}`,background:a?C.org:"transparent",color:a?"#fff":C.mut,fontWeight:600,fontSize:11,cursor:"pointer"}}>{d}</button>;})}
+            <div style={{fontSize:13,fontWeight:600,color:C.lt,marginBottom:8}} id="report-days-label">Report Days</div>
+            <div role="group" aria-labelledby="report-days-label" style={{display:"flex",gap:6,marginBottom:10,flexWrap:"wrap"}}>
+              {["Mon","Tue","Wed","Thu","Fri","Sat","Sun"].map(d=>{const a=jdDays.includes(d);return<button type="button" key={d} aria-pressed={a} onClick={()=>jdTogDay(d)} style={{width:42,height:42,borderRadius:"50%",border:a?`2px solid ${C.org}`:`1px solid #555`,background:a?C.org:"transparent",color:a?"#fff":C.mut,fontWeight:600,fontSize:11,cursor:"pointer"}}>{d}</button>;})}
             </div>
-            <div style={{display:"flex",gap:8,marginBottom:16}}>
-              {[{k:"weekly",l:"Weekly"},{k:"as_needed",l:"As Needed"}].map(({k,l})=><button key={k} onClick={()=>jdPreset(k)} style={{padding:"8px 14px",borderRadius:8,border:jdSched===k?`2px solid ${C.org}`:`1px solid ${C.brd}`,background:jdSched===k?C.org:"transparent",color:jdSched===k?"#fff":C.mut,fontWeight:600,fontSize:12,cursor:"pointer"}}>{l}</button>)}
+            <div role="radiogroup" aria-label="Report frequency" style={{display:"flex",gap:8,marginBottom:16}}>
+              {[{k:"weekly",l:"Weekly"},{k:"as_needed",l:"As Needed"}].map(({k,l})=><button type="button" role="radio" aria-checked={jdSched===k} key={k} onClick={()=>jdPreset(k)} style={{padding:"8px 14px",borderRadius:8,border:jdSched===k?`2px solid ${C.org}`:`1px solid #555`,background:jdSched===k?C.org:"transparent",color:jdSched===k?"#fff":C.mut,fontWeight:600,fontSize:12,cursor:"pointer"}}>{l}</button>)}
             </div>
             {jdEffSch()!=="as_needed"&&(
               <div style={{marginBottom:16}}>
@@ -6335,7 +6336,7 @@ function JobDetail({job, user, onBack, onDeleted}){
               </div>
               <span style={{fontSize:11,color:schedEnabled?C.ok:C.mut,fontWeight:600}}>{schedEnabled?"ON":"OFF"}</span>
             </button>
-            <button onClick={()=>{setShowFreqSet(!showFreqSet);}} style={{width:"100%",display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,padding:"14px 18px",background:"none",border:"none",borderBottom:`1px solid ${C.brd}`,cursor:"pointer",textAlign:"left"}}>
+            <button type="button" aria-expanded={showFreqSet} aria-controls="freq-reminders-panel" onClick={()=>{setShowFreqSet(!showFreqSet);}} style={{width:"100%",display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,padding:"14px 18px",background:"none",border:"none",borderBottom:`1px solid ${C.brd}`,cursor:"pointer",textAlign:"left"}}>
               <div style={{display:"flex",alignItems:"center",gap:10}}>
                 <span style={{fontSize:16}}>🔔</span><span style={{fontSize:14,fontWeight:600,color:C.lt}}>Frequency & Reminders</span>
               </div>
