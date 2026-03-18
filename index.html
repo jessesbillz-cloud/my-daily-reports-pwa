@@ -3684,9 +3684,12 @@ function WorkLogEditor({job, user, onBack, reportDate}){
       {fieldMode&&(
         <div style={{position:"fixed",bottom:0,left:0,right:0,padding:"10px 20px",borderTop:`1px solid ${C.brd}`,background:C.card,zIndex:100}}>
           <div style={{display:"flex",gap:10,maxWidth:560,margin:"0 auto"}}>
-            <button onClick={()=>{savingRef.current=false;setSaving(false);setSubmitting(false);onBack();}} style={{padding:"14px 16px",background:"transparent",border:`1px solid ${C.brd}`,borderRadius:10,color:C.mut,fontSize:13,fontWeight:600,cursor:"pointer"}}>Exit</button>
-            <button onClick={async()=>{await saveWorking();onBack();}} disabled={saving} style={{flex:1,padding:"14px 0",background:C.org,border:"none",borderRadius:10,color:"#fff",fontSize:14,fontWeight:700,cursor:saving?"default":"pointer",opacity:saving?0.7:1,display:"flex",alignItems:"center",justifyContent:"center",gap:6}}>
-              <span>✓</span> {saving?"Saving...":"Save & Exit"}
+            <button onClick={()=>{savingRef.current=false;setSaving(false);setSubmitting(false);onBack();}} style={{padding:"14px 12px",background:"transparent",border:`1px solid ${C.brd}`,borderRadius:10,color:C.mut,fontSize:13,fontWeight:600,cursor:"pointer"}}>Exit</button>
+            <button onClick={async()=>{await saveWorking();showToast("Saved!");}} disabled={saving} style={{flex:1,padding:"14px 0",background:C.blu,border:"none",borderRadius:10,color:"#fff",fontSize:14,fontWeight:700,cursor:saving?"default":"pointer",opacity:saving?0.6:1}}>
+              {saving?"Saving...":"Save Draft"}
+            </button>
+            <button onClick={submitWorkLog} disabled={submitting} style={{flex:1,padding:"14px 0",background:C.org,border:"none",borderRadius:10,color:"#fff",fontSize:14,fontWeight:700,cursor:submitting?"default":"pointer",opacity:submitting?0.6:1}}>
+              {submitting?"...":"Submit"}
             </button>
           </div>
         </div>
@@ -4281,15 +4284,16 @@ function ReportEditor({job, user, onBack, reportDate}){
   };
 
   // Compress/rotate photo via canvas (fixes EXIF orientation for pdf-lib)
+  // Max 1200px and quality 0.6 to keep save payloads under control
   const compressFieldPhoto=(dataUrl)=>new Promise(resolve=>{
     const img=new Image();
     img.onload=()=>{
-      const MAX=1600;
+      const MAX=1200;
       let w=img.naturalWidth,h=img.naturalHeight;
       if(w>MAX||h>MAX){const r=Math.min(MAX/w,MAX/h);w=Math.round(w*r);h=Math.round(h*r);}
       const cvs=document.createElement("canvas");cvs.width=w;cvs.height=h;
       cvs.getContext("2d").drawImage(img,0,0,w,h);
-      resolve(cvs.toDataURL("image/jpeg",0.7));
+      resolve(cvs.toDataURL("image/jpeg",0.6));
     };
     img.onerror=()=>resolve(dataUrl);
     img.src=dataUrl;
@@ -4318,13 +4322,25 @@ function ReportEditor({job, user, onBack, reportDate}){
     try{
       // Always use fresh date (not stale closure if app was open overnight)
       const saveDate=reportDate||new Date().toLocaleDateString("en-CA",{timeZone:tz});
-      const content={vals,lockVals,photos,photoLayout,lockFields,editFields,sigTimestamps};
+      // Limit photo data in save payload to prevent oversized JSON / frozen UI
+      // Keep only src + name (strip any extra metadata), and cap at 20 photos
+      const safePhotos=photos.slice(0,20).map(p=>({id:p.id,src:p.src,name:p.name}));
+      const content={vals,lockVals,photos:safePhotos,photoLayout,lockFields,editFields,sigTimestamps};
+      let contentStr;
+      try{contentStr=JSON.stringify(content);}catch(e){
+        console.error("JSON serialize failed:",e);
+        throw new Error("Failed to save — too much data. Try removing some photos.");
+      }
+      // Warn if payload is very large (>4MB) — likely to fail or hang
+      if(contentStr.length>4*1024*1024){
+        console.warn("[saveWorking] Content payload very large:",Math.round(contentStr.length/1024),"KB");
+      }
       const savePromise=db.saveReport({
         job_id:job.id,
         user_id:user.id,
         report_date:saveDate,
         status:reportStatus||"working_copy",
-        content:JSON.stringify(content),
+        content:contentStr,
         updated_at:new Date().toISOString()
       });
       const timeout=new Promise((_,rej)=>setTimeout(()=>rej(new Error("Save timed out")),15000));
@@ -4353,6 +4369,12 @@ function ReportEditor({job, user, onBack, reportDate}){
     const t=setTimeout(()=>{busyRef.current=false;setSubmitting(false);console.warn("Force-reset stuck submitting state");showToast("Submit timed out — please try again");},45000);
     return()=>clearTimeout(t);
   },[submitting]);
+  // Safety valve: if viewLoading gets stuck for >30s, force-reset it
+  useEffect(()=>{
+    if(!viewLoading)return;
+    const t=setTimeout(()=>{busyRef.current=false;setViewLoading(false);console.warn("Force-reset stuck viewLoading state");showToast("Preview timed out — please try again");},30000);
+    return()=>clearTimeout(t);
+  },[viewLoading]);
   const [viewingReport,setViewingReport]=useState(null); // array of page image data URLs
   const [viewDocxHtml,setViewDocxHtml]=useState(null); // HTML string for DOCX preview
   const [editablePreview,setEditablePreview]=useState(null); // {pages:[{imgUrl,w,h}],fields:[...]} for desktop interactive edit
@@ -4521,7 +4543,10 @@ function ReportEditor({job, user, onBack, reportDate}){
           try{
             const src=photos[i].src||photos[i];
             const im=new Image();
-            await new Promise((res,rej)=>{im.onload=res;im.onerror=rej;im.src=src;});
+            await Promise.race([
+              new Promise((res,rej)=>{im.onload=res;im.onerror=rej;im.src=src;}),
+              new Promise((_,rej)=>setTimeout(()=>rej(new Error("Image load timeout")),10000))
+            ]);
             // Draw to 1x1 canvas to force EXIF rotation, then read rendered size
             // createImageBitmap respects EXIF and gives us the real dimensions
             let w=im.naturalWidth,h=im.naturalHeight;
@@ -4603,6 +4628,7 @@ function ReportEditor({job, user, onBack, reportDate}){
     // Always use fresh current date at submit time (not stale closure value)
     const submitDate=reportDate||new Date().toLocaleDateString("en-CA",{timeZone:tz});
     try{
+      await ensurePdfLib();
       const {PDFDocument,rgb,StandardFonts}=PDFLib;
 
       // ── 1. Look up template ──
