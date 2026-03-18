@@ -606,31 +606,36 @@ function SupportTab({hGet,h,onRefresh}){
       if(r.ok){const m=await r.json();setMsgs(m);}
     }catch(e){}
   };
-  useEffect(()=>{loadConvs();const t=setInterval(loadConvs,5000);return()=>clearInterval(t);},[]);
+  useEffect(()=>{loadConvs();const t=setInterval(loadConvs,15000);return()=>clearInterval(t);},[]);
   useEffect(()=>{
     if(!selConv)return;
     loadMsgs(selConv.id);
     if(pollRef.current)clearInterval(pollRef.current);
-    pollRef.current=setInterval(()=>loadMsgs(selConv.id),3000);
+    pollRef.current=setInterval(()=>loadMsgs(selConv.id),8000);
     return()=>{if(pollRef.current)clearInterval(pollRef.current);};
   },[selConv?.id]);
   useEffect(()=>{if(scrollRef.current)scrollRef.current.scrollTop=scrollRef.current.scrollHeight;},[msgs]);
 
+  const [supportErr,setSupportErr]=useState("");
+  const flashErr=(msg)=>{setSupportErr(msg);setTimeout(()=>setSupportErr(""),5000);};
   const sendMsg=async()=>{
     if(!draft.trim()||sending||!selConv)return;
     setSending(true);
     try{
-      await fetch(`${SB_URL}/rest/v1/support_messages`,{method:"POST",headers:h(),body:JSON.stringify({conversation_id:selConv.id,sender:"agent",body:draft.trim()})});
+      const r=await fetch(`${SB_URL}/rest/v1/support_messages`,{method:"POST",headers:h(),body:JSON.stringify({conversation_id:selConv.id,sender:"agent",body:draft.trim()})});
+      if(!r.ok){const d=await r.json().catch(()=>({}));flashErr("Send failed: "+(d.message||r.status));return;}
       setDraft("");loadMsgs(selConv.id);
-    }catch(e){console.error(e);}
+    }catch(e){flashErr("Network error: "+e.message);}
     finally{setSending(false);}
   };
   const updateStatus=async(status)=>{
     if(!selConv)return;
+    const prevStatus=selConv.status;
     try{
-      await fetch(`${SB_URL}/rest/v1/support_conversations?id=eq.${selConv.id}`,{method:"PATCH",headers:h(),body:JSON.stringify({status})});
+      const r=await fetch(`${SB_URL}/rest/v1/support_conversations?id=eq.${selConv.id}`,{method:"PATCH",headers:h(),body:JSON.stringify({status})});
+      if(!r.ok){const d=await r.json().catch(()=>({}));flashErr("Update failed: "+(d.message||r.status));return;}
       setSelConv(p=>({...p,status}));loadConvs();onRefresh();
-    }catch(e){console.error(e);}
+    }catch(e){flashErr("Network error: "+e.message);}
   };
   const getName=(c)=>c.guest_name||("User "+((c.user_id||"").slice(0,8)||"anon"));
   const fmtTime=(ts)=>{const d=new Date(ts);const now=new Date();if(d.toDateString()===now.toDateString())return d.toLocaleTimeString([],{hour:"numeric",minute:"2-digit"});return d.toLocaleDateString([],{month:"short",day:"numeric"});};
@@ -638,6 +643,7 @@ function SupportTab({hGet,h,onRefresh}){
   return(
     <div>
       <h2 className="page-title">Support</h2>
+      {supportErr&&<div style={{background:"#2a1515",border:"1px solid #ef4444",borderRadius:8,padding:"10px 16px",marginBottom:16,color:"#ef4444",fontSize:13,fontWeight:600}}>{supportErr}</div>}
       <div style={{display:"flex",gap:16,height:"calc(100vh - 120px)"}}>
         {/* Conversation list */}
         <div style={{width:280,borderRight:"1px solid #222",overflowY:"auto",flexShrink:0}}>
