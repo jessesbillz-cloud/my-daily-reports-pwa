@@ -214,6 +214,10 @@ details[open] .collapsible-summary::after { content: '−'; }
         </label>
     </div>
 </details>
+<div style="margin-top:14px;display:flex;align-items:center;gap:8px;">
+    <input type="checkbox" id="notifyMeCheck" checked style="width:18px;height:18px;accent-color:#e8742a;">
+    <label for="notifyMeCheck" style="font-size:13px;color:#ccc;cursor:pointer;">Email me updates about this request</label>
+</div>
 <div id="submitWarning" style="display:none;color:#ef4444;font-size:13px;font-weight:600;margin-top:12px;padding:12px;background:#2a1515;border:1px solid #ef4444;border-radius:8px;text-align:center;"></div>
 <button onclick="submitIR()" id="submitBtn" class="submit-btn">Submit Scheduling Request</button>
 </div>
@@ -688,13 +692,14 @@ function submitIR(){
     fd.append('subcontractor','');
     fd.append('location_detail','');
     // Look up requester email from contacts
+    var wantsNotify=document.getElementById('notifyMeCheck').checked;
     var matchedContact=savedContacts.find(function(c){return c.name===nm;});
     if(matchedContact&&matchedContact.email){
         fd.append('requester_email',matchedContact.email);
         fd.append('requester_name',matchedContact.name);
         if(matchedContact.company) fd.append('requester_company',matchedContact.company);
-        // Also add requester to email recipients so they get the notification
-        if(emails.indexOf(matchedContact.email)===-1) emails.push(matchedContact.email);
+        // Only add requester to email recipients if they opted in
+        if(wantsNotify&&emails.indexOf(matchedContact.email)===-1) emails.push(matchedContact.email);
     } else if(newName){
         var newEmail=document.getElementById('iNewEmail').value.trim();
         if(newEmail){
@@ -702,7 +707,7 @@ function submitIR(){
             fd.append('requester_name',newName);
             var newCompany=document.getElementById('iNewCompany').value.trim();
             if(newCompany) fd.append('requester_company',newCompany);
-            if(emails.indexOf(newEmail)===-1) emails.push(newEmail);
+            if(wantsNotify&&emails.indexOf(newEmail)===-1) emails.push(newEmail);
         }
     }
     if(emails.length>0) fd.append('email_recipients',JSON.stringify(emails));
