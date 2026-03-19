@@ -83,6 +83,13 @@ function loadHub(){
 function renderHub(profile,jobs){
   var name=profile.full_name||'Inspector';
   var html='';
+  // "Back to App" button — only show if opened from within the PWA (not shared externally)
+  var fromApp=document.referrer&&document.referrer.indexOf(window.location.origin)===0;
+  if(fromApp){
+    html+='<div style="text-align:left;margin-bottom:12px;">';
+    html+='<a href="index.html" style="background:#222;border:1px solid #333;border-radius:12px;color:#fff;font-size:26px;cursor:pointer;line-height:1;width:56px;height:56px;display:flex;align-items:center;justify-content:center;text-decoration:none;flex-shrink:0;" aria-label="Back to App">←</a>';
+    html+='</div>';
+  }
   html+='<div class="header">';
   html+='<h1>'+esc(name)+'</h1>';
   html+='<p>Scheduling Request</p>';
