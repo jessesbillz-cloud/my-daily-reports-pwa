@@ -839,7 +839,7 @@ function submitIRContinue(d,t,nm){
     var btn=document.getElementById('submitBtn'); btn.textContent='Submitting...'; btn.disabled=true;
     var fd=new FormData();
     allFiles.forEach(function(file,index){fd.append('file_'+index,file);});
-    fd.append('project',PROJ); fd.append('gc',cleanName);
+    fd.append('project',PROJ); fd.append('gc',cleanName); if(JOB_ID)fd.append('job_id',JOB_ID);
     fd.append('inspection_date',d); fd.append('inspection_time',t);
     var typesArr=[inspType];
     var specialVal='';
