@@ -723,6 +723,8 @@ function checkSchedulingConflicts(date,time,types,dur){
     var reqEnd=reqMinutes+parseInt(dur||60);
     var warnings=[];
     dayEvents.forEach(function(e){
+        // Same-project events never conflict — team members can stack inspections on their own job
+        if(e.project===PROJ) return;
         var eTime=e.inspection_time?e.inspection_time.substring(0,5):'';
         if(!eTime||e.flexible_display==='flexible') return;
         var eMin=parseInt(eTime.split(':')[0])*60+parseInt(eTime.split(':')[1]);
@@ -732,12 +734,12 @@ function checkSchedulingConflicts(date,time,types,dur){
         if(!overlaps) return;
         var eTypes=e.inspection_types||[];
         var eIsBlocking=eTypes.some(function(t){return blockingTypes.indexOf(t)>=0;});
-        // Rule 1: Blocking types cannot overlap anything
+        // Rule 1: Blocking types cannot overlap anything (across different jobs only)
         if(isBlocking || eIsBlocking){
-            warnings.push((eTypes.join('/')||'Inspection')+' at '+eTime+(e.project!==PROJ?' ('+e.project+')':'')+' — blocking type conflict');
+            warnings.push((eTypes.join('/')||'Inspection')+' at '+eTime+' ('+e.project+') — blocking type conflict');
         }
         // Rule 2: Regular cannot overlap Regular across different jobs
-        else if(types.indexOf('Regular')>=0 && eTypes.indexOf('Regular')>=0 && e.project!==PROJ){
+        else if(types.indexOf('Regular')>=0 && eTypes.indexOf('Regular')>=0){
             warnings.push('Regular at '+eTime+' ('+e.project+') — cannot overlap Regular across jobs');
         }
     });

@@ -559,6 +559,8 @@ function _doLoadMD(){
             if(!mD[d])mD[d]=[];
             mD[d].push(v);
             // Determine if this event BLOCKS a time slot
+            // Same-project events never block — team members can stack inspections on their own job
+            if(v.project===PROJ) return;
             var types=v.inspection_types||[];
             var isRegular=types.indexOf('Regular')>=0;
             var isConcrete=types.indexOf('Concrete')>=0;
