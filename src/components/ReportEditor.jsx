@@ -1313,7 +1313,7 @@ function ReportEditor({job, user, onBack, reportDate}){
     return(
       <div style={{minHeight:"100vh",background:C.bg,color:C.txt,display:"flex",flexDirection:"column"}}>
         <div style={{display:"flex",alignItems:"center",gap:10,padding:"12px 16px",borderBottom:`1px solid ${C.brd}`,background:C.card}}>
-          <button onClick={()=>{setViewingReport(null);setViewDocxHtml(null);setEditablePreview(null);}} style={{background:C.inp,border:`1px solid ${C.brd}`,borderRadius:12,color:"#fff",fontSize:26,cursor:"pointer",lineHeight:1,width:56,height:56,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}aria-label="Go back">←</button>
+          <button onClick={()=>{closeCamera();setViewingReport(null);setViewDocxHtml(null);setEditablePreview(null);}} style={{background:C.inp,border:`1px solid ${C.brd}`,borderRadius:12,color:"#fff",fontSize:26,cursor:"pointer",lineHeight:1,width:56,height:56,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}aria-label="Go back">←</button>
           <div style={{flex:1}}>
             <div style={{fontWeight:700,fontSize:17}}>{useEditable?"Edit on Preview":"Report Preview"}</div>
             <div style={{fontSize:12,color:C.mut}}>{useEditable?"Click any field to edit directly on the PDF":"This is how your report will look"}</div>
@@ -1362,10 +1362,10 @@ function ReportEditor({job, user, onBack, reportDate}){
           )}
         </div>
         <div style={{position:"fixed",bottom:0,left:0,right:0,padding:"14px 20px",borderTop:`1px solid ${C.brd}`,background:C.card,zIndex:100,display:"flex",gap:10,maxWidth:useEditable?900:"none",margin:useEditable?"0 auto":"0"}}>
-          <button onClick={()=>{setViewingReport(null);setViewDocxHtml(null);setEditablePreview(null);}} style={{padding:"14px 16px",background:C.card,border:`1px solid ${C.brd}`,borderRadius:10,color:C.mut,fontSize:15,fontWeight:700,cursor:"pointer"}}>
+          <button onClick={()=>{closeCamera();setViewingReport(null);setViewDocxHtml(null);setEditablePreview(null);}} style={{padding:"14px 16px",background:C.card,border:`1px solid ${C.brd}`,borderRadius:10,color:C.mut,fontSize:15,fontWeight:700,cursor:"pointer"}}>
             ←
           </button>
-          <button onClick={async()=>{await saveWorking();setViewingReport(null);setViewDocxHtml(null);setEditablePreview(null);onBack();}} disabled={saving} style={{flex:1,padding:"14px 0",background:C.card,border:`1px solid ${C.brd}`,borderRadius:10,color:C.txt,fontSize:15,fontWeight:700,cursor:"pointer",opacity:saving?0.5:1}}>
+          <button onClick={async()=>{closeCamera();if(reportStatus!=="submitted")await saveWorking();setViewingReport(null);setViewDocxHtml(null);setEditablePreview(null);onBack();}} disabled={saving} style={{flex:1,padding:"14px 0",background:C.card,border:`1px solid ${C.brd}`,borderRadius:10,color:C.txt,fontSize:15,fontWeight:700,cursor:"pointer",opacity:saving?0.5:1}}>
             {saving?"Saving...":"Save & Exit"}
           </button>
           <button onClick={()=>{setViewingReport(null);setViewDocxHtml(null);setEditablePreview(null);submitReport();}} disabled={submitting} className="btn-o" style={{flex:1,padding:"14px 0",background:C.org,border:"none",borderRadius:10,color:"#fff",fontSize:15,fontWeight:700,cursor:submitting?"default":"pointer",opacity:submitting?0.6:1}}>
@@ -1449,7 +1449,7 @@ function ReportEditor({job, user, onBack, reportDate}){
       {/* Header */}
       <div style={{borderBottom:`1px solid ${C.brd}`,background:C.card,padding:"14px 16px"}}>
       <div style={{display:"flex",alignItems:"center",gap:12,maxWidth:600,margin:"0 auto"}}>
-        <button onClick={async()=>{await saveWorking();onBack();}} style={{background:C.inp,border:`1px solid ${C.brd}`,borderRadius:12,color:"#fff",fontSize:26,cursor:"pointer",lineHeight:1,width:56,height:56,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}aria-label="Go back">←</button>
+        <button onClick={async()=>{closeCamera();if(reportStatus!=="submitted")await saveWorking();onBack();}} style={{background:C.inp,border:`1px solid ${C.brd}`,borderRadius:12,color:"#fff",fontSize:26,cursor:"pointer",lineHeight:1,width:56,height:56,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}aria-label="Go back">←</button>
         <div style={{flex:1,minWidth:0}}>
           <div style={{fontWeight:700,fontSize:17}}>{reportStatus==="submitted"?"Submitted Report":"Today's Report"}</div>
           <div style={{fontSize:12,color:C.mut,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{job.name}</div>
