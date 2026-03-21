@@ -1,4 +1,4 @@
-const CACHE_NAME = 'mdr-1774067587';
+const CACHE_NAME = 'mdr-1774069873';
 const API_CACHE = 'mdr-api-v1';
 const OFFLINE_QUEUE = 'mdr-offline-queue';
 
