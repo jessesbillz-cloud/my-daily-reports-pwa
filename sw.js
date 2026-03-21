@@ -1,4 +1,4 @@
-const CACHE_NAME = 'mdr-v137';
+const CACHE_NAME = 'mdr-v139';
 const API_CACHE = 'mdr-api-v1';
 const OFFLINE_QUEUE = 'mdr-offline-queue';
 
@@ -208,7 +208,23 @@ self.addEventListener('fetch', e => {
     return;
   }
 
-  // 4. Static assets — cache-first
+  // 4. App JS/CSS bundles (hashed by Vite) — network-first so deploys take effect immediately
+  if (url.pathname.startsWith('/assets/') && /\.(js|css)$/.test(url.pathname)) {
+    e.respondWith(
+      fetch(e.request)
+        .then(resp => {
+          if (resp.ok) {
+            const clone = resp.clone();
+            caches.open(CACHE_NAME).then(cache => cache.put(e.request, clone));
+          }
+          return resp;
+        })
+        .catch(() => caches.match(e.request).then(cached => cached || new Response('', { status: 503 })))
+    );
+    return;
+  }
+
+  // 5. Other static assets (icons, fonts, CDN libs) — cache-first
   e.respondWith(
     caches.match(e.request).then(cached => {
       if (cached) return cached;
