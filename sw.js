@@ -1,4 +1,4 @@
-const CACHE_NAME = 'mdr-1774129070';
+const CACHE_NAME = 'mdr-1774131358';
 
 // Static assets to pre-cache for offline app shell launch
 const CACHE_URLS = [
@@ -16,7 +16,16 @@ const CACHE_URLS = [
 self.addEventListener('install', e => {
   e.waitUntil(
     caches.open(CACHE_NAME)
-      .then(cache => cache.addAll(CACHE_URLS))
+      .then(cache => {
+        // Use Promise.allSettled to cache URLs individually.
+        // If any URL fails, continue instead of blocking the install.
+        const promises = CACHE_URLS.map(url =>
+          cache.add(url).catch(err => {
+            console.warn(`[SW] Failed to cache ${url}:`, err.message);
+          })
+        );
+        return Promise.allSettled(promises);
+      })
       .then(() => self.skipWaiting())
   );
 });
