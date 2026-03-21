@@ -93,7 +93,7 @@ details[open] .collapsible-summary::after { content: '−'; }
 <button onclick="changeMonth(1)">&rarr;</button>
 </div>
 <div class="week-row" style="padding:0 8px;">
-<div class="week-header">S</div><div class="week-header">M</div><div class="week-header">T</div><div class="week-header">W</div><div class="week-header">T</div><div class="week-header">F</div><div class="week-header">S</div>
+<div class="week-header">Su</div><div class="week-header">Mo</div><div class="week-header">Tu</div><div class="week-header">We</div><div class="week-header">Th</div><div class="week-header">Fr</div><div class="week-header">Sa</div>
 </div>
 <div id="calGrid" class="week-row" style="padding:0 8px;"></div>
 <div class="day-detail" id="dayDetail">
@@ -130,16 +130,16 @@ details[open] .collapsible-summary::after { content: '−'; }
 <div id="blockedBanner" class="blocked-banner" style="display:none;">
 ⛔ This inspector is already scheduled on the selected date. Please choose a different date.
 </div>
-<label class="field-label">Photos or PDFs *</label>
+<label class="field-label" for="photoIn">Photos or PDFs *</label>
 <div class="photo-box" onclick="document.getElementById('photoIn').click()">
     <div id="photoPrompt">&#128247; Tap to select multiple photos or PDFs</div>
 </div>
-<input type="file" id="photoIn" onchange="handleFileSelection(this)" multiple style="display:none;">
+<input type="file" id="photoIn" onchange="handleFileSelection(this)" multiple accept="image/*,.pdf" style="display:none;">
 <div id="filePreviewGrid" class="file-list-container"></div>
-<label class="field-label">Inspection Date *</label>
-<input type="date" id="iDate" class="field-input" onchange="checkDateAvailability()">
+<label class="field-label" for="iDate">Inspection Date *</label>
+<input type="date" id="iDate" class="field-input" onchange="checkDateAvailability()" min="">
 <div id="dateWarning" style="display:none;color:#ef4444;font-size:12px;font-weight:600;margin-top:-10px;margin-bottom:10px;"></div>
-<label class="field-label">Inspection Time *</label>
+<label class="field-label" for="iTime">Inspection Time *</label>
 <select id="iTime" class="field-input" onchange="checkDateAvailability()">
 <option value="">Select time</option>
 <option value="flexible">Flexible — anytime today</option>
@@ -157,15 +157,15 @@ details[open] .collapsible-summary::after { content: '−'; }
 <option value="16:00">4:00 PM</option><option value="16:30">4:30 PM</option>
 <option value="17:00">5:00 PM</option>
 </select>
-<label class="field-label">Scheduling Request #/Title (Optional)</label>
+<label class="field-label" for="iIdentifier">Scheduling Request #/Title (Optional)</label>
 <input type="text" id="iIdentifier" class="field-input" maxlength="50">
 <label class="field-label">Duration *</label>
 <div class="dur-btns" id="durBtns">
-<div class="dur-btn" onclick="setDur('30')">30 min</div>
-<div class="dur-btn" onclick="setDur('60')">1 hr</div>
-<div class="dur-btn" onclick="setDur('120')">2 hr</div>
-<div class="dur-btn" onclick="setDur('240')">4 hr</div>
-<div class="dur-btn" onclick="setDur('480')">All Day</div>
+<div class="dur-btn" onclick="setDur('30',event)">30 min</div>
+<div class="dur-btn" onclick="setDur('60',event)">1 hr</div>
+<div class="dur-btn" onclick="setDur('120',event)">2 hr</div>
+<div class="dur-btn" onclick="setDur('240',event)">4 hr</div>
+<div class="dur-btn" onclick="setDur('480',event)">All Day</div>
 </div>
 <label class="field-label">Inspection Type *</label>
 <div class="type-btns">
@@ -173,7 +173,7 @@ details[open] .collapsible-summary::after { content: '−'; }
 <div class="type-btn" id="btnRegular" onclick="setType('Regular')">Regular</div>
 </div>
 <div class="special-sub" id="specialSub">
-<label class="field-label">Special Inspection Type *</label>
+<label class="field-label" for="specialType">Special Inspection Type *</label>
 <select class="field-input" id="specialType" onchange="checkDateAvailability()">
 <option value="">Select type</option>
 <option value="Welding">Welding</option><option value="Bolting">Bolting</option><option value="Concrete">Concrete</option>
@@ -183,7 +183,7 @@ details[open] .collapsible-summary::after { content: '−'; }
 <option value="Fireproofing">Fireproofing</option><option value="Shotcrete">Shotcrete</option>
 </select>
 </div>
-<label class="field-label">Submitted By *</label>
+<label class="field-label" for="iName">Submitted By *</label>
 <select id="iName" class="field-input" onchange="onNameChange()">
 <option value="">Select your name</option>
 <option value="other">-- My name isn't here --</option>
@@ -198,7 +198,7 @@ details[open] .collapsible-summary::after { content: '−'; }
     <input type="text" id="iNewCompany" class="field-input" placeholder="e.g., Lusardi, Testing Lab" autocomplete="off">
     <div style="font-size:12px;color:#4a4;margin-top:4px;">Your name will appear in the dropdown next time</div>
 </div>
-<label class="field-label">Notes</label>
+<label class="field-label" for="iNotes">Notes</label>
 <textarea id="iNotes" class="field-input" rows="3" placeholder="Optional details"></textarea>
 <label class="field-label">Send a copy to:</label>
 <div class="email-list" id="emailListContainer">
@@ -632,7 +632,7 @@ function renderCal(){
     }
 }
 function setType(t){inspType=t;document.getElementById('btnSpecial').classList.toggle('active',t==='Special');document.getElementById('btnRegular').classList.toggle('active',t==='Regular');document.getElementById('specialSub').classList.toggle('show',t==='Special');if(t!=='Special')document.getElementById('specialType').selectedIndex=0;checkDateAvailability();}
-function setDur(d){inspDur=d;document.querySelectorAll('.dur-btn').forEach(function(b){b.classList.remove('active');});event.target.classList.add('active');checkDateAvailability();}
+function setDur(d,e){inspDur=d;document.querySelectorAll('.dur-btn').forEach(function(b){b.classList.remove('active');});(e||event).target.classList.add('active');checkDateAvailability();}
 function scheduleInsp(id){
 fetch(SB+'/functions/v1/update-inspection',{method:'POST',headers:{'Authorization':'Bearer '+AK,'apikey':AK,'Content-Type':'application/json'},body:JSON.stringify({request_id:id,action:'schedule',notify:true})})
 .then(function(r){return r.json();}).then(function(data){if(data.success){showToast('Marked as Scheduled — notifications sent.'); loadMD();} else {showToast('Error — try again');}})
@@ -648,6 +648,7 @@ function submitIR(){
     if(!t) missing.push('Time');
     if(!inspDur) missing.push('Duration');
     if(!inspType) missing.push('Inspection Type');
+    if(inspType==='Special'&&!document.getElementById('specialType').value) missing.push('Special Visit Type');
     if(!nm) missing.push('Your Name');
     if(missing.length>0){
         var w=document.getElementById('submitWarning');
@@ -855,6 +856,7 @@ function onNameChange(){
     sec.style.display=sel.value==='other'?'block':'none';
 }
 function resetForm(){ location.reload(); }
+document.getElementById('iDate').min=new Date().toISOString().split('T')[0];
 loadContacts(); // also triggers loadMD() after fetching user_id
 renderCal();
 </script>
