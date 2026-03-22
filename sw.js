@@ -1,4 +1,4 @@
-const CACHE_NAME = 'mdr-1774136031';
+const CACHE_NAME = 'mdr-1774137977';
 
 // Static assets to pre-cache for offline app shell launch
 const CACHE_URLS = [
