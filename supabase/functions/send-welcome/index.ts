@@ -29,6 +29,7 @@ serve(async (req) => {
     }
 
     const FROM_EMAIL = Deno.env.get("FROM_EMAIL") || "reports@mydailyreports.org";
+    const REPLY_TO = Deno.env.get("REPLY_TO_EMAIL") || FROM_EMAIL;
     const firstName = (full_name || "").split(" ")[0] || "there";
 
     const html = `
@@ -86,9 +87,14 @@ serve(async (req) => {
       },
       body: JSON.stringify({
         from: `My Daily Reports <${FROM_EMAIL}>`,
+        reply_to: REPLY_TO,
         to: [email],
         subject: "Welcome to My Daily Reports — let's get you set up",
         html,
+        text: `Hey ${firstName}! Your account is all set up and ready to go.\n\nHere's how to get started:\n1. Create your first job — Tap "+ New Job" and enter your project name.\n2. Upload your template — Drop in your PDF or DOCX inspection form. AI will detect all the fields automatically.\n3. Add your team — Enter team email addresses so reports are automatically distributed when you submit.\n4. Fill out and submit — Fill in your daily fields, attach photos, and hit Submit.\n\nCheck the Training Center inside the app for detailed guides and tips.\n\nQuestions? Reply to this email anytime — we're here to help.\n\n---\nMy Daily Reports - mydailyreports.org`,
+        headers: {
+          "List-Unsubscribe": `<mailto:${FROM_EMAIL}?subject=unsubscribe>`,
+        },
       }),
     });
 

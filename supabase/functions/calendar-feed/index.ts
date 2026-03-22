@@ -92,6 +92,7 @@ serve(async (req) => {
 
     let calendarName = "My Daily Reports";
     let requests: any[] = [];
+    let userTimezone = "America/Los_Angeles";
 
     if (project) {
       calendarName = `${project.replace(/-/g, " ")} — Schedule`;
@@ -118,7 +119,7 @@ serve(async (req) => {
       if (slug && !userId) {
         const { data: profile } = await supabase
           .from("profiles")
-          .select("id, full_name")
+          .select("id, full_name, timezone")
           .eq("slug", slug)
           .single();
 
@@ -130,16 +131,18 @@ serve(async (req) => {
         }
         resolvedUserId = profile.id;
         calendarName = `${profile.full_name || "Inspector"} — Scheduling`;
+        if (profile.timezone) userTimezone = profile.timezone;
       } else if (userId) {
         const { data: profile } = await supabase
           .from("profiles")
-          .select("full_name")
+          .select("full_name, timezone")
           .eq("id", userId)
           .single();
 
         if (profile?.full_name) {
           calendarName = `${profile.full_name} — Scheduling`;
         }
+        if (profile?.timezone) userTimezone = profile.timezone;
       }
 
       const { data, error } = await supabase
@@ -160,7 +163,19 @@ serve(async (req) => {
       requests = data || [];
     }
 
-    const TZ = "America/Los_Angeles";
+    const TZ = userTimezone;
+
+    // US timezone offset map for VTIMEZONE generation
+    const TZ_OFFSETS: Record<string, { std: string; dst: string; stdName: string; dstName: string }> = {
+      "America/New_York":     { std: "-0500", dst: "-0400", stdName: "EST", dstName: "EDT" },
+      "America/Chicago":      { std: "-0600", dst: "-0500", stdName: "CST", dstName: "CDT" },
+      "America/Denver":       { std: "-0700", dst: "-0600", stdName: "MST", dstName: "MDT" },
+      "America/Phoenix":      { std: "-0700", dst: "-0700", stdName: "MST", dstName: "MST" },
+      "America/Los_Angeles":  { std: "-0800", dst: "-0700", stdName: "PST", dstName: "PDT" },
+      "America/Anchorage":    { std: "-0900", dst: "-0800", stdName: "AKST", dstName: "AKDT" },
+      "Pacific/Honolulu":     { std: "-1000", dst: "-1000", stdName: "HST", dstName: "HST" },
+    };
+    const tzInfo = TZ_OFFSETS[TZ] || TZ_OFFSETS["America/Los_Angeles"];
 
     const lines: string[] = [
       "BEGIN:VCALENDAR",
@@ -175,16 +190,16 @@ serve(async (req) => {
       "BEGIN:STANDARD",
       "DTSTART:19701101T020000",
       "RRULE:FREQ=YEARLY;BYMONTH=11;BYDAY=1SU",
-      "TZOFFSETFROM:-0700",
-      "TZOFFSETTO:-0800",
-      "TZNAME:PST",
+      `TZOFFSETFROM:${tzInfo.dst}`,
+      `TZOFFSETTO:${tzInfo.std}`,
+      `TZNAME:${tzInfo.stdName}`,
       "END:STANDARD",
       "BEGIN:DAYLIGHT",
       "DTSTART:19700308T020000",
       "RRULE:FREQ=YEARLY;BYMONTH=3;BYDAY=2SU",
-      "TZOFFSETFROM:-0800",
-      "TZOFFSETTO:-0700",
-      "TZNAME:PDT",
+      `TZOFFSETFROM:${tzInfo.std}`,
+      `TZOFFSETTO:${tzInfo.dst}`,
+      `TZNAME:${tzInfo.dstName}`,
       "END:DAYLIGHT",
       "END:VTIMEZONE",
     ];

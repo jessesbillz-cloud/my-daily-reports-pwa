@@ -78,7 +78,7 @@ details[open] .collapsible-summary::after { content: '−'; }
 <body>
 <!-- SCHEDULING HEADER (primary) -->
 <div class="header" style="display:flex;align-items:center;gap:12px;margin-bottom:12px;">
-    <a id="backToHub" href="hub.html" style="background:none;border:none;color:#5a8fc0;font-size:28px;cursor:pointer;padding:8px 12px;line-height:1;border-radius:8px;min-width:48px;min-height:48px;display:flex;align-items:center;justify-content:center;text-decoration:none;">←</a>
+    <a id="backToHub" href="hub.html" style="background:#222;border:1px solid #333;border-radius:12px;color:#fff;font-size:26px;cursor:pointer;line-height:1;width:56px;height:56px;display:flex;align-items:center;justify-content:center;text-decoration:none;flex-shrink:0;">←</a>
     <img src="logo.jpg" alt="Logo" style="width:45px;height:45px;border-radius:6px;">
     <div>
         <h2>Scheduling Request</h2>
@@ -101,7 +101,7 @@ details[open] .collapsible-summary::after { content: '−'; }
 <button onclick="changeMonth(1)">&rarr;</button>
 </div>
 <div class="week-row" style="padding:0 8px;">
-<div class="week-header">S</div><div class="week-header">M</div><div class="week-header">T</div><div class="week-header">W</div><div class="week-header">T</div><div class="week-header">F</div><div class="week-header">S</div>
+<div class="week-header">Su</div><div class="week-header">Mo</div><div class="week-header">Tu</div><div class="week-header">We</div><div class="week-header">Th</div><div class="week-header">Fr</div><div class="week-header">Sa</div>
 </div>
 <div id="calGrid" class="week-row" style="padding:0 8px;"></div>
 <div class="day-detail" id="dayDetail">
@@ -132,16 +132,16 @@ details[open] .collapsible-summary::after { content: '−'; }
 </div>
 </div>
 <div id="requestView" class="form-wrap">
-<label class="field-label">Photos or PDFs *</label>
+<label class="field-label" for="photoIn">Photos or PDFs *</label>
 <div class="photo-box" onclick="document.getElementById('photoIn').click()">
     <div id="photoPrompt">&#128247; Tap to select multiple photos or PDFs</div>
 </div>
-<input type="file" id="photoIn" onchange="handleFileSelection(this)" multiple style="display:none;">
+<input type="file" id="photoIn" onchange="handleFileSelection(this)" multiple accept="image/*,.pdf" style="display:none;">
 <div id="filePreviewGrid" class="file-list-container"></div>
-<label class="field-label">Date *</label>
-<input type="date" id="iDate" class="field-input">
+<label class="field-label" for="iDate">Date *</label>
+<input type="date" id="iDate" class="field-input" min="">
 <div id="dateWarning" style="display:none;color:#ef4444;font-size:12px;font-weight:600;margin-top:-10px;margin-bottom:10px;"></div>
-<label class="field-label">Time *</label>
+<label class="field-label" for="iTime">Time *</label>
 <select id="iTime" class="field-input">
 <option value="">Select time</option>
 <option value="flexible">Flexible — anytime today</option>
@@ -159,15 +159,15 @@ details[open] .collapsible-summary::after { content: '−'; }
 <option value="16:00">4:00 PM</option><option value="16:30">4:30 PM</option>
 <option value="17:00">5:00 PM</option>
 </select>
-<label class="field-label">Scheduling Request #/Title (Optional)</label>
+<label class="field-label" for="iIdentifier">Scheduling Request #/Title (Optional)</label>
 <input type="text" id="iIdentifier" class="field-input" maxlength="50">
 <label class="field-label">Duration *</label>
 <div class="dur-btns" id="durBtns">
-<div class="dur-btn" onclick="setDur('30')">30 min</div>
-<div class="dur-btn" onclick="setDur('60')">1 hr</div>
-<div class="dur-btn" onclick="setDur('120')">2 hr</div>
-<div class="dur-btn" onclick="setDur('240')">4 hr</div>
-<div class="dur-btn" onclick="setDur('480')">All Day</div>
+<div class="dur-btn" onclick="setDur('30',event)">30 min</div>
+<div class="dur-btn" onclick="setDur('60',event)">1 hr</div>
+<div class="dur-btn" onclick="setDur('120',event)">2 hr</div>
+<div class="dur-btn" onclick="setDur('240',event)">4 hr</div>
+<div class="dur-btn" onclick="setDur('480',event)">All Day</div>
 </div>
 <label class="field-label">Type *</label>
 <div class="type-btns">
@@ -175,17 +175,17 @@ details[open] .collapsible-summary::after { content: '−'; }
 <div class="type-btn" id="btnRegular" onclick="setType('Regular')">Regular</div>
 </div>
 <div class="special-sub" id="specialSub">
-<label class="field-label">Special Visit Type *</label>
+<label class="field-label" for="specialType">Special Visit Type *</label>
 <select class="field-input" id="specialType">
 <option value="">Select type</option>
-<option value="Soils">Soils</option><option value="Material ID">Material ID</option>
-<option value="Material ID CWI">Material ID CWI</option><option value="Concrete">Concrete</option>
-<option value="Bolting">Bolting</option><option value="Pull Test">Pull Test</option>
-<option value="Shotcrete">Shotcrete</option><option value="Fireproofing">Fireproofing</option>
-<option value="UT/MP">UT/MP</option><option value="Post Inst. Anchor">Post Inst. Anchor</option><option value="Epoxy">Epoxy</option><option value="Grout">Grout</option>
+<option value="Welding">Welding</option><option value="Bolting">Bolting</option><option value="Concrete">Concrete</option>
+<option value="Grout">Grout</option><option value="Epoxy">Epoxy</option><option value="Soils">Soils</option>
+<option value="Material ID">Material ID</option><option value="Material ID CWI">Material ID CWI</option>
+<option value="UT/MP">UT/MP</option><option value="Pull Test">Pull Test</option><option value="Post Inst. Anchor">Post Inst. Anchor</option>
+<option value="Fireproofing">Fireproofing</option><option value="Shotcrete">Shotcrete</option>
 </select>
 </div>
-<label class="field-label">Submitted By *</label>
+<label class="field-label" for="iName">Submitted By *</label>
 <select id="iName" class="field-input">
 <option value="">Select your name</option>
 </select>
@@ -208,7 +208,7 @@ details[open] .collapsible-summary::after { content: '−'; }
     </div>
 </div>
 
-<label class="field-label">Notes</label>
+<label class="field-label" for="iNotes">Notes</label>
 <textarea id="iNotes" class="field-input" rows="3" placeholder="Optional details"></textarea>
 <label class="field-label">Send a copy to:</label>
 <div class="email-list" id="emailListContainer">
@@ -405,7 +405,7 @@ function showDay(d){
             if(e.inspection_identifier) html+='<div style="color:#e8742a;font-weight:700;font-size:13px;margin:4px 0;">'+esc(e.inspection_identifier)+'</div>';
             html+='<div style="font-size:11px;color:#888;margin-top:4px;">By: '+esc(e.submitted_by)+'</div>';
             if(e.location_detail) html+='<div style="font-size:11px;color:#5a8fc0;margin-top:2px;">📍 '+esc(e.location_detail)+'</div>';
-            if(e.duration) html+='<div style="font-size:11px;color:#888;margin-top:2px;">Duration: '+(e.duration>=60?(e.duration/60)+'hr':e.duration+'min')+'</div>';
+            if(e.duration) html+='<div style="font-size:11px;color:#888;margin-top:2px;">Duration: '+(parseInt(e.duration)>=480?'All Day':e.duration>=60?(e.duration/60)+'hr':e.duration+'min')+'</div>';
             if(isCancelled){
                 html+='<div style="color:#c44;font-size:12px;font-weight:600;margin-top:4px;">Cancelled</div>';
             } else if(isScheduled){
@@ -603,7 +603,7 @@ function renderCal(){
     }
 }
 function setType(t){inspType=t;document.getElementById('btnSpecial').classList.toggle('active',t==='Special');document.getElementById('btnRegular').classList.toggle('active',t==='Regular');document.getElementById('specialSub').classList.toggle('show',t==='Special');if(t!=='Special')document.getElementById('specialType').selectedIndex=0;}
-function setDur(d){inspDur=d;document.querySelectorAll('.dur-btn').forEach(function(b){b.classList.remove('active');});event.target.classList.add('active');}
+function setDur(d,e){inspDur=d;document.querySelectorAll('.dur-btn').forEach(function(b){b.classList.remove('active');});(e||event).target.classList.add('active');}
 function scheduleInsp(id){
 var btns=document.querySelectorAll('.evt-actions button');btns.forEach(function(b){b.disabled=true;b.style.opacity='0.5';});
 fetch(SB+'/functions/v1/update-inspection',{method:'POST',headers:{'Authorization':'Bearer '+AK,'apikey':AK,'Content-Type':'application/json'},body:JSON.stringify({request_id:id,action:'schedule'})})
@@ -723,6 +723,8 @@ function checkSchedulingConflicts(date,time,types,dur){
     var reqEnd=reqMinutes+parseInt(dur||60);
     var warnings=[];
     dayEvents.forEach(function(e){
+        // Same-project events never conflict — team members can stack inspections on their own job
+        if(e.project===PROJ) return;
         var eTime=e.inspection_time?e.inspection_time.substring(0,5):'';
         if(!eTime||e.flexible_display==='flexible') return;
         var eMin=parseInt(eTime.split(':')[0])*60+parseInt(eTime.split(':')[1]);
@@ -732,12 +734,12 @@ function checkSchedulingConflicts(date,time,types,dur){
         if(!overlaps) return;
         var eTypes=e.inspection_types||[];
         var eIsBlocking=eTypes.some(function(t){return blockingTypes.indexOf(t)>=0;});
-        // Rule 1: Blocking types cannot overlap anything
+        // Rule 1: Blocking types cannot overlap anything (across different jobs only)
         if(isBlocking || eIsBlocking){
-            warnings.push((eTypes.join('/')||'Inspection')+' at '+eTime+(e.project!==PROJ?' ('+e.project+')':'')+' — blocking type conflict');
+            warnings.push((eTypes.join('/')||'Inspection')+' at '+eTime+' ('+e.project+') — blocking type conflict');
         }
         // Rule 2: Regular cannot overlap Regular across different jobs
-        else if(types.indexOf('Regular')>=0 && eTypes.indexOf('Regular')>=0 && e.project!==PROJ){
+        else if(types.indexOf('Regular')>=0 && eTypes.indexOf('Regular')>=0){
             warnings.push('Regular at '+eTime+' ('+e.project+') — cannot overlap Regular across jobs');
         }
     });
@@ -805,6 +807,7 @@ function submitIR(){
     if(!t) missing.push('Time');
     if(!inspDur) missing.push('Duration');
     if(!inspType) missing.push('Inspection Type');
+    if(inspType==='Special'&&!document.getElementById('specialType').value) missing.push('Special Visit Type');
     if(!nm) missing.push('Your Name');
     if(missing.length>0){
         var w=document.getElementById('submitWarning');
@@ -837,7 +840,7 @@ function submitIRContinue(d,t,nm){
     var btn=document.getElementById('submitBtn'); btn.textContent='Submitting...'; btn.disabled=true;
     var fd=new FormData();
     allFiles.forEach(function(file,index){fd.append('file_'+index,file);});
-    fd.append('project',PROJ); fd.append('gc',cleanName);
+    fd.append('project',PROJ); fd.append('gc',cleanName); if(JOB_ID)fd.append('job_id',JOB_ID);
     fd.append('inspection_date',d); fd.append('inspection_time',t);
     var typesArr=[inspType];
     var specialVal='';
@@ -913,6 +916,8 @@ function loadContacts(){
     });
 }
 function resetForm(){ location.reload(); }
+// Set min date to today to prevent past-date submissions
+document.getElementById('iDate').min=new Date().toISOString().split('T')[0];
 loadContacts(); // also triggers loadMD() after fetching user_id
 loadAdditionalRecipients();
 renderCal();

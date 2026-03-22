@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <meta name="theme-color" content="#0f0f0f" />
@@ -331,6 +331,12 @@ function ConfirmOverlay(){
 
 /* ── Support Chat Widget ── */
 function SupportChat({user}){
+  // Robust token getter: live AUTH_TOKEN → mdr_session stored token → anon key
+  const getTok=()=>{
+    if(AUTH_TOKEN)return AUTH_TOKEN;
+    try{const s=JSON.parse(localStorage.getItem("mdr_session")||"{}");if(s.access_token)return s.access_token;}catch(e){}
+    return SB_KEY;
+  };
   const [scToast,setScToast]=useState("");
   const showToast=(m)=>{setScToast(m);setTimeout(()=>setScToast(""),3000);};
   const [open,setOpen]=useState(false);
@@ -348,10 +354,12 @@ function SupportChat({user}){
   // Resume existing conversation on open
   useEffect(()=>{
     if(open&&convId&&started){
-      // Load existing messages and start polling
-      const tok=AUTH_TOKEN||(localStorage.getItem("sb_access_token"))||SB_KEY;
+      // Verify conversation still exists, then load messages
+      const tok=getTok();
       (async()=>{
         try{
+          const cv=await fetch(`${SB_URL}/rest/v1/support_conversations?id=eq.${convId}&select=id`,{headers:{"apikey":SB_KEY,"Authorization":"Bearer "+tok}});
+          if(cv.ok){const arr=await cv.json();if(!arr||arr.length===0){setConvId(null);setStarted(false);setMsgs([]);try{localStorage.removeItem("mdr_support_conv");}catch(e){}return;}}
           const r=await fetch(`${SB_URL}/rest/v1/support_messages?conversation_id=eq.${convId}&order=created_at.asc`,{headers:{"apikey":SB_KEY,"Authorization":"Bearer "+tok}});
           if(r.ok)setMsgs(await r.json());
         }catch(e){}
@@ -363,7 +371,7 @@ function SupportChat({user}){
 
   // Start or resume conversation
   const startChat=async()=>{
-    const tok=AUTH_TOKEN||(localStorage.getItem("sb_access_token"))||SB_KEY;
+    const tok=getTok();
     const headers={"apikey":SB_KEY,"Content-Type":"application/json","Authorization":"Bearer "+tok,"Prefer":"return=representation"};
     try{
       // Create new conversation
@@ -388,7 +396,7 @@ function SupportChat({user}){
   const subscribeToMessages=(cid)=>{
     if(subRef.current)subRef.current.unsubscribe?.();
     // Poll for new messages every 3s (simpler than realtime for PWA)
-    const tok=AUTH_TOKEN||(localStorage.getItem("sb_access_token"))||SB_KEY;
+    const tok=getTok();
     const h={"apikey":SB_KEY,"Authorization":"Bearer "+tok};
     const poll=setInterval(async()=>{
       try{
@@ -404,16 +412,20 @@ function SupportChat({user}){
 
   const sendMsg=async()=>{
     if(!draft.trim()||sending||!convId)return;
+    const msgText=draft.trim();
     setSending(true);
+    // Optimistic: show the message immediately
+    const tempMsg={id:"tmp-"+Date.now(),conversation_id:convId,sender:"user",body:msgText,created_at:new Date().toISOString()};
+    setMsgs(prev=>[...prev,tempMsg]);
+    setDraft("");
     try{
-      const tok=AUTH_TOKEN||(localStorage.getItem("sb_access_token"))||SB_KEY;
+      const tok=getTok();
       const h={"apikey":SB_KEY,"Authorization":"Bearer "+tok,"Content-Type":"application/json"};
-      const pr=await fetch(`${SB_URL}/rest/v1/support_messages`,{method:"POST",headers:h,body:JSON.stringify({conversation_id:convId,sender:"user",body:draft.trim()})});
-      if(!pr.ok){showToast("Send failed — try again");setSending(false);return;}
-      setDraft("");
+      const pr=await fetch(`${SB_URL}/rest/v1/support_messages`,{method:"POST",headers:h,body:JSON.stringify({conversation_id:convId,sender:"user",body:msgText})});
+      if(!pr.ok){showToast("Send failed — try again");setMsgs(prev=>prev.filter(m=>m.id!==tempMsg.id));setDraft(msgText);setSending(false);return;}
       const r=await fetch(`${SB_URL}/rest/v1/support_messages?conversation_id=eq.${convId}&order=created_at.asc`,{headers:{"apikey":SB_KEY,"Authorization":"Bearer "+tok}});
-      if(r.ok)setMsgs(await r.json());
-    }catch(e){showToast("Send failed — try again");}
+      if(r.ok){const real=await r.json();if(real.length>0)setMsgs(real);}
+    }catch(e){showToast("Send failed — try again");setMsgs(prev=>prev.filter(m=>m.id!==tempMsg.id));setDraft(msgText);}
     finally{setSending(false);}
   };
 
@@ -7978,8 +7990,9 @@ ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
 // Register service worker + auto-update on new version
 if('serviceWorker' in navigator){
   navigator.serviceWorker.register('/sw.js').then(reg=>{
-    // Check for updates every 30 minutes
-    setInterval(()=>reg.update(),30*60*1000);
+    // Check for SW update immediately on load, then every 5 minutes
+    reg.update().catch(()=>{});
+    setInterval(()=>reg.update(),5*60*1000);
     reg.addEventListener('updatefound',()=>{
       const nw=reg.installing;
       nw.addEventListener('statechange',()=>{

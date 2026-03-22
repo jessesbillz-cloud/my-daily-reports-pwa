@@ -11,6 +11,29 @@ serve(async (req) => {
   }
 
   try {
+    // ── Manual auth check (verify_jwt is off to bypass gateway issues) ──
+    const authHeader = req.headers.get("authorization");
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+      return new Response(
+        JSON.stringify({ error: "Not authenticated. Please log in again." }),
+        { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+    const SUPABASE_URL = Deno.env.get("SUPABASE_URL");
+    const SUPABASE_SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+    if (SUPABASE_URL && SUPABASE_SERVICE_KEY) {
+      const { createClient } = await import("https://esm.sh/@supabase/supabase-js@2");
+      const token = authHeader.replace("Bearer ", "");
+      const sb = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
+      const { error: authErr } = await sb.auth.getUser(token);
+      if (authErr) {
+        return new Response(
+          JSON.stringify({ error: "Invalid session. Please log out and log back in." }),
+          { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+    }
+
     const { image_base64, context } = await req.json();
 
     if (!image_base64) {
@@ -50,15 +73,17 @@ serve(async (req) => {
     else if (base64Data.startsWith("R0lG")) mediaType = "image/gif";
     else if (base64Data.startsWith("UklG")) mediaType = "image/webp";
 
-    const systemPrompt = `You write photo descriptions for construction daily reports. Technical language only. 1-2 sentences max.
+    const systemPrompt = `You write ONE SHORT LINE photo descriptions for construction daily inspection reports. Maximum 8-12 words.
 
 Rules:
-- State exactly what is visible: materials, equipment, work activity, conditions, defects, measurements if readable
-- Use trade-specific terminology (e.g. "rebar mat at grade", "CMU coursing", "HVAC ductwork rough-in", "standing water at footing")
-- If you cannot identify something, skip it — do NOT guess, speculate, or use vague filler
-- No openers like "This photo shows" or "The image depicts" — just state the facts
-- No adjectives like "professional", "thorough", "well-maintained" — describe, don't evaluate
-- No generalities like "various materials" or "ongoing work" — be specific or say nothing`;
+- ONE line only. Brief. To the point. Like a field note, not a paragraph.
+- Focus on the key technical element: what trade, what activity, what stage.
+- If readable text is visible (delivery tickets, labels, tags), note it: "Concrete delivery ticket #4521, sampled"
+- Use shorthand a real inspector would use: "CMU wall, rebar dowels above 2nd floor", "Footing excavation east side", "Concrete truck on site, load verified"
+- Do NOT describe the photo — describe what's happening on site.
+- No AI-sounding language. No "This image shows". No filler words. No evaluative adjectives.
+- If you can identify the building or area from context, include it briefly.
+- Skip anything you can't confidently identify.`;
 
     const userPrompt = context
       ? `Describe this photo for a daily report. Context: ${context}`
@@ -68,7 +93,7 @@ Rules:
 
     const apiBody = JSON.stringify({
       model: "claude-haiku-4-5-20251001",
-      max_tokens: 150,
+      max_tokens: 60,
       system: systemPrompt,
       messages: [
         {

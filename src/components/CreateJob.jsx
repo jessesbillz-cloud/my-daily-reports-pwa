@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { C } from '../constants/theme';
 import { db } from '../utils/db';
 import { AUTH_TOKEN, refreshAuthToken } from '../utils/auth';
+import { api } from '../utils/api';
 import { SB_URL, SB_KEY } from '../constants/supabase';
 import { askConfirm } from './ConfirmOverlay';
 import { extractPdfTextStructure, readAcroFormFields } from '../utils/auth';
@@ -78,16 +79,19 @@ function CreateJob({user, onBack, onCreated}){
     setJobCompanyMatches([]);
     // Fetch company templates and copy to user's saved templates
     try{
+      console.log("[CreateJob] fetching templates for company",company.id,company.name);
       const tpls=await db.getCompanyTemplates(company.id);
+      console.log("[CreateJob] found",tpls.length,"company templates",tpls.map(t=>({id:t.id,name:t.template_name,path:t.storage_path})));
       setJobCompanyTemplates(tpls);
       if(tpls.length){
-        try{await db.copyCompanyTemplatesDB(user.id,company.id);}catch(e){
-          try{await db.copyCompanyTemplatesToUser(tpls,user.id);}catch(e2){console.error("Template copy fallback:",e2);}
-        }
+        // Copy company templates to user's saved_templates table
+        // Note: DB RPC copies to templates table (per-job), but we need saved_templates (reusable)
+        // Always use JS fallback which correctly saves to saved_templates
+        try{await db.copyCompanyTemplatesToUser(tpls,user.id);console.log("[CreateJob] copyCompanyTemplatesToUser succeeded");}catch(e){console.error("[CreateJob] Template copy failed:",e.message);}
         // Refresh saved templates list so they appear immediately
         try{const updated=await db.getSavedTemplates(user.id);setSavedTpls(updated);}catch(e){}
       }
-    }catch(e){setJobCompanyTemplates([]);}
+    }catch(e){console.error("[CreateJob] getCompanyTemplates failed:",e);setJobCompanyTemplates([]);}
   };
 
   const clearJobCompany=()=>{
@@ -165,20 +169,15 @@ function CreateJob({user, onBack, onCreated}){
       console.log("[parseFields] No AcroForm fields — falling back to text extraction + AI...");
       const textItems=await extractPdfTextStructure(new Uint8Array(buf));
       console.log("[parseFields] Extracted",textItems.length,"text items");
+      if(!textItems||textItems.length===0){
+        setErr("This PDF has no extractable text (it may be a scanned image). You can still create the job and add fields manually.");
+        return;
+      }
       // Step 2: Send text items (not base64 PDF) to edge function for semantic mapping
       const payload={text_items:textItems,file_name:fileName};
       console.log("[parseFields] Step 2: calling edge function, payload size:",JSON.stringify(payload).length);
-      let resp=await fetch(`${SB_URL}/functions/v1/parse-template`,{
-        method:"POST",
-        headers:{"Content-Type":"application/json","Authorization":"Bearer "+(AUTH_TOKEN||SB_KEY),"apikey":SB_KEY},
-        body:JSON.stringify(payload)
-      });
-      // Auto-retry with refreshed token on 401
-      if(resp.status===401){console.log("[parseFields] 401 — refreshing token and retrying");await refreshAuthToken();resp=await fetch(`${SB_URL}/functions/v1/parse-template`,{method:"POST",headers:{"Content-Type":"application/json","Authorization":"Bearer "+(AUTH_TOKEN||SB_KEY),"apikey":SB_KEY},body:JSON.stringify(payload)});}
-      console.log("[parseFields] Edge function responded:",resp.status);
-      if(!resp.ok){const errText=await resp.text();console.error("[parseFields] Error body:",errText);throw new Error("Parse API "+resp.status+": "+errText);}
-      const parsed=await resp.json();
-      console.log("[parseFields] Parsed result keys:",Object.keys(parsed));
+      const parsed=await api.parseTemplate({text_items:textItems,file_name:fileName});
+      console.log("[parseFields] Edge function responded with keys:",Object.keys(parsed));
       if(parsed.error)throw new Error(parsed.error);
       // Merge editable + locked into one unified list (preserve coords for PDF fill)
       const all=[];const seenNames=new Set();
@@ -222,14 +221,7 @@ function CreateJob({user, onBack, onCreated}){
       const bytes=new Uint8Array(buf);
       let binary="";for(let i=0;i<bytes.length;i++)binary+=String.fromCharCode(bytes[i]);
       const b64=btoa(binary);
-      let resp=await fetch(`${SB_URL}/functions/v1/parse-template`,{
-        method:"POST",
-        headers:{"Content-Type":"application/json","Authorization":"Bearer "+(AUTH_TOKEN||SB_KEY),"apikey":SB_KEY},
-        body:JSON.stringify({docx_base64:b64,file_name:fileName})
-      });
-      if(resp.status===401){await refreshAuthToken();resp=await fetch(`${SB_URL}/functions/v1/parse-template`,{method:"POST",headers:{"Content-Type":"application/json","Authorization":"Bearer "+(AUTH_TOKEN||SB_KEY),"apikey":SB_KEY},body:JSON.stringify({docx_base64:b64,file_name:fileName})});}
-      if(!resp.ok){const errText=await resp.text();throw new Error("Parse API "+resp.status+": "+errText);}
-      const parsed=await resp.json();
+      const parsed=await api.parseTemplate({docx_base64:b64,file_name:fileName});
       if(parsed.error)throw new Error(parsed.error);
       // Same merge logic as PDF path
       const all=[];const seenNames=new Set();
@@ -286,8 +278,9 @@ function CreateJob({user, onBack, onCreated}){
   // Job-specific locked fields become editable so user can enter new values for the new job
   const JOB_SPECIFIC_FIELDS=["project name","project no","project number","owner","client","district","dsa file","dsa file #","dsa app","dsa app #","contractor","architect","engineer","inspector","ior","project inspector","project manager","address","location","jurisdiction"];
   const [loadingTpl,setLoadingTpl]=useState(false);
+  const [loadingTplId,setLoadingTplId]=useState(null); // track which template is loading
   const useSavedTemplate=async(tpl)=>{
-    setLoadingTpl(true);setErr("");
+    setLoadingTpl(true);setLoadingTplId(tpl.id);setErr("");
     try{
     let raw=tpl.field_config||[];
     // Validate field_config — must be an array; if it's the new {editable,locked} schema, normalize
@@ -315,18 +308,33 @@ function CreateJob({user, onBack, onCreated}){
     setReportTitle(storedPattern||tpl.original_filename?.replace(/\.[^.]+$/,"")||tpl.name||"");
     setTplSaved(adjusted.length>0);
     setShowSaved(false);
-    // Download the template file — check company-templates bucket first, then report-source-docs
+    // Download the template file — try multiple storage paths with auth
     if(tpl.storage_path){
         const isCompanyBucket=tpl.storage_path.startsWith("company-templates/");
-        const bucket=isCompanyBucket?"company-templates":"report-source-docs";
-        const path=isCompanyBucket?tpl.storage_path.replace("company-templates/",""):tpl.storage_path;
-        const token=AUTH_TOKEN||SB_KEY;
-        console.log("[useSavedTemplate] Downloading from",bucket,"/",path,"public:",isCompanyBucket);
-        const resp=isCompanyBucket
-          ?await fetch(`${SB_URL}/storage/v1/object/public/${bucket}/${path}`)
-          :await fetch(`${SB_URL}/storage/v1/object/${bucket}/${path}`,{headers:{apikey:SB_KEY,Authorization:`Bearer ${token}`}});
-        console.log("[useSavedTemplate] Download status:",resp.status);
-        if(resp.ok){
+        if(!AUTH_TOKEN){throw new Error("Authentication required to download template");}
+        const authHeaders={apikey:SB_KEY,Authorization:`Bearer ${AUTH_TOKEN}`};
+        // Build ordered list of download URLs to try
+        const urls=[];
+        if(isCompanyBucket){
+          const path=tpl.storage_path.replace("company-templates/","");
+          urls.push({url:`${SB_URL}/storage/v1/object/company-templates/${path}`,label:"company-templates (auth)"});
+          urls.push({url:`${SB_URL}/storage/v1/object/public/company-templates/${path}`,label:"company-templates (public)",noAuth:true});
+        }else{
+          // Non-prefixed path — try report-source-docs first, then company-templates as fallback
+          urls.push({url:`${SB_URL}/storage/v1/object/report-source-docs/${tpl.storage_path}`,label:"report-source-docs (auth)"});
+          urls.push({url:`${SB_URL}/storage/v1/object/company-templates/${tpl.storage_path}`,label:"company-templates (auth)"});
+          urls.push({url:`${SB_URL}/storage/v1/object/public/company-templates/${tpl.storage_path}`,label:"company-templates (public)",noAuth:true});
+        }
+        let resp=null;
+        for(const attempt of urls){
+          console.log("[useSavedTemplate] Trying download:",attempt.label,attempt.url);
+          try{
+            resp=attempt.noAuth?await fetch(attempt.url):await fetch(attempt.url,{headers:authHeaders});
+            console.log("[useSavedTemplate] Download status:",resp.status,"from",attempt.label);
+            if(resp.ok)break;
+          }catch(fetchErr){console.warn("[useSavedTemplate] Fetch error from",attempt.label,":",fetchErr.message);resp=null;}
+        }
+        if(resp&&resp.ok){
           const blob=await resp.blob();
           const ext=tpl.file_type||tpl.original_filename?.split(".").pop().toLowerCase()||"pdf";
           const file=new File([blob],tpl.original_filename||tpl.file_name||`template.${ext}`,{type:blob.type});
@@ -335,20 +343,21 @@ function CreateJob({user, onBack, onCreated}){
           const chunks=[];for(let i=0;i<u8.length;i+=8192)chunks.push(String.fromCharCode.apply(null,u8.subarray(i,i+8192)));
           setTfB64(btoa(chunks.join("")));
           // If no fields were loaded (company template without field_config), auto-parse the file
-          if(adjusted.length===0&&ext==="pdf"){
+          if(adjusted.length===0){
             const buf=await blob.arrayBuffer();
-            await parseFields(buf,file.name);
+            if(ext==="pdf")await parseFields(buf,file.name);
+            else if(ext==="docx"||ext==="doc")await parseDocxFields(buf,file.name);
           }
         }else{
-          const errBody=await resp.text().catch(()=>"");
-          console.error("[useSavedTemplate] Download failed:",resp.status,errBody);
-          setErr("Could not load template file ("+resp.status+"). Try uploading manually.");
+          const errBody=resp?await resp.text().catch(()=>""):"";
+          console.error("[useSavedTemplate] All download attempts failed. Last status:",resp?.status,errBody);
+          setErr("Could not load template file"+(resp?" ("+resp.status+")":"")+". Try uploading the file manually.");
         }
     }else if(adjusted.length===0){
       setErr("This template doesn't have a file yet. Upload a PDF to get started.");
     }
     }catch(dlErr){console.error("[useSavedTemplate] Error:",dlErr);setErr("Template loading failed: "+dlErr.message);}
-    finally{setLoadingTpl(false);}
+    finally{setLoadingTpl(false);setLoadingTplId(null);}
   };
 
   // When file is uploaded after selecting a saved template, skip parsing
@@ -448,7 +457,7 @@ function CreateJob({user, onBack, onCreated}){
               const pagePaths=await db.saveTemplatePages(user.id,job.id,imgs);
               if(pagePaths.length>0){
                 // Update template record with page images in background
-                try{await fetch(`${SB_URL}/rest/v1/templates?job_id=eq.${job.id}`,{method:"PATCH",headers:db._h(),body:JSON.stringify({structure_map:{page_images:pagePaths}})});}catch(e){}
+                try{await api.rest.patchTemplateByJob(job.id,{structure_map:{page_images:pagePaths}});}catch(e){}
               }
             }catch(pgErr){console.error("Template page render:",pgErr);}})();
           }
@@ -542,15 +551,19 @@ function CreateJob({user, onBack, onCreated}){
                 <span>Company Template ({jobCompanyTemplates.length})</span>
                 <span style={{fontSize:12,color:C.mut}}>{showCompanyTpls?"▲":"▼"}</span>
               </button>
-              {showCompanyTpls&&jobCompanyTemplates.map(t=>(
-                <div key={"co-"+t.id} onClick={()=>{if(!loadingTpl)useSavedTemplate({...t,name:t.template_name||t.name||t.file_name});}} style={{padding:"10px 14px",borderTop:`1px solid ${C.brd}`,display:"flex",alignItems:"center",gap:10,cursor:loadingTpl?"default":"pointer",opacity:loadingTpl?0.6:1}}>
+              {showCompanyTpls&&jobCompanyTemplates.map(t=>{
+                const isThis=loadingTplId===t.id;
+                const isOther=loadingTpl&&!isThis;
+                return(
+                <div key={"co-"+t.id} onClick={()=>{if(!loadingTpl)useSavedTemplate({...t,name:t.template_name||t.name||t.file_name});}} style={{padding:"10px 14px",borderTop:`1px solid ${C.brd}`,display:"flex",alignItems:"center",gap:10,cursor:loadingTpl?"default":"pointer",opacity:isOther?0.4:1,background:isThis?"rgba(232,116,42,0.08)":"transparent"}}>
                   <div style={{flex:1}}>
                     <div style={{fontSize:13,fontWeight:600,color:C.txt}}>{t.template_name||t.name||t.file_name||"Template"}</div>
                     <div style={{fontSize:11,color:C.mut}}>{t.file_type?t.file_type.toUpperCase():"PDF"}</div>
                   </div>
-                  <span style={{color:C.org,fontSize:12,fontWeight:700}}>{loadingTpl?"Loading...":"Use"}</span>
+                  <span style={{color:isThis?C.org:C.blu,fontSize:12,fontWeight:700}}>{isThis?"Loading...":"Use"}</span>
                 </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>
@@ -628,18 +641,22 @@ function CreateJob({user, onBack, onCreated}){
               </button>
               {showSaved&&(
                 <div style={{marginTop:8,background:C.inp,border:`1px solid ${C.brd}`,borderRadius:10,overflow:"hidden",maxHeight:300,overflowY:"auto"}}>
-                  {savedTpls.map(t=>(
-                    <div key={t.id} style={{padding:"12px 16px",borderBottom:`1px solid ${C.brd}`,display:"flex",alignItems:"center",gap:10}}>
-                      <div onClick={()=>useSavedTemplate(t)} style={{display:"flex",alignItems:"center",gap:10,flex:1,cursor:"pointer"}}>
+                  {savedTpls.map(t=>{
+                    const isThis=loadingTplId===t.id;
+                    const isOther=loadingTpl&&!isThis;
+                    return(
+                    <div key={t.id} style={{padding:"12px 16px",borderBottom:`1px solid ${C.brd}`,display:"flex",alignItems:"center",gap:10,opacity:isOther?0.4:1,background:isThis?"rgba(232,116,42,0.08)":"transparent"}}>
+                      <div onClick={()=>{if(!loadingTpl)useSavedTemplate(t);}} style={{display:"flex",alignItems:"center",gap:10,flex:1,cursor:loadingTpl?"default":"pointer"}}>
                         <div style={{flex:1}}>
                           <div style={{fontSize:13,fontWeight:600,color:C.txt}}>{t.name}</div>
                           <div style={{fontSize:11,color:C.mut}}>{(t.field_config||[]).length} fields — {t.file_type?.toUpperCase()}</div>
                         </div>
-                        <span style={{color:C.blu,fontSize:12,fontWeight:600}}>Use</span>
+                        <span style={{color:isThis?C.org:C.blu,fontSize:12,fontWeight:600}}>{isThis?"Loading...":"Use"}</span>
                       </div>
                       <button onClick={async(e)=>{e.stopPropagation();const btn=e.currentTarget;if(btn.disabled)return;btn.disabled=true;if(!await askConfirm("Delete this saved template?")){btn.disabled=false;return;}try{await db.deleteSavedTemplate(t.id);setSavedTpls(p=>p.filter(x=>x.id!==t.id));}catch(err){showToast("Delete failed");btn.disabled=false;}}} style={{background:"none",border:"none",color:C.err,fontSize:14,cursor:"pointer",padding:"4px 6px",flexShrink:0}}>🗑️</button>
                     </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
               <div style={{textAlign:"center",color:C.mut,fontSize:12,margin:"10px 0"}}>— or upload a new one —</div>

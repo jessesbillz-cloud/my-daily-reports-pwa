@@ -10,6 +10,28 @@ serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
 
   try {
+    // ── Manual auth check (verify_jwt is off to bypass gateway issues) ──
+    const authHeader = req.headers.get("authorization");
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+      return new Response(
+        JSON.stringify({ error: "Not authenticated. Please log in again." }),
+        { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+    const SUPABASE_URL = Deno.env.get("SUPABASE_URL");
+    const SUPABASE_SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+    if (SUPABASE_URL && SUPABASE_SERVICE_KEY) {
+      const token = authHeader.replace("Bearer ", "");
+      const sb = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
+      const { error: authErr } = await sb.auth.getUser(token);
+      if (authErr) {
+        return new Response(
+          JSON.stringify({ error: "Invalid session. Please log out and log back in." }),
+          { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+    }
+
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const supabase = createClient(supabaseUrl, supabaseKey);
@@ -30,6 +52,7 @@ serve(async (req) => {
     const requesterName = (formData.get("requester_name") as string) || "";
     const requesterCompany = (formData.get("requester_company") as string) || "";
     const specialType = (formData.get("special_type") as string) || "";
+    const jobId = (formData.get("job_id") as string) || "";
 
     if (!project || !inspectionDate || !inspectionTime || !submittedBy) {
       return new Response(JSON.stringify({ success: false, error: "Missing required fields" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
@@ -85,13 +108,24 @@ serve(async (req) => {
     let ownerPushSub: any = null;
     let ownerNtfyTopic = "";
     let ownerCompanyName = "";
+    let ownerNotifPrefs: any = { request_new: true, request_edited: true, request_deleted: true, request_scheduled: true };
 
-    try {
-      const { data: allJobs } = await supabase.from("jobs").select("user_id, name").limit(200);
-      const projectLower = project.toLowerCase().replace(/[^a-z0-9]+/g, "-");
-      const matchedJob = (allJobs || []).find((j: any) => (j.name || "").toLowerCase().replace(/[^a-z0-9]+/g, "-") === projectLower);
-      if (matchedJob) ownerId = matchedJob.user_id;
-    } catch (e) { console.error("Job lookup failed:", e); }
+    // Primary: use job_id if provided (avoids name collision across accounts)
+    if (jobId) {
+      try {
+        const { data: job } = await supabase.from("jobs").select("user_id").eq("id", jobId).single();
+        if (job) ownerId = job.user_id;
+      } catch (e) { console.error("Job lookup by ID failed:", e); }
+    }
+    // Fallback: scan all jobs by slugified name (legacy — no job_id in form)
+    if (!ownerId) {
+      try {
+        const { data: allJobs } = await supabase.from("jobs").select("user_id, name").limit(200);
+        const projectLower = project.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+        const matchedJob = (allJobs || []).find((j: any) => (j.name || "").toLowerCase().replace(/[^a-z0-9]+/g, "-") === projectLower);
+        if (matchedJob) ownerId = matchedJob.user_id;
+      } catch (e) { console.error("Job lookup by name failed:", e); }
+    }
 
     if (!ownerId) {
       try {
@@ -102,11 +136,12 @@ serve(async (req) => {
 
     if (ownerId) {
       try {
-        const { data: profile } = await supabase.from("profiles").select("ntfy_topic, company_name, push_subscription").eq("id", ownerId).single();
+        const { data: profile } = await supabase.from("profiles").select("ntfy_topic, company_name, push_subscription, notification_prefs").eq("id", ownerId).single();
         if (profile) {
           ownerNtfyTopic = profile.ntfy_topic || "";
           ownerCompanyName = profile.company_name || "";
           ownerPushSub = profile.push_subscription || null;
+          if (profile.notification_prefs) ownerNotifPrefs = { ...ownerNotifPrefs, ...profile.notification_prefs };
         }
         const { data: authUser } = await supabase.auth.admin.getUserById(ownerId);
         if (authUser?.user?.email) ownerEmail = authUser.user.email;
@@ -135,14 +170,15 @@ serve(async (req) => {
       const reqStart = parseInt(actualTime.split(":")[0]) * 60 + parseInt(actualTime.split(":")[1]);
       const reqEnd = reqStart + duration;
 
-      // For Regular: check ALL projects for Regular + blocking-special conflicts on this date
-      // For blocking specials: also check ALL projects
+      // Check OTHER projects for conflicts — same-project requests never conflict
+      // (team members can stack inspections on their own job)
       const { data: existing } = await supabase
         .from("inspection_requests")
-        .select("id, inspection_time, duration, status, inspection_types, flexible_display")
+        .select("id, inspection_time, duration, status, inspection_types, flexible_display, project")
         .eq("inspection_date", inspectionDate)
         .neq("status", "cancelled")
-        .neq("status", "deleted");
+        .neq("status", "deleted")
+        .neq("project", project);
 
       if (existing && existing.length > 0) {
         const conflict = existing.find((r: any) => {
@@ -168,7 +204,7 @@ serve(async (req) => {
       inspection_types: inspectionTypes, duration, submitted_by: submittedBy,
       notes, subcontractor, location_detail: siteAddress,
       inspection_identifier: inspectionIdentifier, email_recipients: emailRecipients,
-      flexible_display: flexibleDisplay, status: "pending", requested_date: inspectionDate,
+      flexible_display: flexibleDisplay, status: inspectionTypes.includes("Blocked") ? "scheduled" : "pending", requested_date: inspectionDate,
     };
     if (ownerId) insertData.user_id = ownerId;
     if (requesterEmail) insertData.requester_email = requesterEmail;
@@ -190,41 +226,61 @@ serve(async (req) => {
       } catch (e) { console.error("Backfill error (non-fatal):", e); }
     }
 
-    // Email
-    const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY");
-    const FROM_EMAIL = Deno.env.get("FROM_EMAIL") || "reports@mydailyreports.org";
-    if (RESEND_API_KEY) {
-      const allRecipients = [...emailRecipients];
-      if (ownerEmail && !allRecipients.includes(ownerEmail)) allRecipients.push(ownerEmail);
-      if (allRecipients.length > 0) {
-        const typeLabel = inspectionTypes.join(", ");
-        const timeLabel = flexibleDisplay === "flexible" ? "Flexible — anytime" : inspectionTime;
-        const filesHtml = fileUrls.length > 0 ? `<div style="margin-top:16px;padding:12px;background:#f0f0f0;border-radius:6px;"><strong style="font-size:13px;">Attached Files (${fileUrls.length}):</strong><div style="margin-top:8px;">${fileUrls.map((url, i) => `<a href="${url}" style="display:block;color:#e8742a;font-size:13px;margin:4px 0;">File ${i + 1}</a>`).join("")}</div></div>` : "";
-        const emailHtml = `<div style="font-family:-apple-system,sans-serif;max-width:600px;margin:0 auto;"><div style="background:#e8742a;padding:20px 24px;border-radius:8px 8px 0 0;"><h1 style="color:#fff;margin:0;font-size:20px;">New Scheduling Request</h1></div><div style="background:#f9f9f9;padding:24px;border:1px solid #e0e0e0;border-top:none;border-radius:0 0 8px 8px;"><table style="width:100%;font-size:14px;color:#333;border-collapse:collapse;"><tr><td style="padding:8px 0;font-weight:bold;width:140px;">Project:</td><td style="padding:8px 0;">${project.replace(/-/g, " ")}</td></tr><tr><td style="padding:8px 0;font-weight:bold;">Date:</td><td style="padding:8px 0;">${inspectionDate}</td></tr><tr><td style="padding:8px 0;font-weight:bold;">Time:</td><td style="padding:8px 0;">${timeLabel}</td></tr><tr><td style="padding:8px 0;font-weight:bold;">Type:</td><td style="padding:8px 0;">${typeLabel}</td></tr><tr><td style="padding:8px 0;font-weight:bold;">Duration:</td><td style="padding:8px 0;">${duration >= 480 ? "All Day" : duration >= 60 ? duration / 60 + " hr" : duration + " min"}</td></tr><tr><td style="padding:8px 0;font-weight:bold;">Submitted By:</td><td style="padding:8px 0;">${submittedBy}</td></tr>${inspectionIdentifier ? `<tr><td style="padding:8px 0;font-weight:bold;">Request #:</td><td style="padding:8px 0;">${inspectionIdentifier}</td></tr>` : ""}${notes ? `<tr><td style="padding:8px 0;font-weight:bold;">Notes:</td><td style="padding:8px 0;">${notes}</td></tr>` : ""}</table>${filesHtml}</div><p style="color:#999;font-size:11px;text-align:center;margin-top:16px;">Sent via My Daily Reports &bull; mydailyreports.org</p></div>`;
-        try {
-          const emailRes = await fetch("https://api.resend.com/emails", { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${RESEND_API_KEY}` }, body: JSON.stringify({ from: `${ownerCompanyName || "My Daily Reports"} <${FROM_EMAIL}>`, to: allRecipients, subject: `Scheduling Request: ${project.replace(/-/g, " ")} — ${typeLabel} on ${inspectionDate}`, html: emailHtml }) });
-          console.log("Email send result:", emailRes.status, await emailRes.text());
-        } catch (emailErr) { console.error("Email send error:", emailErr); }
+    // Skip ALL notifications for blocked time entries — they're personal calendar blocks, not real requests
+    const isBlockedTime = inspectionTypes.includes("Blocked");
+
+    // Only send notifications if owner has request_new enabled AND it's not a blocked time
+    if (!isBlockedTime && ownerNotifPrefs.request_new !== false) {
+      // Email
+      const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY");
+      const FROM_EMAIL = Deno.env.get("FROM_EMAIL") || "reports@mydailyreports.org";
+      const REPLY_TO = Deno.env.get("REPLY_TO_EMAIL") || FROM_EMAIL;
+      if (RESEND_API_KEY) {
+        const allRecipients = [...emailRecipients];
+        if (ownerEmail && !allRecipients.includes(ownerEmail)) allRecipients.push(ownerEmail);
+        if (allRecipients.length > 0) {
+          const typeLabel = inspectionTypes.join(", ");
+          const timeLabel = flexibleDisplay === "flexible" ? "Flexible — anytime" : inspectionTime;
+          const durationLabel = duration >= 480 ? "All Day" : duration >= 60 ? duration / 60 + " hr" : duration + " min";
+          const filesHtml = fileUrls.length > 0 ? `<div style="margin-top:16px;padding:12px;background:#f0f0f0;border-radius:6px;"><strong style="font-size:13px;">Attached Files (${fileUrls.length}):</strong><div style="margin-top:8px;">${fileUrls.map((url, i) => `<a href="${url}" style="display:block;color:#e8742a;font-size:13px;margin:4px 0;">File ${i + 1}</a>`).join("")}</div></div>` : "";
+          const emailHtml = `<div style="font-family:-apple-system,sans-serif;max-width:600px;margin:0 auto;"><div style="background:#e8742a;padding:20px 24px;border-radius:8px 8px 0 0;"><h1 style="color:#fff;margin:0;font-size:20px;">New Scheduling Request</h1></div><div style="background:#f9f9f9;padding:24px;border:1px solid #e0e0e0;border-top:none;border-radius:0 0 8px 8px;"><table style="width:100%;font-size:14px;color:#333;border-collapse:collapse;"><tr><td style="padding:8px 0;font-weight:bold;width:140px;">Project:</td><td style="padding:8px 0;">${project.replace(/-/g, " ")}</td></tr><tr><td style="padding:8px 0;font-weight:bold;">Date:</td><td style="padding:8px 0;">${inspectionDate}</td></tr><tr><td style="padding:8px 0;font-weight:bold;">Time:</td><td style="padding:8px 0;">${timeLabel}</td></tr><tr><td style="padding:8px 0;font-weight:bold;">Type:</td><td style="padding:8px 0;">${typeLabel}</td></tr><tr><td style="padding:8px 0;font-weight:bold;">Duration:</td><td style="padding:8px 0;">${durationLabel}</td></tr><tr><td style="padding:8px 0;font-weight:bold;">Submitted By:</td><td style="padding:8px 0;">${submittedBy}</td></tr>${inspectionIdentifier ? `<tr><td style="padding:8px 0;font-weight:bold;">Request #:</td><td style="padding:8px 0;">${inspectionIdentifier}</td></tr>` : ""}${notes ? `<tr><td style="padding:8px 0;font-weight:bold;">Notes:</td><td style="padding:8px 0;">${notes}</td></tr>` : ""}</table>${filesHtml}</div><p style="color:#999;font-size:11px;text-align:center;margin-top:16px;">Sent via My Daily Reports &bull; mydailyreports.org</p></div>`;
+          const emailText = `New Scheduling Request\n\nProject: ${project.replace(/-/g, " ")}\nDate: ${inspectionDate}\nTime: ${timeLabel}\nType: ${typeLabel}\nDuration: ${durationLabel}\nSubmitted By: ${submittedBy}${inspectionIdentifier ? "\nRequest #: " + inspectionIdentifier : ""}${notes ? "\nNotes: " + notes : ""}\n\n---\nSent via My Daily Reports - mydailyreports.org`;
+          try {
+            const emailRes = await fetch("https://api.resend.com/emails", {
+              method: "POST",
+              headers: { "Content-Type": "application/json", Authorization: `Bearer ${RESEND_API_KEY}` },
+              body: JSON.stringify({
+                from: `${ownerCompanyName || "My Daily Reports"} <${FROM_EMAIL}>`,
+                reply_to: REPLY_TO,
+                to: allRecipients,
+                subject: `Scheduling Request: ${project.replace(/-/g, " ")} — ${typeLabel} on ${inspectionDate}`,
+                html: emailHtml,
+                text: emailText,
+                headers: { "List-Unsubscribe": `<mailto:${FROM_EMAIL}?subject=unsubscribe>` },
+              }),
+            });
+            console.log("Email send result:", emailRes.status, await emailRes.text());
+          } catch (emailErr) { console.error("Email send error:", emailErr); }
+        }
       }
-    }
 
-    // Push notification — Web Push first, ntfy fallback
-    const typeLabel = inspectionTypes.join(", ");
-    const timeLabel = flexibleDisplay === "flexible" ? "Flexible" : inspectionTime;
-    const pushTitle = "New Scheduling Request";
-    const pushBody = `${submittedBy} requested ${typeLabel} on ${inspectionDate} at ${timeLabel} for ${project.replace(/-/g, " ")}`;
+      // Push notification — Web Push first, ntfy fallback
+      const typeLabel = inspectionTypes.join(", ");
+      const timeLabel = flexibleDisplay === "flexible" ? "Flexible" : inspectionTime;
+      const pushTitle = "New Scheduling Request";
+      const pushBody = `${submittedBy} requested ${typeLabel} on ${inspectionDate} at ${timeLabel} for ${project.replace(/-/g, " ")}`;
 
-    if (ownerPushSub && ownerPushSub.endpoint) {
-      try {
-        const pushRes = await fetch(ownerPushSub.endpoint, { method: "POST", headers: { "Content-Type": "application/json", "TTL": "86400" }, body: JSON.stringify({ title: pushTitle, body: pushBody, tag: "scheduling-" + inserted.id }) });
-        console.log("Web push result:", pushRes.status);
-      } catch (pushErr) { console.error("Web push error (non-fatal):", pushErr); }
-    }
-    // Always send ntfy (not gated behind web push)
-    if (ownerNtfyTopic) {
-      try {
-        await fetch(`https://ntfy.sh/${ownerNtfyTopic}`, { method: "POST", headers: { "Title": pushTitle, "Priority": "high", "Tags": "calendar" }, body: pushBody });
-      } catch (ntfyErr) { console.error("ntfy push error (non-fatal):", ntfyErr); }
+      if (ownerPushSub && ownerPushSub.endpoint) {
+        try {
+          const pushRes = await fetch(ownerPushSub.endpoint, { method: "POST", headers: { "Content-Type": "application/json", "TTL": "86400" }, body: JSON.stringify({ title: pushTitle, body: pushBody, tag: "scheduling-" + inserted.id }) });
+          console.log("Web push result:", pushRes.status);
+        } catch (pushErr) { console.error("Web push error (non-fatal):", pushErr); }
+      }
+      if (ownerNtfyTopic) {
+        try {
+          await fetch(`https://ntfy.sh/${ownerNtfyTopic}`, { method: "POST", headers: { "Title": pushTitle, "Priority": "high", "Tags": "calendar" }, body: pushBody });
+        } catch (ntfyErr) { console.error("ntfy push error (non-fatal):", ntfyErr); }
+      }
     }
 
     return new Response(JSON.stringify({ success: true, id: inserted.id, files: fileUrls }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });

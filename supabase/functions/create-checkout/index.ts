@@ -13,6 +13,28 @@ serve(async (req) => {
   }
 
   try {
+    // ── Manual auth check (verify_jwt is off to bypass gateway issues) ──
+    const authHeader = req.headers.get("authorization");
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+      return new Response(
+        JSON.stringify({ error: "Not authenticated. Please log in again." }),
+        { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+    const SUPABASE_URL = Deno.env.get("SUPABASE_URL");
+    const SUPABASE_SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+    if (SUPABASE_URL && SUPABASE_SERVICE_KEY) {
+      const token = authHeader.replace("Bearer ", "");
+      const sb = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
+      const { error: authErr } = await sb.auth.getUser(token);
+      if (authErr) {
+        return new Response(
+          JSON.stringify({ error: "Invalid session. Please log out and log back in." }),
+          { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+    }
+
     const STRIPE_SECRET = Deno.env.get("STRIPE_SECRET_KEY");
     if (!STRIPE_SECRET) throw new Error("Stripe not configured");
 

@@ -13,27 +13,31 @@ serve(async (req) => {
   }
 
   try {
+    // ── Manual auth check (verify_jwt is off to bypass gateway issues) ──
+    const authHeader = req.headers.get("authorization");
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+      return new Response(
+        JSON.stringify({ error: "Not authenticated. Please log in again." }),
+        { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+    const SUPABASE_URL = Deno.env.get("SUPABASE_URL");
+    const SUPABASE_SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+    if (SUPABASE_URL && SUPABASE_SERVICE_KEY) {
+      const token = authHeader.replace("Bearer ", "");
+      const sb = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
+      const { error: authErr } = await sb.auth.getUser(token);
+      if (authErr) {
+        return new Response(
+          JSON.stringify({ error: "Invalid session. Please log out and log back in." }),
+          { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+    }
+
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const supabase = createClient(supabaseUrl, supabaseKey);
-
-    // Verify the caller's identity via JWT
-    const authHeader = req.headers.get("Authorization");
-    if (!authHeader) {
-      return new Response(
-        JSON.stringify({ success: false, error: "Missing Authorization header" }),
-        { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
-    }
-    const { data: { user: authUser }, error: authError } = await supabase.auth.getUser(
-      authHeader.replace("Bearer ", "")
-    );
-    if (authError || !authUser) {
-      return new Response(
-        JSON.stringify({ success: false, error: "Unauthorized" }),
-        { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
-    }
 
     const body = await req.json();
     const { request_id, action, action_by, reason, new_date, new_time, new_duration, new_notes } = body;
@@ -71,10 +75,11 @@ serve(async (req) => {
       );
     }
 
-    // Look up the job owner's email, ntfy topic, and company name
+    // Look up the job owner's email, ntfy topic, company name, and notification preferences
     let ownerEmail = "";
     let ownerNtfyTopic = "";
     let ownerCompanyName = "";
+    let ownerNotifPrefs: any = { request_new: true, request_edited: true, request_deleted: true, request_scheduled: true };
 
     // Primary: use user_id stored on the request record
     const lookupId = existing.user_id;
@@ -82,12 +87,13 @@ serve(async (req) => {
       try {
         const { data: profile } = await supabase
           .from("profiles")
-          .select("ntfy_topic, company_name")
+          .select("ntfy_topic, company_name, notification_prefs")
           .eq("id", lookupId)
           .single();
         if (profile) {
           ownerNtfyTopic = profile.ntfy_topic || "";
           ownerCompanyName = profile.company_name || "";
+          if (profile.notification_prefs) ownerNotifPrefs = { ...ownerNotifPrefs, ...profile.notification_prefs };
         }
         const { data: authUser } = await supabase.auth.admin.getUserById(lookupId);
         if (authUser?.user?.email) ownerEmail = authUser.user.email;
@@ -134,6 +140,7 @@ serve(async (req) => {
     const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY");
     const FROM_EMAIL =
       Deno.env.get("FROM_EMAIL") || "reports@mydailyreports.org";
+    const REPLY_TO = Deno.env.get("REPLY_TO_EMAIL") || FROM_EMAIL;
     const projectName = (existing.project || "").replace(/-/g, " ");
     const typeLabel = (existing.inspection_types || []).join(", ");
 
@@ -151,12 +158,41 @@ serve(async (req) => {
       }
     };
 
+    // Helper to build .ics calendar content for an inspection
+    const buildICS = (): string => {
+      const dateField = existing.inspection_date || "";
+      const timeField = existing.inspection_time || "";
+      const dur = parseInt(existing.duration) || 60;
+      const isFlexible = existing.flexible_display === "flexible";
+      const uid = `${existing.id}@mydailyreports.org`;
+      const now = new Date().toISOString().replace(/[-:]/g, "").replace(/\.\d{3}/, "");
+      const icsDate = dateField.replace(/-/g, "");
+      const summary = `${typeLabel}: ${projectName}`;
+      let ics = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//My Daily Reports//Scheduling//EN\r\nMETHOD:PUBLISH\r\nBEGIN:VEVENT\r\n";
+      ics += `UID:${uid}\r\nDTSTAMP:${now}\r\n`;
+      if (!isFlexible && timeField) {
+        const tParts = timeField.split(":").map(Number);
+        const startMin = tParts[0] * 60 + tParts[1];
+        const endMin = startMin + dur;
+        const tStart = String(tParts[0]).padStart(2, "0") + String(tParts[1]).padStart(2, "0") + "00";
+        const tEnd = String(Math.floor(endMin / 60)).padStart(2, "0") + String(endMin % 60).padStart(2, "0") + "00";
+        ics += `DTSTART:${icsDate}T${tStart}\r\nDTEND:${icsDate}T${tEnd}\r\n`;
+      } else {
+        ics += `DTSTART;VALUE=DATE:${icsDate}\r\n`;
+      }
+      ics += `SUMMARY:${summary}\r\nSTATUS:CONFIRMED\r\n`;
+      if (existing.location_detail) ics += `LOCATION:${existing.location_detail.replace(/[,;]/g, " ")}\r\n`;
+      ics += "END:VEVENT\r\nEND:VCALENDAR";
+      return ics;
+    };
+
     // Helper to send notification email
     const sendEmail = async (
       subject: string,
       headerBg: string,
       headerTitle: string,
-      tableRows: string
+      tableRows: string,
+      icsAttachment?: string
     ) => {
       const recipients = buildRecipients();
       if (!RESEND_API_KEY || recipients.length === 0) return;
@@ -179,6 +215,21 @@ serve(async (req) => {
         </div>
       `;
 
+      // Strip HTML tags for plain-text version
+      const textContent = html
+        .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "")
+        .replace(/<[^>]+>/g, " ")
+        .replace(/&bull;/g, "-")
+        .replace(/\s+/g, " ")
+        .trim();
+
+      const attachments: any[] = [];
+      if (icsAttachment) {
+        // Resend expects base64-encoded content for attachments
+        const icsB64 = btoa(icsAttachment);
+        attachments.push({ filename: "invite.ics", content: icsB64, content_type: "text/calendar; method=PUBLISH" });
+      }
+
       try {
         const res = await fetch("https://api.resend.com/emails", {
           method: "POST",
@@ -188,9 +239,15 @@ serve(async (req) => {
           },
           body: JSON.stringify({
             from: `${ownerCompanyName || "My Daily Reports"} <${FROM_EMAIL}>`,
+            reply_to: REPLY_TO,
             to: recipients,
             subject,
             html,
+            text: textContent,
+            headers: {
+              "List-Unsubscribe": `<mailto:${FROM_EMAIL}?subject=unsubscribe>`,
+            },
+            ...(attachments.length > 0 ? { attachments } : {}),
           }),
         });
         console.log("Email result:", res.status, await res.text());
@@ -219,15 +276,18 @@ serve(async (req) => {
         );
       }
 
-      await sendEmail(
-        `CANCELLED: ${projectName} — ${typeLabel} on ${existing.inspection_date}`,
-        "#c44",
-        "Scheduling Request Cancelled",
-        `<tr><td style="padding:8px 0;font-weight:bold;">Date:</td><td>${existing.inspection_date}</td></tr>
-         <tr><td style="padding:8px 0;font-weight:bold;">Cancelled By:</td><td>${action_by || "Unknown"}</td></tr>
-         ${reason ? `<tr><td style="padding:8px 0;font-weight:bold;">Reason:</td><td>${reason}</td></tr>` : ""}`
-      );
-      await sendNtfy("Request Cancelled", `${typeLabel} on ${existing.inspection_date} for ${projectName} was cancelled by ${action_by || "Unknown"}`, "x", "default");
+      // Only send notifications if owner has request_deleted enabled
+      if (ownerNotifPrefs.request_deleted !== false) {
+        await sendEmail(
+          `CANCELLED: ${projectName} — ${typeLabel} on ${existing.inspection_date}`,
+          "#c44",
+          "Scheduling Request Cancelled",
+          `<tr><td style="padding:8px 0;font-weight:bold;">Date:</td><td>${existing.inspection_date}</td></tr>
+           <tr><td style="padding:8px 0;font-weight:bold;">Cancelled By:</td><td>${action_by || "Unknown"}</td></tr>
+           ${reason ? `<tr><td style="padding:8px 0;font-weight:bold;">Reason:</td><td>${reason}</td></tr>` : ""}`
+        );
+        await sendNtfy("Request Cancelled", `${typeLabel} on ${existing.inspection_date} for ${projectName} was cancelled by ${action_by || "Unknown"}`, "x", "default");
+      }
 
       return new Response(JSON.stringify({ success: true, action: "cancel" }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -304,16 +364,21 @@ serve(async (req) => {
         );
       }
 
-      await sendEmail(
-        `SCHEDULED: ${projectName} — ${typeLabel} on ${existing.inspection_date}`,
-        "#4a4",
-        "Scheduling Request Confirmed ✅",
-        `<tr><td style="padding:8px 0;font-weight:bold;">Date:</td><td>${existing.inspection_date}</td></tr>
-         <tr><td style="padding:8px 0;font-weight:bold;">Time:</td><td>${existing.flexible_display === "flexible" ? "Flexible" : existing.inspection_time}</td></tr>
-         <tr><td style="padding:8px 0;font-weight:bold;">Submitted By:</td><td>${existing.submitted_by}</td></tr>
-         <tr><td style="padding:8px 0;font-weight:bold;">Status:</td><td style="color:#4a4;font-weight:bold;">✅ Scheduled</td></tr>`
-      );
-      await sendNtfy("Request Confirmed", `${typeLabel} on ${existing.inspection_date} for ${projectName} is confirmed`, "white_check_mark", "default");
+      // Only send notifications if owner has request_scheduled enabled
+      if (ownerNotifPrefs.request_scheduled !== false) {
+        const ics = buildICS();
+        await sendEmail(
+          `SCHEDULED: ${projectName} — ${typeLabel} on ${existing.inspection_date}`,
+          "#4a4",
+          "Scheduling Request Confirmed ✅",
+          `<tr><td style="padding:8px 0;font-weight:bold;">Date:</td><td>${existing.inspection_date}</td></tr>
+           <tr><td style="padding:8px 0;font-weight:bold;">Time:</td><td>${existing.flexible_display === "flexible" ? "Flexible" : existing.inspection_time}</td></tr>
+           <tr><td style="padding:8px 0;font-weight:bold;">Submitted By:</td><td>${existing.submitted_by}</td></tr>
+           <tr><td style="padding:8px 0;font-weight:bold;">Status:</td><td style="color:#4a4;font-weight:bold;">✅ Scheduled</td></tr>`,
+          ics
+        );
+        await sendNtfy("Request Confirmed", `${typeLabel} on ${existing.inspection_date} for ${projectName} is confirmed`, "white_check_mark", "default");
+      }
 
       return new Response(
         JSON.stringify({ success: true, action: "schedule" }),

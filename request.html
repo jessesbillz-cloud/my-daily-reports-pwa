@@ -73,11 +73,9 @@ details[open] .collapsible-summary::after { content: '−'; }
 </style>
 </head>
 <body>
-<div style="text-align:center;padding:8px 0;margin-bottom:8px;">
-<a id="backToHub" href="hub.html" style="color:#5a8fc0;text-decoration:none;font-size:13px;font-weight:600;border:1px solid #333;padding:6px 14px;border-radius:20px;">&larr; Back to Project List</a>
-</div>
-<div class="header">
-    <img src="logo.jpg" alt="Logo">
+<div class="header" style="display:flex;align-items:center;gap:12px;margin-bottom:12px;">
+    <a id="backToHub" href="hub.html" style="background:#222;border:1px solid #333;border-radius:12px;color:#fff;font-size:26px;cursor:pointer;line-height:1;width:56px;height:56px;display:flex;align-items:center;justify-content:center;text-decoration:none;flex-shrink:0;">←</a>
+    <img src="logo.jpg" alt="Logo" style="width:45px;height:45px;border-radius:6px;">
     <div>
         <h2>Scheduling Request</h2>
         <p id="projectSubtitle">Loading...</p>
@@ -95,7 +93,7 @@ details[open] .collapsible-summary::after { content: '−'; }
 <button onclick="changeMonth(1)">&rarr;</button>
 </div>
 <div class="week-row" style="padding:0 8px;">
-<div class="week-header">S</div><div class="week-header">M</div><div class="week-header">T</div><div class="week-header">W</div><div class="week-header">T</div><div class="week-header">F</div><div class="week-header">S</div>
+<div class="week-header">Su</div><div class="week-header">Mo</div><div class="week-header">Tu</div><div class="week-header">We</div><div class="week-header">Th</div><div class="week-header">Fr</div><div class="week-header">Sa</div>
 </div>
 <div id="calGrid" class="week-row" style="padding:0 8px;"></div>
 <div class="day-detail" id="dayDetail">
@@ -132,16 +130,16 @@ details[open] .collapsible-summary::after { content: '−'; }
 <div id="blockedBanner" class="blocked-banner" style="display:none;">
 ⛔ This inspector is already scheduled on the selected date. Please choose a different date.
 </div>
-<label class="field-label">Photos or PDFs *</label>
+<label class="field-label" for="photoIn">Photos or PDFs *</label>
 <div class="photo-box" onclick="document.getElementById('photoIn').click()">
     <div id="photoPrompt">&#128247; Tap to select multiple photos or PDFs</div>
 </div>
-<input type="file" id="photoIn" onchange="handleFileSelection(this)" multiple style="display:none;">
+<input type="file" id="photoIn" onchange="handleFileSelection(this)" multiple accept="image/*,.pdf" style="display:none;">
 <div id="filePreviewGrid" class="file-list-container"></div>
-<label class="field-label">Inspection Date *</label>
-<input type="date" id="iDate" class="field-input" onchange="checkDateAvailability()">
+<label class="field-label" for="iDate">Inspection Date *</label>
+<input type="date" id="iDate" class="field-input" onchange="checkDateAvailability()" min="">
 <div id="dateWarning" style="display:none;color:#ef4444;font-size:12px;font-weight:600;margin-top:-10px;margin-bottom:10px;"></div>
-<label class="field-label">Inspection Time *</label>
+<label class="field-label" for="iTime">Inspection Time *</label>
 <select id="iTime" class="field-input" onchange="checkDateAvailability()">
 <option value="">Select time</option>
 <option value="flexible">Flexible — anytime today</option>
@@ -159,15 +157,15 @@ details[open] .collapsible-summary::after { content: '−'; }
 <option value="16:00">4:00 PM</option><option value="16:30">4:30 PM</option>
 <option value="17:00">5:00 PM</option>
 </select>
-<label class="field-label">Scheduling Request #/Title (Optional)</label>
+<label class="field-label" for="iIdentifier">Scheduling Request #/Title (Optional)</label>
 <input type="text" id="iIdentifier" class="field-input" maxlength="50">
 <label class="field-label">Duration *</label>
 <div class="dur-btns" id="durBtns">
-<div class="dur-btn" onclick="setDur('30')">30 min</div>
-<div class="dur-btn" onclick="setDur('60')">1 hr</div>
-<div class="dur-btn" onclick="setDur('120')">2 hr</div>
-<div class="dur-btn" onclick="setDur('240')">4 hr</div>
-<div class="dur-btn" onclick="setDur('480')">All Day</div>
+<div class="dur-btn" onclick="setDur('30',event)">30 min</div>
+<div class="dur-btn" onclick="setDur('60',event)">1 hr</div>
+<div class="dur-btn" onclick="setDur('120',event)">2 hr</div>
+<div class="dur-btn" onclick="setDur('240',event)">4 hr</div>
+<div class="dur-btn" onclick="setDur('480',event)">All Day</div>
 </div>
 <label class="field-label">Inspection Type *</label>
 <div class="type-btns">
@@ -175,17 +173,17 @@ details[open] .collapsible-summary::after { content: '−'; }
 <div class="type-btn" id="btnRegular" onclick="setType('Regular')">Regular</div>
 </div>
 <div class="special-sub" id="specialSub">
-<label class="field-label">Special Inspection Type *</label>
+<label class="field-label" for="specialType">Special Inspection Type *</label>
 <select class="field-input" id="specialType" onchange="checkDateAvailability()">
 <option value="">Select type</option>
-<option value="Soils">Soils</option><option value="Material ID">Material ID</option>
-<option value="Material ID CWI">Material ID CWI</option><option value="Concrete">Concrete</option>
-<option value="Bolting">Bolting</option><option value="Pull Test">Pull Test</option>
-<option value="Shotcrete">Shotcrete</option><option value="Fireproofing">Fireproofing</option>
-<option value="UT/MP">UT/MP</option><option value="Post Inst. Anchor">Post Inst. Anchor</option><option value="Epoxy">Epoxy</option><option value="Grout">Grout</option>
+<option value="Welding">Welding</option><option value="Bolting">Bolting</option><option value="Concrete">Concrete</option>
+<option value="Grout">Grout</option><option value="Epoxy">Epoxy</option><option value="Soils">Soils</option>
+<option value="Material ID">Material ID</option><option value="Material ID CWI">Material ID CWI</option>
+<option value="UT/MP">UT/MP</option><option value="Pull Test">Pull Test</option><option value="Post Inst. Anchor">Post Inst. Anchor</option>
+<option value="Fireproofing">Fireproofing</option><option value="Shotcrete">Shotcrete</option>
 </select>
 </div>
-<label class="field-label">Submitted By *</label>
+<label class="field-label" for="iName">Submitted By *</label>
 <select id="iName" class="field-input" onchange="onNameChange()">
 <option value="">Select your name</option>
 <option value="other">-- My name isn't here --</option>
@@ -200,7 +198,7 @@ details[open] .collapsible-summary::after { content: '−'; }
     <input type="text" id="iNewCompany" class="field-input" placeholder="e.g., Lusardi, Testing Lab" autocomplete="off">
     <div style="font-size:12px;color:#4a4;margin-top:4px;">Your name will appear in the dropdown next time</div>
 </div>
-<label class="field-label">Notes</label>
+<label class="field-label" for="iNotes">Notes</label>
 <textarea id="iNotes" class="field-input" rows="3" placeholder="Optional details"></textarea>
 <label class="field-label">Send a copy to:</label>
 <div class="email-list" id="emailListContainer">
@@ -214,6 +212,10 @@ details[open] .collapsible-summary::after { content: '−'; }
         </label>
     </div>
 </details>
+<div style="margin-top:14px;display:flex;align-items:center;gap:8px;">
+    <input type="checkbox" id="notifyMeCheck" checked style="width:18px;height:18px;accent-color:#e8742a;">
+    <label for="notifyMeCheck" style="font-size:13px;color:#ccc;cursor:pointer;">Email me updates about this request</label>
+</div>
 <div id="submitWarning" style="display:none;color:#ef4444;font-size:13px;font-weight:600;margin-top:12px;padding:12px;background:#2a1515;border:1px solid #ef4444;border-radius:8px;text-align:center;"></div>
 <button onclick="submitIR()" id="submitBtn" class="submit-btn">Submit Scheduling Request</button>
 </div>
@@ -555,6 +557,8 @@ function _doLoadMD(){
             if(!mD[d])mD[d]=[];
             mD[d].push(v);
             // Determine if this event BLOCKS a time slot
+            // Same-project events never block — team members can stack inspections on their own job
+            if(v.project===PROJ) return;
             var types=v.inspection_types||[];
             var isRegular=types.indexOf('Regular')>=0;
             var isConcrete=types.indexOf('Concrete')>=0;
@@ -628,7 +632,7 @@ function renderCal(){
     }
 }
 function setType(t){inspType=t;document.getElementById('btnSpecial').classList.toggle('active',t==='Special');document.getElementById('btnRegular').classList.toggle('active',t==='Regular');document.getElementById('specialSub').classList.toggle('show',t==='Special');if(t!=='Special')document.getElementById('specialType').selectedIndex=0;checkDateAvailability();}
-function setDur(d){inspDur=d;document.querySelectorAll('.dur-btn').forEach(function(b){b.classList.remove('active');});event.target.classList.add('active');checkDateAvailability();}
+function setDur(d,e){inspDur=d;document.querySelectorAll('.dur-btn').forEach(function(b){b.classList.remove('active');});(e||event).target.classList.add('active');checkDateAvailability();}
 function scheduleInsp(id){
 fetch(SB+'/functions/v1/update-inspection',{method:'POST',headers:{'Authorization':'Bearer '+AK,'apikey':AK,'Content-Type':'application/json'},body:JSON.stringify({request_id:id,action:'schedule',notify:true})})
 .then(function(r){return r.json();}).then(function(data){if(data.success){showToast('Marked as Scheduled — notifications sent.'); loadMD();} else {showToast('Error — try again');}})
@@ -644,6 +648,7 @@ function submitIR(){
     if(!t) missing.push('Time');
     if(!inspDur) missing.push('Duration');
     if(!inspType) missing.push('Inspection Type');
+    if(inspType==='Special'&&!document.getElementById('specialType').value) missing.push('Special Visit Type');
     if(!nm) missing.push('Your Name');
     if(missing.length>0){
         var w=document.getElementById('submitWarning');
@@ -674,7 +679,7 @@ function submitIR(){
     var btn=document.getElementById('submitBtn'); btn.textContent='Submitting...'; btn.disabled=true;
     var fd=new FormData();
     allFiles.forEach(function(file,index){fd.append('file_'+index,file);});
-    fd.append('project',PROJ); fd.append('gc',cleanName);
+    fd.append('project',PROJ); fd.append('gc',cleanName); if(JOB_ID)fd.append('job_id',JOB_ID);
     fd.append('inspection_date',d); fd.append('inspection_time',t);
     var typesArr=[inspType];
     var specialVal='';
@@ -688,13 +693,14 @@ function submitIR(){
     fd.append('subcontractor','');
     fd.append('location_detail','');
     // Look up requester email from contacts
+    var wantsNotify=document.getElementById('notifyMeCheck').checked;
     var matchedContact=savedContacts.find(function(c){return c.name===nm;});
     if(matchedContact&&matchedContact.email){
         fd.append('requester_email',matchedContact.email);
         fd.append('requester_name',matchedContact.name);
         if(matchedContact.company) fd.append('requester_company',matchedContact.company);
-        // Also add requester to email recipients so they get the notification
-        if(emails.indexOf(matchedContact.email)===-1) emails.push(matchedContact.email);
+        // Only add requester to email recipients if they opted in
+        if(wantsNotify&&emails.indexOf(matchedContact.email)===-1) emails.push(matchedContact.email);
     } else if(newName){
         var newEmail=document.getElementById('iNewEmail').value.trim();
         if(newEmail){
@@ -702,7 +708,7 @@ function submitIR(){
             fd.append('requester_name',newName);
             var newCompany=document.getElementById('iNewCompany').value.trim();
             if(newCompany) fd.append('requester_company',newCompany);
-            if(emails.indexOf(newEmail)===-1) emails.push(newEmail);
+            if(wantsNotify&&emails.indexOf(newEmail)===-1) emails.push(newEmail);
         }
     }
     if(emails.length>0) fd.append('email_recipients',JSON.stringify(emails));
@@ -850,6 +856,7 @@ function onNameChange(){
     sec.style.display=sel.value==='other'?'block':'none';
 }
 function resetForm(){ location.reload(); }
+document.getElementById('iDate').min=new Date().toISOString().split('T')[0];
 loadContacts(); // also triggers loadMD() after fetching user_id
 renderCal();
 </script>

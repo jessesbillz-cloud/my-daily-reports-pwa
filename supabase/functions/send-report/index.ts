@@ -12,8 +12,39 @@ serve(async (req) => {
   }
 
   try {
+    // ── Manual auth check ──
+    // We deploy with --no-verify-jwt to bypass the Supabase gateway JWT validation
+    // (which has been unreliable). Instead, we validate the user ourselves using
+    // supabase.auth.getUser() — this is MORE secure because it hits the auth server.
+    const SUPABASE_URL = Deno.env.get("SUPABASE_URL");
+    const SUPABASE_SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+    const authHeader = req.headers.get("authorization");
+    console.log("[send-report] Auth header present:", !!authHeader, "length:", authHeader?.length || 0);
+
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+      console.error("[send-report] Missing or invalid Authorization header");
+      return new Response(
+        JSON.stringify({ error: "Missing Authorization header. Please log in again." }),
+        { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    if (SUPABASE_URL && SUPABASE_SERVICE_KEY) {
+      const token = authHeader.replace("Bearer ", "");
+      const authClient = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
+      const { data: { user: authUser }, error: authErr } = await authClient.auth.getUser(token);
+      if (authErr || !authUser) {
+        console.error("[send-report] Auth validation failed:", authErr?.message || "no user");
+        return new Response(
+          JSON.stringify({ error: "Invalid session. Please log out and log back in." }),
+          { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+      console.log("[send-report] Authenticated user:", authUser.id, authUser.email);
+    }
+
     console.log("[send-report] Starting — parsing request body");
-    const { to, subject, body, html_body, pdf_base64, pdf_filename, sender_name } = await req.json();
+    const { to, subject, body, html_body, pdf_base64, pdf_filename, sender_name, ics_attachment } = await req.json();
     console.log("[send-report] Recipients:", JSON.stringify(to), "Subject:", subject?.slice(0, 60), "Has PDF:", !!pdf_base64, "PDF size:", pdf_base64?.length || 0);
 
     // Reject oversized PDF attachments before they hit Resend (~10MB raw = ~13.3MB base64)
@@ -46,9 +77,6 @@ serve(async (req) => {
       );
     }
     console.log("[send-report] RESEND_API_KEY found, length:", RESEND_API_KEY.length, "prefix:", RESEND_API_KEY.slice(0, 6));
-
-    const SUPABASE_URL = Deno.env.get("SUPABASE_URL");
-    const SUPABASE_SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
 
     // Filter out suppressed email addresses (bounced/complained)
     let validRecipients = [...to];
@@ -92,7 +120,10 @@ serve(async (req) => {
     }
 
     const FROM_EMAIL = Deno.env.get("FROM_EMAIL") || "reports@mydailyreports.org";
+    const REPLY_TO = Deno.env.get("REPLY_TO_EMAIL") || FROM_EMAIL;
     console.log("[send-report] Sending from:", FROM_EMAIL, "to:", validRecipients, "sender_name:", sender_name);
+
+    const bodyText = body || "A daily report has been submitted.";
 
     const emailHtml = html_body || `
       <div style="font-family: -apple-system, sans-serif; max-width: 600px; margin: 0 auto;">
@@ -100,7 +131,7 @@ serve(async (req) => {
           <h1 style="color: #fff; margin: 0; font-size: 20px;">My Daily Reports</h1>
         </div>
         <div style="background: #f9f9f9; padding: 24px; border: 1px solid #e0e0e0; border-top: none; border-radius: 0 0 8px 8px;">
-          <p style="color: #333; font-size: 15px; line-height: 1.6; margin: 0 0 16px;">${body || "A daily report has been submitted."}</p>
+          <p style="color: #333; font-size: 15px; line-height: 1.6; margin: 0 0 16px;">${bodyText}</p>
           <p style="color: #666; font-size: 13px; margin: 0;">The PDF report is attached to this email.</p>
         </div>
         <p style="color: #999; font-size: 11px; text-align: center; margin-top: 16px;">
@@ -109,16 +140,27 @@ serve(async (req) => {
       </div>
     `;
 
+    // Plain-text version (improves deliverability — HTML-only emails get spam-scored)
+    const emailText = html_body
+      ? undefined
+      : `${bodyText}\n\nThe PDF report is attached to this email.\n\n---\nSent via My Daily Reports - mydailyreports.org`;
+
     console.log("[send-report] Calling Resend API...");
-    const resendPayload = {
+    const resendPayload: Record<string, any> = {
       from: `${sender_name || "My Daily Reports"} <${FROM_EMAIL}>`,
+      reply_to: REPLY_TO,
       to: validRecipients,
       subject: subject,
       html: emailHtml,
-      attachments: pdf_base64
-        ? [{ filename: pdf_filename || "report.pdf", content: pdf_base64 }]
-        : [],
+      headers: {
+        "List-Unsubscribe": `<mailto:${FROM_EMAIL}?subject=unsubscribe>`,
+      },
+      attachments: [
+        ...(pdf_base64 ? [{ filename: pdf_filename || "report.pdf", content: pdf_base64 }] : []),
+        ...(ics_attachment ? [{ filename: "invite.ics", content: btoa(ics_attachment), content_type: "text/calendar; method=PUBLISH" }] : []),
+      ],
     };
+    if (emailText) resendPayload.text = emailText;
 
     // Rate-limit aware send with retry + exponential backoff (Resend Pro = 2 req/sec)
     const MAX_RETRIES = 3;
@@ -196,7 +238,7 @@ serve(async (req) => {
                 headers: { "Content-Type": "application/json", Authorization: `Bearer ${RESEND_API_KEY}` },
                 body: JSON.stringify({
                   from: `MDR System <${Deno.env.get("FROM_EMAIL") || "reports@mydailyreports.org"}>`,
-                  to: ["jessesbillz@gmail.com"],
+                  to: [Deno.env.get("ADMIN_ALERT_EMAIL") || "support@mydailyreports.org"],
                   subject: `⚠️ Resend Limit Alert: ${cnt.toLocaleString()} / ${MONTHLY_LIMIT.toLocaleString()} emails`,
                   html: `<div style="font-family:sans-serif;padding:20px;"><h2 style="color:#e8742a;">Email Volume Alert</h2><p>Your MDR app has sent <strong>${cnt.toLocaleString()}</strong> of your <strong>${MONTHLY_LIMIT.toLocaleString()}</strong> monthly Resend emails (${Math.round(cnt/MONTHLY_LIMIT*100)}%).</p><p>Consider upgrading your Resend plan or monitoring volume closely.</p></div>`,
                 }),

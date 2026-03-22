@@ -1,9 +1,10 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { C } from '../constants/theme';
 import { db } from '../utils/db';
-import { AUTH_TOKEN, refreshAuthToken } from '../utils/auth';
-import { SB_URL, SB_KEY } from '../constants/supabase';
-import { ensurePdfLib, ensurePdfJs } from '../utils/pdf';
+import { AUTH_TOKEN, refreshAuthToken, authDiag, preflightCheck } from '../utils/auth';
+import { SB_URL, TYR_COMPANY_ID } from '../constants/supabase';
+import { api } from '../utils/api';
+import { ensurePdfLib, ensurePdfJs, ensureMammoth } from '../utils/pdf';
 import { askConfirm } from './ConfirmOverlay';
 import { buildAutoFillData } from '../utils/auth';
 import { AI_DESCRIBE_DAILY_LIMIT, getAiUsageCount, checkAiLimit, incrementAiUsage } from '../utils/ai-usage';
@@ -109,13 +110,10 @@ function ReportEditor({job, user, onBack, reportDate}){
     try{
       const aiImg=await downscaleForAI(imageDataUrl);
       const b64=aiImg.includes(",")?aiImg.split(",")[1]:aiImg;
-      const r=await fetch(`${SB_URL}/functions/v1/describe-photo`,{
-        method:"POST",
-        headers:{"Content-Type":"application/json",apikey:SB_KEY},
-        body:JSON.stringify({image_base64:b64,context})
-      });
-      const data=await r.json();
-      if(!r.ok)throw new Error(data.error||"AI request failed");
+      const formData=new FormData();
+      formData.append('image_base64',b64);
+      formData.append('context',context);
+      const data=await api.describePhoto(formData);
       incrementAiUsage(job?.id);
       setAiUsageCount(getAiUsageCount(job?.id));
       return data.description||"";
@@ -129,6 +127,51 @@ function ReportEditor({job, user, onBack, reportDate}){
   };
 
   const [reportStatus,setReportStatus]=useState(null);
+  // ── TYR v3: scoped contractor picker ──
+  const isTYR=job.company_id===TYR_COMPANY_ID;
+  const [jobContractors,setJobContractors]=useState([]);
+  const [selectedContractors,setSelectedContractors]=useState([]);
+  const toggleContractor=(name)=>{setSelectedContractors(p=>{const exists=p.find(c=>c.company_name===name);if(exists)return p.filter(c=>c.company_name!==name);return[...p,{company_name:name,manpower:0,hours_regular:0,hours_overtime:0}];});};
+  const updateContractorManpower=(name,val)=>{setSelectedContractors(p=>p.map(c=>c.company_name===name?{...c,manpower:parseInt(val)||0}:c));};
+  const updateContractorHours=(name,field,val)=>{setSelectedContractors(p=>p.map(c=>c.company_name===name?{...c,[field]:parseFloat(val)||0}:c));};
+  useEffect(()=>{if(!isTYR)return;(async()=>{try{const c=await db.getJobContractors(job.id);setJobContractors(c);}catch(e){console.error("Load contractors:",e);}})();},[job.id,isTYR]);
+  // TYR v4: Auto-fill general statement from job settings into matching field
+  useEffect(()=>{if(!isTYR||!job.general_statement)return;const gsField=editFields.find(f=>/general.?statement/i.test(f.name||""));if(gsField&&!vals[gsField.name]){setVals(p=>({...p,[gsField.name]:job.general_statement}));}},[ isTYR,editFields.length]);
+
+  // TYR v5: Weather toggle + auto-fetch
+  const [tyrWeatherOn,setTyrWeatherOn]=useState(false);
+  const [tyrWeather,setTyrWeather]=useState("");
+  const [tyrWeatherLoading,setTyrWeatherLoading]=useState(false);
+  const fetchTyrWeather=async()=>{
+    if(!job.site_address){showToast("Add a site address in Job Settings to enable weather");return;}
+    setTyrWeatherLoading(true);
+    try{
+      let lat,lng;
+      try{const geoR=await fetch(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(job.site_address)}&format=json&limit=1`,{headers:{"User-Agent":"MyDailyReports/1.0"}});const geoD=await geoR.json();if(geoD&&geoD.length>0){lat=parseFloat(geoD[0].lat);lng=parseFloat(geoD[0].lon);}}catch(e){}
+      if(!lat||!lng){try{const cityMatch=job.site_address.match(/,\s*([^,]+),?\s*[A-Z]{2}/);const searchName=cityMatch?cityMatch[1].trim():job.site_address;const geoR2=await fetch(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(searchName)}&count=1&language=en&format=json`);const geoD2=await geoR2.json();if(geoD2.results&&geoD2.results.length>0){lat=geoD2.results[0].latitude;lng=geoD2.results[0].longitude;}}catch(e){}}
+      if(!lat||!lng){showToast("Could not find location");setTyrWeatherLoading(false);return;}
+      const wxR=await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lng}&current=temperature_2m,weather_code,wind_speed_10m&temperature_unit=fahrenheit&wind_speed_unit=mph&timezone=auto`);
+      const wxD=await wxR.json();
+      if(wxD.current){
+        const t=Math.round(wxD.current.temperature_2m);
+        const wmo={0:"Clear",1:"Mostly Clear",2:"Partly Cloudy",3:"Overcast",45:"Foggy",51:"Light Drizzle",61:"Light Rain",63:"Rain",65:"Heavy Rain",71:"Light Snow",73:"Snow",80:"Showers",95:"Thunderstorm"};
+        const desc=wmo[wxD.current.weather_code]||"";
+        const wind=Math.round(wxD.current.wind_speed_10m);
+        const wxStr=`${desc} ${t}°F, Wind ${wind} mph`;
+        setTyrWeather(wxStr);
+        // Auto-fill the Weather field in the form
+        const wxField=[...editFields,...lockFields].find(f=>/weather/i.test(f.name||""));
+        if(wxField){if(editFields.find(ef=>ef.name===wxField.name))setVals(p=>({...p,[wxField.name]:wxStr}));else setLockVals(p=>({...p,[wxField.name]:wxStr}));}
+      }
+    }catch(e){console.error("Weather fetch:",e);showToast("Weather fetch failed");}
+    finally{setTyrWeatherLoading(false);}
+  };
+  const toggleTyrWeather=(on)=>{
+    if(on&&!job.site_address){showToast("Add a site address in Job Settings to enable weather");return;}
+    setTyrWeatherOn(on);
+    if(on&&!tyrWeather)fetchTyrWeather();
+  };
+
   // Load existing report on mount (works for both working_copy and submitted)
   useEffect(()=>{
     (async()=>{
@@ -169,6 +212,7 @@ function ReportEditor({job, user, onBack, reportDate}){
             if(c.lockVals)setLockVals(p=>({...p,...c.lockVals}));
             if(c.photos)setPhotos(c.photos);
             if(c.photoLayout)setPhotoLayout(c.photoLayout);
+            if(isTYR&&c.contractors)setSelectedContractors(c.contractors);
             if(c.sigTimestamps)setSigTimestamps(c.sigTimestamps);
             // Apply notes dedup to restored fields (fixes old drafts saved with duplicates)
             if(c.lockFields){const editHasN=(c.editFields||initEdit).some(f=>isNotes(f.name));setLockFields(editHasN?c.lockFields.filter(f=>!isNotes(f.name)):dedupNotes(c.lockFields));}
@@ -349,7 +393,7 @@ function ReportEditor({job, user, onBack, reportDate}){
       // Limit photo data in save payload to prevent oversized JSON / frozen UI
       // Keep only src + name (strip any extra metadata), and cap at 20 photos
       const safePhotos=photos.slice(0,20).map(p=>({id:p.id,src:p.src,name:p.name}));
-      const content={vals,lockVals,photos:safePhotos,photoLayout,lockFields,editFields,sigTimestamps};
+      const content={vals,lockVals,photos:safePhotos,photoLayout,lockFields,editFields,sigTimestamps,...(isTYR?{contractors:selectedContractors}:{})};
       let contentStr;
       try{contentStr=JSON.stringify(content);}catch(e){
         console.error("JSON serialize failed:",e);
@@ -471,6 +515,96 @@ function ReportEditor({job, user, onBack, reportDate}){
     });
   };
 
+  // ── TYR v5: Draw ALL TYR fields on canvas preview at hardcoded positions ──
+  const drawTyrFieldsOnCanvas=(ctx,fields,scale)=>{
+    if(!isTYR)return;
+    const v2={};fields.forEach(f=>{if(f.val)v2[(f.name||"").toLowerCase().trim()]=f.val;});
+    const wordMatch2=(fn,kw)=>{const re=new RegExp("(^|[\\s_\\-\\.:#])"+kw.replace(/[.*+?^${}()|[\]\\]/g,"\\$&"),"i");return re.test(fn);};
+    const fv=(...keys)=>{for(const k of keys){for(const[fn,val]of Object.entries(v2)){if(wordMatch2(fn,k))return val;}}return"";};
+    const fv2=(a,b)=>{for(const[fn,val]of Object.entries(v2)){if(wordMatch2(fn,a)&&wordMatch2(fn,b))return val;}return"";};
+    const sz=10*scale;const szSm=9*scale;const rh=14.8;
+    ctx.fillStyle="#000000";
+    // Helper: draw single-line cell with auto-shrink
+    const cell=(text,x,topY,w,h,useSz,bold)=>{
+      if(!text)return;const s=String(text);const fSz=useSz||sz;
+      ctx.font=(bold?"bold ":"")+fSz+"px Helvetica, Arial, sans-serif";
+      let tw=ctx.measureText(s).width;let drawSz=fSz;
+      if(w&&tw>w-6){drawSz=Math.max(6*scale,fSz*(w-6*scale)/tw);ctx.font=(bold?"bold ":"")+drawSz+"px Helvetica, Arial, sans-serif";}
+      const textY=topY*scale+(h*scale+drawSz)/2-drawSz*0.15;
+      ctx.fillText(s,(x+3)*scale,textY);
+    };
+    // Helper: draw multiline wrapped text on canvas
+    const multi=(text,x,topY,w,bottomY,useSz)=>{
+      if(!text)return;const fSz=useSz||sz;
+      ctx.font=fSz+"px Helvetica, Arial, sans-serif";
+      const leftPad=6*scale;const maxW=w*scale-leftPad-4*scale;
+      const textStartY=topY*scale+fSz;
+      const bottomPx=bottomY*scale;
+      const words=text.replace(/\n/g," ").split(" ").filter(Boolean);
+      const lines=[];let cur="";
+      words.forEach(wd=>{const test=cur?cur+" "+wd:wd;if(ctx.measureText(test).width>maxW&&cur){lines.push(cur);cur=wd;}else cur=test;});
+      if(cur)lines.push(cur);
+      lines.forEach((ln,i)=>{const ly=textStartY+i*fSz*1.3;if(ly<bottomPx)ctx.fillText(ln,x*scale+leftPad,ly);});
+    };
+    // Header fields (bold)
+    cell(fv("district"),109.3,125.2,190.6,rh,sz,true);
+    cell(fv2("project","name"),424.4,125.2,164.1,rh,sz,true);
+    cell(fv("address"),109.3,142.2,479.2,rh,sz,true);
+    cell(fv("dsa"),109.3,159.3,190.6,rh,sz,true);
+    cell(fv("tyr project","project #","project#"),424.4,159.3,164.1,rh,sz,true);
+    cell(fv("date"),109.3,176.4,190.6,rh,sz,true);
+    cell(fv("weather"),424.4,176.4,164.1,rh,szSm,true);
+    cell(fv("reg"),109.3,193.4,100.5,rh,sz,false);
+    cell(fv("ot"),316.4,193.4,96.6,rh,sz,false);
+    cell(fv("dt"),523.5,193.4,65.0,rh,sz,false);
+    // General — wraps within box
+    multi(fv("general"),70,231.1,517.2,257,sz);
+    // Daily Activities — wraps within 80pt box
+    multi(fv("activit"),25.2,357.4,562.0,437,sz);
+    // Inspection Requests — wraps
+    multi(fv("inspection","request","site visit"),195,439.6,392.2,455,szSm);
+    // Notes and Comments — removed from TYR output
+    // RFI column
+    const rfiVal=fv("rfi","ccd","asi","submittal");
+    if(rfiVal){
+      const rfiX=420*scale;const rowTops=[276.2,293.2,310.3,327.3];
+      const parts=rfiVal.split("/").map(s=>s.trim()).filter(Boolean);
+      ctx.font=szSm+"px Helvetica, Arial, sans-serif";
+      parts.forEach((part,i)=>{if(i<rowTops.length)ctx.fillText(part,rfiX,rowTops[i]*scale+szSm+2*scale);});
+    }
+  };
+
+  // ── TYR v5: Draw contractor table on canvas preview — exact template coordinates ──
+  const drawContractorTableOnCanvas=(ctx,scale,pageH)=>{
+    if(!isTYR||selectedContractors.length===0)return;
+    const sz=10*scale;
+    // Template grey box columns (pdfplumber top-left coords, scaled)
+    const leftNameX=25.2*scale;
+    const leftMpX=189*scale;
+    const rightNameX=229*scale;
+    const rightMpX=379*scale;
+    // Data row tops (pdfplumber y coords): 276.2, 293.2, 310.3, 327.3
+    const rowTops=[276.2,293.2,310.3,327.3];
+    const rowH=14.8*scale;
+    // Split contractors: first 4 left, next 4 right
+    const leftCs=selectedContractors.slice(0,4);
+    const rightCs=selectedContractors.slice(4,8);
+    ctx.fillStyle="#000000";
+    ctx.font="bold "+sz+"px Georgia, Cambria, serif";
+    leftCs.forEach((c,i)=>{
+      if(i>=rowTops.length)return;
+      const textY=rowTops[i]*scale+sz+2*scale;
+      ctx.fillText(c.company_name||"",leftNameX,textY);
+      ctx.fillText(String(c.manpower||0),leftMpX,textY);
+    });
+    rightCs.forEach((c,i)=>{
+      if(i>=rowTops.length)return;
+      const textY=rowTops[i]*scale+sz+2*scale;
+      ctx.fillText(c.company_name||"",rightNameX,textY);
+      ctx.fillText(String(c.manpower||0),rightMpX,textY);
+    });
+  };
+
   // View Report — renders original template with pdf.js, overlays field values + notes on canvas
   const viewReport=async()=>{
     if(busyRef.current)return;
@@ -494,16 +628,13 @@ function ReportEditor({job, user, onBack, reportDate}){
         const fieldValues={};
         allFields.forEach(f=>{if(f.val)fieldValues[f.name]=f.val;});
         // Download template (cached)
-        const tplBytes=new Uint8Array(await db.downloadTemplateBytes(tplRecord.storage_path));
+        const rawTplBytes=await db.downloadTemplateBytes(tplRecord.storage_path);
+        if(!rawTplBytes||rawTplBytes.byteLength===0)throw new Error("Template download failed — re-upload in Job Settings.");
+        const tplBytes=new Uint8Array(rawTplBytes);
         const tplChunks=[];for(let i=0;i<tplBytes.length;i+=8192)tplChunks.push(String.fromCharCode.apply(null,tplBytes.subarray(i,i+8192)));
         const tplB64=btoa(tplChunks.join(""));
         // Call generate-docx to fill template with field values
-        const genResp=await fetch(`${SB_URL}/functions/v1/generate-docx`,{
-          method:"POST",
-          headers:{"Content-Type":"application/json","Authorization":"Bearer "+(AUTH_TOKEN||SB_KEY),"apikey":SB_KEY},
-          body:JSON.stringify({docx_base64:tplB64,field_values:fieldValues})
-        });
-        if(!genResp.ok)throw new Error("Generate preview failed: "+(await genResp.text()));
+        const genResp=await api.generateDocx({docx_base64:tplB64,field_values:fieldValues});
         const genData=await genResp.json();
         if(genData.error)throw new Error(genData.error);
         // Decode filled DOCX and render with mammoth for preview
@@ -519,6 +650,7 @@ function ReportEditor({job, user, onBack, reportDate}){
         return;
       }
       const tplBytes=await db.downloadTemplateBytes(tplRecord.storage_path);
+      if(!tplBytes||tplBytes.byteLength===0)throw new Error("Template download failed — re-upload in Job Settings.");
       // Validate PDF magic bytes
       const header=new Uint8Array(tplBytes.slice(0,5));
       const headerStr=String.fromCharCode(...header);
@@ -546,15 +678,18 @@ function ReportEditor({job, user, onBack, reportDate}){
         }
         // Draw field values on this page (flat preview)
         const pageH=vp1.height;
-        drawFieldsOnCanvas(ctx,allFields,pi,scale,pageH);
+        if(isTYR&&pi===1){
+          // TYR: use hardcoded positions for all fields (matches PDF output exactly)
+          drawTyrFieldsOnCanvas(ctx,allFields,scale);
+          drawContractorTableOnCanvas(ctx,scale,pageH);
+        }else{
+          drawFieldsOnCanvas(ctx,allFields,pi,scale,pageH);
+        }
         previewPages.push(cvs.toDataURL("image/jpeg",0.92));
         cvs.width=0;cvs.height=0;
       }
-      if(isDesktop&&cleanPages.length>0){
-        setEditablePreview({pages:cleanPages,fields:allFields});
-      }else{
-        setEditablePreview(null);
-      }
+      // Always show flat rendered preview (matches actual PDF output)
+      setEditablePreview(null);
       // Render photos as additional preview pages — paginate to match PDF output
       if(photos.length>0){
         const perPage=photoLayout==="1"?1:photoLayout==="2"?2:4;
@@ -660,13 +795,42 @@ function ReportEditor({job, user, onBack, reportDate}){
       if(!tplRecord){console.error("Submit: no template record for job:",job.id);throw new Error("No template record found. Go to Job Settings and re-upload your template.");}
       if(!tplRecord.storage_path){console.error("Submit: template has no storage_path:",JSON.stringify(tplRecord));throw new Error("Template file is missing. Go to Job Settings and re-upload your template.");}
       const tplBytes=await db.downloadTemplateBytes(tplRecord.storage_path);
+      if(!tplBytes||tplBytes.byteLength===0){throw new Error("Template download failed — file may be missing from storage. Go to Job Settings and re-upload your template.");}
       const isPdfTemplate=tplRecord.file_type==="pdf";
       const isDocxTemplate=tplRecord.file_type==="docx"||tplRecord.file_type==="doc";
+
+      // ── 1b. Build fields + AI proofread (before any path) ──
+      const allFields=buildEditableFields();
+
+      // AI Proofreading — only if enabled in job settings
+      if(job.field_config?.aiProofread){
+        try{
+          setSubmitStep("Proofreading...");
+          const textFields={};
+          allFields.forEach(f=>{
+            if(f.val&&typeof f.val==="string"&&f.val.trim().length>2){
+              const ln=f.name.toLowerCase();
+              // Skip auto-fill fields (date, name, number), only proofread user-typed content
+              if(!f.autoFill&&!(/^(date|day|report.?no|report.?number|inspector|prepared.?by)$/i.test(ln)))
+                textFields[f.name]=f.val;
+            }
+          });
+          if(Object.keys(textFields).length>0){
+            const proofData=await api.proofreadReport({fields:textFields});
+            if(proofData?.corrected&&Object.keys(proofData.corrected).length>0){
+              console.log("[submit] Proofread corrections:",proofData.corrected);
+              allFields.forEach(f=>{if(proofData.corrected[f.name])f.val=proofData.corrected[f.name];});
+            }
+          }
+        }catch(proofErr){
+          console.warn("[submit] Proofread failed (non-blocking):",proofErr.message);
+          // Non-blocking — report still submits with original text
+        }
+      }
 
       // ── DOCX path: send to edge function for XML editing ──
       setSubmitStep("Generating report...");
       if(isDocxTemplate){
-        const allFields=buildEditableFields();
         const fieldValues={};
         allFields.forEach(f=>{if(f.val)fieldValues[f.name]=f.val;});
         // Convert template to base64
@@ -674,12 +838,7 @@ function ReportEditor({job, user, onBack, reportDate}){
         const tplChunks=[];for(let i=0;i<tplUint8.length;i+=8192)tplChunks.push(String.fromCharCode.apply(null,tplUint8.subarray(i,i+8192)));
         const tplB64=btoa(tplChunks.join(""));
         // Call generate-docx edge function
-        const genResp=await fetch(`${SB_URL}/functions/v1/generate-docx`,{
-          method:"POST",
-          headers:{"Content-Type":"application/json","Authorization":"Bearer "+(AUTH_TOKEN||SB_KEY),"apikey":SB_KEY},
-          body:JSON.stringify({docx_base64:tplB64,field_values:fieldValues})
-        });
-        if(!genResp.ok)throw new Error("Generate DOCX failed: "+(await genResp.text()));
+        const genResp=await api.generateDocx({docx_base64:tplB64,field_values:fieldValues});
         const genData=await genResp.json();
         if(genData.error)throw new Error(genData.error);
         // Decode the returned filled DOCX
@@ -758,15 +917,10 @@ function ReportEditor({job, user, onBack, reportDate}){
         const vals={};const lockVals={};
         allFields.forEach(f=>{if(f.autoFill||f.mode==="edit")vals[f.name]=f.val;else lockVals[f.name]=f.val;});
         const storagePath=`${user.id}/${job.id}/reports/${docxFilename}`;
-        let upR=await fetch(`${SB_URL}/storage/v1/object/report-source-docs/${storagePath}`,{
-          method:"POST",headers:{apikey:SB_KEY,Authorization:`Bearer ${AUTH_TOKEN||SB_KEY}`,"Content-Type":"application/octet-stream"},body:docxBlob
-        });
-        if(!upR.ok){upR=await fetch(`${SB_URL}/storage/v1/object/report-source-docs/${storagePath}`,{
-          method:"PUT",headers:{apikey:SB_KEY,Authorization:`Bearer ${AUTH_TOKEN||SB_KEY}`,"Content-Type":"application/octet-stream"},body:docxBlob
-        });}
-        if(!upR.ok)throw new Error("File upload failed ("+upR.status+"). Report was NOT submitted.");
-        const reportContent={vals,lockVals,photos:[],photoLayout:"1",lockFields:[],editFields:allFields};
+        await api.uploadStorage(storagePath,docxBlob,"application/octet-stream");
+        const reportContent={vals,lockVals,photos:[],photoLayout:"1",lockFields:[],editFields:allFields,...(isTYR?{contractors:selectedContractors}:{})};
         await db.saveReport({job_id:job.id,user_id:user.id,report_date:submitDate,status:"submitted",content:JSON.stringify(reportContent),updated_at:new Date().toISOString()});
+        if(isTYR&&selectedContractors.length>0&&draftId)try{await db.saveReportContractors(draftId,job.id,user.id,selectedContractors);}catch(e){console.error("Save report contractors:",e);}
         const userName=user.user_metadata?.full_name||user.email?.split("@")[0]||"Inspector";
         const emailHtml=`<div style="font-family:-apple-system,sans-serif;max-width:600px;"><div style="background:#e8742a;padding:20px 24px;border-radius:8px 8px 0 0;"><h1 style="color:#fff;margin:0;font-size:20px;">My Daily Reports</h1></div><div style="background:#f9f9f9;padding:24px;border:1px solid #e0e0e0;border-top:none;border-radius:0 0 8px 8px;"><p style="color:#333;font-size:16px;">${userName} has submitted the daily report for <strong>${job.name}</strong> on ${todayDisplay}.</p><p style="color:#555;font-size:14px;">The filled DOCX report is attached.</p></div></div>`;
         const rawTeam=job.team_emails||[];
@@ -775,8 +929,7 @@ function ReportEditor({job, user, onBack, reportDate}){
         return;
       }
 
-      // ── 2. Build field values ──
-      const allFields=buildEditableFields();
+      // ── 2. Field values (already built + proofread above) ──
       const fcSource=(job.field_config||{}).source;
 
       // ── 2b. AcroForm fill-by-name path (for fillable PDFs uploaded via AcroForm detection) ──
@@ -912,12 +1065,112 @@ function ReportEditor({job, user, onBack, reportDate}){
         }
       }
       const font=await pdfDoc.embedFont(StandardFonts.TimesRoman);
+      const fontBold=await pdfDoc.embedFont(StandardFonts.TimesRomanBold);
       const fontItalic=await pdfDoc.embedFont(StandardFonts.TimesRomanItalic);
       const pages=pdfDoc.getPages();
 
-      // ── 3. Fill fields by coordinates (standard path — skip for AcroForm fill-by-name) ──
+      // ── 3. Fill fields by coordinates ──
       if(fcSource!=="acroform"){
-      // Use drawText directly — no AcroForm create+flatten (which adds white backgrounds over colored cells)
+      if(isTYR&&pages.length>0){
+        // ── TYR v5: Hardcoded field positions from template analysis ──
+        // All coordinates in pdfplumber top-left system; convert: pdfY = 792 - top
+        const pg1=pages[0];const pgH=pg1.getHeight();
+        const sz=10;const szSm=9;
+        // TYR uses Helvetica (sans-serif) to better match Century Gothic template style
+        const tyrFont=await pdfDoc.embedFont(StandardFonts.Helvetica);
+        const tyrFontBold=await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+        const tyrFontItalic=await pdfDoc.embedFont(StandardFonts.HelveticaOblique);
+        // Helper: draw single-line text, vertically centered in cell, auto-shrink
+        const drawCell=(text,x,topY,w,h,useSz,useFont)=>{
+          if(!text)return;
+          const s=String(text);let fs=useSz||sz;const f2=useFont||tyrFont;
+          const tw=f2.widthOfTextAtSize(s,fs);
+          if(w&&tw>w-6)fs=Math.max(6,fs*(w-6)/tw);
+          const pdfY=pgH-topY-(h+fs)/2+fs*0.15;
+          pg1.drawText(s,{x:x+3,y:pdfY,size:fs,font:f2,color:rgb(0,0,0)});
+        };
+        // Helper: draw multiline text with word-wrap inside a box
+        // lineSpacing: multiplier for line height (default 1.3 for readability)
+        // useFontSz: optional font size override
+        // useF: optional font override
+        // noBullets: if true, skip bullet formatting even for multi-line text
+        const drawMulti=(text,x,topY,w,h,{lineSpacing=1.3,useFontSz,useF,noBullets,bottomLimit}={})=>{
+          if(!text)return;
+          const fSz=useFontSz||sz;const f=useF||tyrFont;
+          const leftPad=6;const fieldTopPDF=pgH-topY;const fieldBottomPDF=bottomLimit!=null?bottomLimit:(pgH-topY-h);
+          const textStartY=fieldTopPDF-fSz;const maxW=w-leftPad-4;
+          const rawLines=text.split(/\n/).filter(l=>l.trim());
+          const useBullets=!noBullets&&rawLines.length>1;
+          const bullet="\u2022  ";const bulletW=useBullets?f.widthOfTextAtSize(bullet,fSz):0;
+          const textAfterBullet=leftPad+bulletW;const wrapMaxW=maxW-bulletW;
+          const lines=[];
+          rawLines.forEach(rl=>{const clean=rl.replace(/^[\-\•\*]\s*/,"").trim();if(!clean)return;const words=clean.split(" ");let cur="";let first=true;words.forEach(wd=>{const test=cur?cur+" "+wd:wd;const tw2=f.widthOfTextAtSize(test,fSz);if(tw2>wrapMaxW&&cur){lines.push({text:first?(useBullets?bullet:"")+cur:cur,xOff:first?leftPad:textAfterBullet,newBullet:first});first=false;cur=wd;}else cur=test;});if(cur)lines.push({text:first?(useBullets?bullet:"")+cur:cur,xOff:first?leftPad:textAfterBullet,newBullet:first});});
+          let yOff=0;lines.forEach((ln,i)=>{if(i>0)yOff+=(ln.newBullet&&useBullets)?fSz*2:fSz*lineSpacing;const ly=textStartY-yOff;if(ly>=fieldBottomPDF)pg1.drawText(ln.text,{x:x+ln.xOff,y:ly,size:fSz,font:f,color:rgb(0,0,0)});});
+        };
+
+        // Build value lookup from form fields — exact name → value map
+        const v={};allFields.forEach(f=>{if(f.val)v[(f.name||"").toLowerCase().trim()]=f.val;});
+        // findVal: word-boundary-aware search — matches whole words in field names
+        // e.g. "ot" matches "ot hours" but NOT "notes"
+        // Word-start boundary match: keyword must start at a word boundary but can be a prefix
+        // e.g. "note" matches "notes and comments" but "ot" does NOT match "notes"
+        const wordMatch=(fieldName,keyword)=>{const re=new RegExp("(^|[\\s_\\-\\.:#])"+keyword.replace(/[.*+?^${}()|[\]\\]/g,"\\$&"),"i");return re.test(fieldName);};
+        const findVal=(...keys)=>{for(const k of keys){for(const[fn,fv]of Object.entries(v)){if(wordMatch(fn,k))return fv;}}return"";};
+        // findVal2: match field name that contains both keywords (word-boundary aware)
+        const findVal2=(a,b)=>{for(const[fn,fv]of Object.entries(v)){if(wordMatch(fn,a)&&wordMatch(fn,b))return fv;}return"";};
+
+        // Row heights are all 14.8pt
+        const rh=14.8;
+
+        // ── Header fields (grey value boxes) ──
+        // Row 1: District Name / Project Name  (y=125.2)
+        drawCell(findVal("district"),109.3,125.2,190.6,rh,sz,tyrFontBold);
+        drawCell(findVal2("project","name"),424.4,125.2,164.1,rh,sz,tyrFontBold);
+        // Row 2: Address  (y=142.2)
+        drawCell(findVal("address"),109.3,142.2,479.2,rh,sz,tyrFontBold);
+        // Row 3: DSA Number / TYR Project #  (y=159.3)
+        drawCell(findVal("dsa"),109.3,159.3,190.6,rh,sz,tyrFontBold);
+        drawCell(findVal("tyr project","project #","project#"),424.4,159.3,164.1,rh,sz,tyrFontBold);
+        // Row 4: Date / Weather  (y=176.4)
+        drawCell(findVal("date"),109.3,176.4,190.6,rh,sz,tyrFontBold);
+        drawCell(findVal("weather"),424.4,176.4,164.1,rh,szSm,tyrFontBold);
+        // Row 5: Reg Hours / OT Hours / DT Hours  (y=193.4)
+        drawCell(findVal("reg"),109.3,193.4,100.5,rh,sz,tyrFont);
+        drawCell(findVal("ot"),316.4,193.4,96.6,rh,sz,tyrFont);
+        drawCell(findVal("dt"),523.5,193.4,65.0,rh,sz,tyrFont);
+
+        // ── General Statement (cream box y=228.9, h=28) ──
+        // "General:" label baseline sits ~2pt below 228.9 top. Start text at 229.5 to align with label.
+        // Allow text to flow down into contractor table area if needed (bottom limit = contractor header y=259.2)
+        drawMulti(findVal("general"),70,229.5,517.2,28,{lineSpacing:1.3,noBullets:true,bottomLimit:pgH-257});
+
+        // ── Daily Activities (cream box below "Daily Activities:" label row) ──
+        // Label row: y=344.4 h=13. Content box: y=357.4, h=80
+        drawMulti(findVal("activit"),25.2,357.4,562.0,80.0,{lineSpacing:1.3});
+
+        // ── Inspection Requests (y=439.6, h=14.8) ──
+        // Label "Inspection Requests/Site Visits:" ends at x~195
+        // Inspection requests — fixed height, does not grow
+        drawMulti(findVal("inspection","request","site visit"),195,439.6,392.2,14.8,{lineSpacing:1.3,useFontSz:szSm,noBullets:true,bottomLimit:pgH-455});
+
+        // ── Notes and Comments — removed from TYR PDF output ──
+        // (was duplicating General field values; user will re-upload template v6 without this row)
+
+        // ── Signature (just above footer, ~y=474) ──
+        const sigField=allFields.find(f=>((f.name||"").toLowerCase().includes("signature")||(f.autoFill==="name"&&(f.name||"").toLowerCase().includes("inspector"))));
+        if(sigField&&sigField.val){
+          const sigSz=sz*0.85;
+          const sigY=pgH-478; // place signature right below Notes section
+          const sigTime=sigTimestamps[sigField.name]?new Date(sigTimestamps[sigField.name]):new Date();
+          const dayName=sigTime.toLocaleDateString("en-US",{weekday:"long"});
+          const datePart=sigTime.toLocaleDateString("en-US",{month:"long",day:"numeric",year:"numeric"});
+          const timePart=sigTime.toLocaleTimeString("en-US",{hour:"numeric",minute:"2-digit",hour12:true});
+          pg1.drawText("Signed by "+String(sigField.val),{x:27,y:sigY,size:sigSz,font:tyrFontItalic,color:rgb(0.1,0.1,0.1)});
+          pg1.drawText(dayName+", "+datePart+" at "+timePart,{x:27,y:sigY-sigSz*1.15,size:sigSz*0.65,font:tyrFont,color:rgb(0.4,0.4,0.4)});
+          pg1.drawText("powered by My Daily Reports",{x:27,y:sigY-sigSz*2.1,size:sigSz*0.55,font:tyrFontItalic,color:rgb(0.6,0.6,0.6)});
+        }
+      }else{
+      // ── Standard (non-TYR) field drawing ──
       {
         allFields.forEach(f=>{
           if(f.x==null||f.y==null||!f.val)return;
@@ -930,10 +1183,9 @@ function ReportEditor({job, user, onBack, reportDate}){
           const fieldH=f.h||(sz*1.6);
           const isSig=f.autoFill!=="date"&&f.autoFill!=="increment"&&((f.name||"").toLowerCase().includes("signature")||(f.autoFill==="name"&&(f.name||"").toLowerCase().includes("inspector")));
           if(isSig){
-            // Signature: place ABOVE the signature line (line is at bottom of field area)
             const sigSz=sz*0.85;
-            const sigBlockH=sigSz*2.8; // total height of 3-line signature block
-            const pdfY=pageH-f.y-fieldH+sigBlockH+sigSz*0.3; // position so sig block sits above the line
+            const sigBlockH=sigSz*2.8;
+            const pdfY=pageH-f.y-fieldH+sigBlockH+sigSz*0.3;
             const sigTime=sigTimestamps[f.name]?new Date(sigTimestamps[f.name]):new Date();
             const dayName=sigTime.toLocaleDateString("en-US",{weekday:"long"});
             const datePart=sigTime.toLocaleDateString("en-US",{month:"long",day:"numeric",year:"numeric"});
@@ -942,18 +1194,16 @@ function ReportEditor({job, user, onBack, reportDate}){
             page.drawText(dayName+", "+datePart+" at "+timePart,{x:f.x+2,y:pdfY-sigSz*1.15,size:sigSz*0.65,font,color:rgb(0.4,0.4,0.4)});
             page.drawText("powered by My Daily Reports",{x:f.x+2,y:pdfY-sigSz*2.1,size:sigSz*0.55,font:fontItalic,color:rgb(0.6,0.6,0.6)});
           }else if(f.multiline&&f.w){
-            // Multiline: bullet-formatted with hanging indent, start at TOP of field, clip at bottom
-            const leftPad=6; // indent from left edge of field
+            const leftPad=6;
             const fieldTopPDF=pageH-f.y;
             const fieldBottomPDF=pageH-f.y-fieldH;
-            const textStartY=fieldTopPDF-sz; // first baseline just below top edge
+            const textStartY=fieldTopPDF-sz;
             const maxW=f.w-leftPad-4;const rawLines=f.val.split(/\n/).filter(l=>l.trim());
             const useBullets=rawLines.length>1;
             const bullet="\u2022  ";
             const bulletW=useBullets?font.widthOfTextAtSize(bullet,sz):0;
-            const textAfterBullet=leftPad+bulletW; // x offset where text starts after bullet
-            const wrapMaxW=maxW-bulletW; // wrap width for continuation lines
-            // Build lines: {text, xOffset, newBullet} — bullet lines start at leftPad, continuations at textAfterBullet
+            const textAfterBullet=leftPad+bulletW;
+            const wrapMaxW=maxW-bulletW;
             const lines=[];
             rawLines.forEach(rl=>{
               const clean=rl.replace(/^[\-\•\*]\s*/,"").trim();
@@ -962,10 +1212,8 @@ function ReportEditor({job, user, onBack, reportDate}){
               words.forEach(w=>{const test=cur?cur+" "+w:w;const tw=font.widthOfTextAtSize(test,sz);if(tw>wrapMaxW&&cur){lines.push({text:first?(useBullets?bullet:"")+cur:cur,xOff:first?leftPad:textAfterBullet,newBullet:first});first=false;cur=w;}else cur=test;});
               if(cur)lines.push({text:first?(useBullets?bullet:"")+cur:cur,xOff:first?leftPad:textAfterBullet,newBullet:first});
             });
-            // Only draw lines that fit within the field boundary — 1.5x within bullets, 2x between bullets
             let yOff=0;lines.forEach((ln,i)=>{if(i>0)yOff+=(ln.newBullet&&useBullets)?sz*2:sz*1.5;const ly=textStartY-yOff;if(ly>=fieldBottomPDF)page.drawText(ln.text,{x:f.x+ln.xOff,y:ly,size:sz,font,color:rgb(0,0,0)});});
           }else{
-            // Single line: vertically center text in the cell, auto-shrink if too wide
             let useSz=sz;
             const fieldW=f.w||120;
             if(fieldW>0){const tw=font.widthOfTextAtSize(String(f.val),useSz);if(tw>fieldW-4){useSz=Math.max(6,useSz*(fieldW-4)/tw);}}
@@ -974,7 +1222,52 @@ function ReportEditor({job, user, onBack, reportDate}){
           }
         });
       }
+      }
       } // end if !acroform
+
+      // ── TYR v5: Draw contractor table on PDF page 1 — exact template coordinates ──
+      // Template has 2-column contractor layout: Left(Name+MP) Right(Name+MP) + RFIs column
+      // 4 data rows, so max 8 contractors (4 left + 4 right)
+      if(isTYR&&selectedContractors.length>0&&pages.length>0){
+        const pg1=pages[0];
+        const pgH=pg1.getHeight(); // 792
+        const sz=10;
+        // Column x-positions (from template analysis)
+        const leftNameX=25.2;   // x for left contractor name
+        const leftMpX=189;      // x for left MP value (centered in 185-225)
+        const rightNameX=229;   // x for right contractor name
+        const rightMpX=379;     // x for right MP value (centered in 375-415)
+        const rfiX=419;         // x for RFIs/CCDs/ASIs/Submittals
+        // Row y-positions in pdf-lib coords (bottom-up) — baseline for 10pt text in 14.8pt rows
+        const rowYs=[504.4,487.3,470.3,453.3]; // rows 1-4
+        // Split contractors: first 4 go left, next 4 go right
+        const leftCs=selectedContractors.slice(0,4);
+        const rightCs=selectedContractors.slice(4,8);
+        const tyrF2=await pdfDoc.embedFont(StandardFonts.Helvetica);
+        const tyrFB2=await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+        leftCs.forEach((c,i)=>{
+          if(i>=rowYs.length)return;
+          pg1.drawText(c.company_name||"",{x:leftNameX,y:rowYs[i],size:sz,font:tyrFB2,color:rgb(0,0,0)});
+          pg1.drawText(String(c.manpower||0),{x:leftMpX,y:rowYs[i],size:sz,font:tyrFB2,color:rgb(0,0,0)});
+        });
+        rightCs.forEach((c,i)=>{
+          if(i>=rowYs.length)return;
+          pg1.drawText(c.company_name||"",{x:rightNameX,y:rowYs[i],size:sz,font:tyrFB2,color:rgb(0,0,0)});
+          pg1.drawText(String(c.manpower||0),{x:rightMpX,y:rowYs[i],size:sz,font:tyrFB2,color:rgb(0,0,0)});
+        });
+        // Draw RFIs/CCDs/ASIs/Submittals — split by "/" into separate rows
+        const rfiVal=vals["RFIs/CCDs/ASIs/Submittals"]||"";
+        if(rfiVal){
+          const rfiParts=rfiVal.split("/").map(s=>s.trim()).filter(Boolean);
+          rfiParts.forEach((part,ri)=>{
+            if(ri>=rowYs.length)return;
+            let rfiSz=9;const rfiW=170;
+            const tw=tyrF2.widthOfTextAtSize(part,rfiSz);
+            if(tw>rfiW)rfiSz=Math.max(6,rfiSz*rfiW/tw);
+            pg1.drawText(part,{x:rfiX,y:rowYs[ri],size:rfiSz,font:tyrF2,color:rgb(0,0,0)});
+          });
+        }
+      }
 
       // ── 5. Remove empty trailing pages (no fields reference them) before adding photos ──
       if(pdfDoc.getPageCount()>1){
@@ -990,7 +1283,11 @@ function ReportEditor({job, user, onBack, reportDate}){
         // Determine where header ends and footer starts from field positions (top-left coords)
         const p1Fields=allFields.filter(f=>f.y!=null&&(f.page||1)===1);
         let headerBottomTL=80,footerTopTL=pageH-40; // defaults in top-left coords
-        if(p1Fields.length>0){
+        if(isTYR){
+          // TYR template: header ends at y=93 (logo area), footer at y=495
+          headerBottomTL=93;
+          footerTopTL=495;
+        }else if(p1Fields.length>0){
           headerBottomTL=Math.max(Math.min(...p1Fields.map(f=>f.y))-5,0);
           footerTopTL=Math.min(Math.max(...p1Fields.map(f=>f.y+(f.h||12)))+5,pageH);
         }
@@ -998,17 +1295,11 @@ function ReportEditor({job, user, onBack, reportDate}){
         const headerBottomPDF=pageH-headerBottomTL; // PDF y where header ends
         const footerTopPDF=pageH-footerTopTL; // PDF y where footer starts
 
-        // Embed header and footer as clipped regions from the template's first page
-        let headerEmbed=null,footerEmbed=null;
-        const headerH=pageH-headerBottomPDF>10?(pageH-headerBottomPDF):0;
-        const footerH=footerTopPDF>10?footerTopPDF:0;
-        if(srcDoc&&headerH>0){
+        // Embed full template page (BBox clipping unreliable), then white-out body area
+        let fullPageEmbed=null;
+        if(srcDoc){
           const srcPage=srcDoc.getPage(0);
-          headerEmbed=await pdfDoc.embedPage(srcPage,{left:0,right:pageW,bottom:headerBottomPDF,top:pageH});
-        }
-        if(srcDoc&&footerH>0){
-          const srcPage=srcDoc.getPage(0);
-          footerEmbed=await pdfDoc.embedPage(srcPage,{left:0,right:pageW,bottom:0,top:footerTopPDF});
+          fullPageEmbed=await pdfDoc.embedPage(srcPage);
         }
 
         // Photo area = between header and footer
@@ -1037,8 +1328,11 @@ function ReportEditor({job, user, onBack, reportDate}){
 
         const addPhotoPage=()=>{
           const np=pdfDoc.addPage([pageW,pageH]);
-          if(headerEmbed)np.drawPage(headerEmbed,{x:0,y:headerBottomPDF,width:pageW,height:headerH});
-          if(footerEmbed)np.drawPage(footerEmbed,{x:0,y:0,width:pageW,height:footerTopPDF});
+          if(fullPageEmbed){
+            np.drawPage(fullPageEmbed,{x:0,y:0,width:pageW,height:pageH});
+            // White-out the body area between header and footer so photos draw on clean background
+            np.drawRectangle({x:0,y:footerTopPDF,width:pageW,height:headerBottomPDF-footerTopPDF,color:rgb(1,1,1)});
+          }
           return np;
         };
 
@@ -1212,20 +1506,15 @@ function ReportEditor({job, user, onBack, reportDate}){
       // ── 8. Upload PDF first, THEN save report record (ensures file exists before marking submitted) ──
       setSubmitStep("Uploading report...");
       const storagePath=`${user.id}/${job.id}/reports/${pdfFilename}`;
-      let upR=await fetch(`${SB_URL}/storage/v1/object/report-source-docs/${storagePath}`,{
-        method:"POST",headers:{apikey:SB_KEY,Authorization:`Bearer ${AUTH_TOKEN||SB_KEY}`,"Content-Type":"application/pdf"},body:pdfBlob
-      });
-      if(!upR.ok){upR=await fetch(`${SB_URL}/storage/v1/object/report-source-docs/${storagePath}`,{
-        method:"PUT",headers:{apikey:SB_KEY,Authorization:`Bearer ${AUTH_TOKEN||SB_KEY}`,"Content-Type":"application/pdf"},body:pdfBlob
-      });}
-      if(!upR.ok)throw new Error("File upload failed ("+upR.status+"). Report was NOT submitted.");
+      await api.uploadStorage(storagePath,pdfBlob,"application/pdf");
 
       setSubmitStep("Saving report...");
-      const reportContent={vals,lockVals,photos,photoLayout,lockFields,editFields};
+      const reportContent={vals,lockVals,photos,photoLayout,lockFields,editFields,...(isTYR?{contractors:selectedContractors}:{})};
       await db.saveReport({
         job_id:job.id,user_id:user.id,report_date:submitDate,status:"submitted",
         content:JSON.stringify(reportContent),updated_at:new Date().toISOString()
       });
+      if(isTYR&&selectedContractors.length>0&&draftId)try{await db.saveReportContractors(draftId,job.id,user.id,selectedContractors);}catch(e){console.error("Save report contractors:",e);}
 
       const userName=user.user_metadata?.full_name||user.email?.split("@")[0]||"Inspector";
       // Build optional photo thumbnails for email
@@ -1240,7 +1529,7 @@ function ReportEditor({job, user, onBack, reportDate}){
       showToast("Report submitted!");
     }catch(e){
       console.error("Submit error:",e);
-      showToast("Submit failed: "+e.message);
+      showToast("Submit failed: "+e.message+" "+authDiag());
     }finally{busyRef.current=false;setSubmitting(false);}
   };
 
@@ -1265,38 +1554,56 @@ function ReportEditor({job, user, onBack, reportDate}){
 
   // Post-submit: Email to project team
   const [emailing,setEmailing]=useState(false);
+  const [emailFallback,setEmailFallback]=useState(null); // null = no error, object = fallback UI data
   const emailToTeam=async()=>{
     if(!submitSuccess)return;
     setEmailing(true);
+    setEmailFallback(null);
     try{
-      const userEmail=user.email;
+      // ── Pre-flight check: verify auth + edge function BEFORE attempting the real call ──
+      const pf=await preflightCheck("send-report");
+      if(!pf.ok){
+        const userEmail=user?.email;
+        const recipients=[...new Set([userEmail,...(submitSuccess.teamEmails||[])])].filter(Boolean);
+        setEmailFallback({recipients,subject:`${submitSuccess.jobName} — Daily Report ${submitSuccess.todayDisplay}`});
+        setEmailing(false);return;
+      }
+
+      const userEmail=user?.email;
       const recipients=[...new Set([userEmail,...submitSuccess.teamEmails])].filter(Boolean);
       if(recipients.length===0){showToast("No team emails configured. Add them in Job Settings.");setEmailing(false);return;}
       // Get company name for dynamic sender
       let senderName="My Daily Reports";
       try{const prof=await db.getProfile(user.id);if(prof?.company_name)senderName=prof.company_name;}catch(e){}
-      await refreshAuthToken();
-      if(!AUTH_TOKEN)throw new Error("Session expired. Please sign out and back in.");
-      const emailBody=JSON.stringify({to:recipients,subject:`${submitSuccess.jobName} — Daily Report ${submitSuccess.todayDisplay}`,html_body:submitSuccess.emailHtml,pdf_base64:submitSuccess.pdfBase64,pdf_filename:submitSuccess.pdfFilename,sender_name:senderName});
-      let r=await fetch(`${SB_URL}/functions/v1/send-report`,{
-        method:"POST",headers:{"Content-Type":"application/json",Authorization:`Bearer ${AUTH_TOKEN}`,apikey:SB_KEY},body:emailBody
-      });
-      // Only retry on 401 if the response is NOT from our function (Supabase gateway auth failure)
-      if(r.status===401){const peek=await r.clone().text().catch(()=>"");const isGateway=!peek.includes("Resend");if(isGateway){await refreshAuthToken();if(!AUTH_TOKEN)throw new Error("Session expired. Please sign out and back in.");r=await fetch(`${SB_URL}/functions/v1/send-report`,{method:"POST",headers:{"Content-Type":"application/json",Authorization:`Bearer ${AUTH_TOKEN}`,apikey:SB_KEY},body:emailBody});}}
-      if(!r.ok){const errText=await r.text().catch(()=>"");let errMsg=`Email send failed (${r.status})`;try{const errBody=JSON.parse(errText);errMsg=errBody.error||errMsg;console.error("Email API:",r.status,errBody);}catch(pe){console.error("Email API (raw):",r.status,errText);if(errText)errMsg=errText.slice(0,200);}throw new Error(errMsg);}
+      await api.sendReport({to:recipients,subject:`${submitSuccess.jobName} — Daily Report ${submitSuccess.todayDisplay}`,html_body:submitSuccess.emailHtml,pdf_base64:submitSuccess.pdfBase64,pdf_filename:submitSuccess.pdfFilename,sender_name:senderName});
       showToast("Report emailed to "+recipients.length+" recipient"+(recipients.length>1?"s":"")+"!");
     }catch(e){
       console.error("Email error:",e);
-      const msg=e.message||"Unknown error";
-      if(msg.includes("RESEND_API_KEY"))showToast("Email not configured: Set RESEND_API_KEY in Supabase secrets.");
-      else if(msg.includes("404")||msg.includes("FunctionNotFound"))showToast("Email function not deployed. Deploy with: npx supabase functions deploy send-report");
-      else if(msg.includes("validation_error")||msg.includes("not verified"))showToast("Email domain not verified in Resend.");
-      else if(msg.includes("Resend API error"))showToast("Email service error: "+msg.replace("Resend API error ","").slice(0,150));
-      else showToast("Email failed: "+msg);
+      // Show fallback UI instead of cryptic error messages
+      const userEmail=user?.email;
+      const recipients=[...new Set([userEmail,...(submitSuccess.teamEmails||[])])].filter(Boolean);
+      setEmailFallback({recipients,subject:`${submitSuccess.jobName} — Daily Report ${submitSuccess.todayDisplay}`});
     }finally{setEmailing(false);}
   };
 
-  const fs={width:"100%",padding:"12px 14px",background:C.inp,border:`1px solid ${C.brd}`,borderRadius:10,color:C.txt,fontSize:15};
+  // Fallback: open the user's mail app with recipients + subject pre-filled
+  const openMailFallback=()=>{
+    if(!emailFallback||!submitSuccess)return;
+    const to=emailFallback.recipients.join(",");
+    const subj=encodeURIComponent(emailFallback.subject);
+    const body=encodeURIComponent("Daily report attached. (Please attach the downloaded PDF to this email.)");
+    window.location.href=`mailto:${to}?subject=${subj}&body=${body}`;
+  };
+
+  // Fallback: copy recipient list to clipboard
+  const copyRecipients=async()=>{
+    if(!emailFallback)return;
+    try{await navigator.clipboard.writeText(emailFallback.recipients.join(", "));showToast("Recipients copied!");}catch(e){showToast("Couldn't copy");}
+  };
+
+  const fs={width:"100%",boxSizing:"border-box",padding:"14px 16px",background:C.inp,border:`2px solid ${C.brd}`,borderRadius:12,color:C.txt,fontSize:16,fontFamily:"inherit"};
+  const cardStyle={background:C.card,borderRadius:16,padding:"16px 18px",marginBottom:16,border:`1px solid ${C.brd}`,boxShadow:"0 2px 12px rgba(0,0,0,0.2)"};
+  const sectionLabel=(icon,text,count)=>(<div style={{fontSize:13,color:C.mut,fontWeight:700,marginBottom:14,display:"flex",alignItems:"center",gap:8}}><span style={{fontSize:16}}>{icon}</span><span style={{letterSpacing:1}}>{text}</span>{count!=null&&<span style={{fontSize:12,color:C.org,fontWeight:700,background:C.org+"18",borderRadius:12,padding:"2px 10px",marginLeft:"auto"}}>{count}</span>}</div>);
   const layouts=[{k:"1",l:"1 per page"},{k:"2",l:"2 per page (auto)"},{k:"4",l:"4 per page"}];
 
   if(loadingDraft)return(<div style={{minHeight:"100vh",background:C.bg,display:"flex",alignItems:"center",justifyContent:"center"}}><p style={{color:C.mut}}>Loading report...</p></div>);
@@ -1365,7 +1672,7 @@ function ReportEditor({job, user, onBack, reportDate}){
           <button onClick={()=>{closeCamera();setViewingReport(null);setViewDocxHtml(null);setEditablePreview(null);}} style={{padding:"14px 16px",background:C.card,border:`1px solid ${C.brd}`,borderRadius:10,color:C.mut,fontSize:15,fontWeight:700,cursor:"pointer"}}>
             ←
           </button>
-          <button onClick={async()=>{closeCamera();if(reportStatus!=="submitted")await saveWorking();setViewingReport(null);setViewDocxHtml(null);setEditablePreview(null);onBack();}} disabled={saving} style={{flex:1,padding:"14px 0",background:C.card,border:`1px solid ${C.brd}`,borderRadius:10,color:C.txt,fontSize:15,fontWeight:700,cursor:"pointer",opacity:saving?0.5:1}}>
+          <button onClick={async()=>{closeCamera();await saveWorking();setViewingReport(null);setViewDocxHtml(null);setEditablePreview(null);onBack();}} disabled={saving} style={{flex:1,padding:"14px 0",background:C.card,border:`1px solid ${C.brd}`,borderRadius:10,color:C.txt,fontSize:15,fontWeight:700,cursor:"pointer",opacity:saving?0.5:1}}>
             {saving?"Saving...":"Save & Exit"}
           </button>
           <button onClick={()=>{setViewingReport(null);setViewDocxHtml(null);setEditablePreview(null);submitReport();}} disabled={submitting} className="btn-o" style={{flex:1,padding:"14px 0",background:C.org,border:"none",borderRadius:10,color:"#fff",fontSize:15,fontWeight:700,cursor:submitting?"default":"pointer",opacity:submitting?0.6:1}}>
@@ -1407,18 +1714,44 @@ function ReportEditor({job, user, onBack, reportDate}){
             </button>
 
             {/* Email to team */}
-            <button onClick={emailToTeam} disabled={emailing} style={{width:"100%",padding:"16px 20px",background:C.org,border:"none",borderRadius:12,color:"#fff",fontSize:15,fontWeight:700,cursor:emailing?"default":"pointer",opacity:emailing?0.7:1,display:"flex",alignItems:"center",gap:12}}>
-              <span style={{fontSize:22}}>✉</span>
-              <div style={{textAlign:"left"}}>
-                <div>{emailing?"Sending...":"Email to Project Team"}</div>
-                <div style={{fontSize:11,fontWeight:400,opacity:0.8}}>
-                  {emailing?"Emails may take up to 5 minutes to arrive. Do not resend."
-                    :teamCount>0
-                    ?`Send to ${teamCount+1} recipient${teamCount+1>1?"s":""} (you + ${teamCount} team)`
-                    :user.email?"Send to "+user.email:"No team emails configured"}
+            {!emailFallback?(
+              <button onClick={emailToTeam} disabled={emailing} style={{width:"100%",padding:"16px 20px",background:C.org,border:"none",borderRadius:12,color:"#fff",fontSize:15,fontWeight:700,cursor:emailing?"default":"pointer",opacity:emailing?0.7:1,display:"flex",alignItems:"center",gap:12}}>
+                <span style={{fontSize:22}}>✉</span>
+                <div style={{textAlign:"left"}}>
+                  <div>{emailing?"Sending...":"Email to Project Team"}</div>
+                  <div style={{fontSize:11,fontWeight:400,opacity:0.8}}>
+                    {emailing?"Emails may take up to 5 minutes to arrive. Do not resend."
+                      :teamCount>0
+                      ?`Send to ${teamCount+1} recipient${teamCount+1>1?"s":""} (you + ${teamCount} team)`
+                      :user?.email?"Send to "+user.email:"No team emails configured"}
+                  </div>
                 </div>
+              </button>
+            ):(
+              <div style={{width:"100%",background:C.card,border:`1px solid ${C.brd}`,borderRadius:12,padding:"16px 18px"}}>
+                <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:12}}>
+                  <span style={{fontSize:18}}>⚠</span>
+                  <div style={{fontSize:14,fontWeight:700,color:"#f59e0b"}}>Email isn't available right now</div>
+                </div>
+                <div style={{fontSize:13,color:C.lt,lineHeight:1.5,marginBottom:16}}>
+                  Your report is saved. Use one of these options to deliver it:
+                </div>
+                <div style={{display:"flex",flexDirection:"column",gap:10}}>
+                  <button onClick={()=>{downloadPdf();}} style={{width:"100%",padding:"12px 16px",background:C.blu,border:"none",borderRadius:10,color:"#fff",fontSize:14,fontWeight:600,cursor:"pointer",display:"flex",alignItems:"center",gap:10}}>
+                    <span>⬇</span> Download PDF, then email manually
+                  </button>
+                  <button onClick={openMailFallback} style={{width:"100%",padding:"12px 16px",background:C.org,border:"none",borderRadius:10,color:"#fff",fontSize:14,fontWeight:600,cursor:"pointer",display:"flex",alignItems:"center",gap:10}}>
+                    <span>✉</span> Open in Mail App (attach PDF yourself)
+                  </button>
+                  <button onClick={copyRecipients} style={{width:"100%",padding:"10px 16px",background:C.inp,border:`1px solid ${C.brd}`,borderRadius:10,color:C.lt,fontSize:13,cursor:"pointer",display:"flex",alignItems:"center",gap:10}}>
+                    <span>📋</span> Copy recipient list ({emailFallback.recipients.length})
+                  </button>
+                </div>
+                <button onClick={()=>{setEmailFallback(null);}} style={{width:"100%",marginTop:12,padding:"8px",background:"none",border:"none",color:C.mut,fontSize:12,cursor:"pointer",textDecoration:"underline"}}>
+                  Try email again
+                </button>
               </div>
-            </button>
+            )}
 
           </div>
 
@@ -1449,7 +1782,7 @@ function ReportEditor({job, user, onBack, reportDate}){
       {/* Header */}
       <div style={{borderBottom:`1px solid ${C.brd}`,background:C.card,padding:"14px 16px"}}>
       <div style={{display:"flex",alignItems:"center",gap:12,maxWidth:600,margin:"0 auto"}}>
-        <button onClick={async()=>{closeCamera();if(reportStatus!=="submitted")await saveWorking();onBack();}} style={{background:C.inp,border:`1px solid ${C.brd}`,borderRadius:12,color:"#fff",fontSize:26,cursor:"pointer",lineHeight:1,width:56,height:56,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}aria-label="Go back">←</button>
+        <button onClick={async()=>{closeCamera();await saveWorking();onBack();}} style={{background:C.inp,border:`1px solid ${C.brd}`,borderRadius:12,color:"#fff",fontSize:26,cursor:"pointer",lineHeight:1,width:56,height:56,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}aria-label="Go back">←</button>
         <div style={{flex:1,minWidth:0}}>
           <div style={{fontWeight:700,fontSize:17}}>{reportStatus==="submitted"?"Submitted Report":"Today's Report"}</div>
           <div style={{fontSize:12,color:C.mut,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{job.name}</div>
@@ -1498,7 +1831,12 @@ function ReportEditor({job, user, onBack, reportDate}){
           )}
 
           {/* Editable fields — only non-auto, non-skipped */}
-          {editFields.filter(f=>!(f.autoFill==="date"||f.autoFill==="increment"||f.autoFill==="name")).map(f=>{
+          {editFields.filter(f=>{
+            if(f.autoFill==="date"||f.autoFill==="increment"||f.autoFill==="name")return false;
+            // TYR: hide contractor/MP/manpower/RFI fields — handled by dedicated sections on main screen
+            if(isTYR){const fn=(f.name||"").toLowerCase();if(/contractor|^mp$|^mp[:\s]|manpower|crew\s*size|rfis|ccds|asis|submittal/i.test(fn))return false;}
+            return true;
+          }).map(f=>{
             const isSkipped=skippedFields[f.name];
             return(
             <div key={f.name} style={{marginBottom:14,opacity:isSkipped?0.4:1,transition:"opacity 0.2s"}}>
@@ -1514,11 +1852,13 @@ function ReportEditor({job, user, onBack, reportDate}){
               {!isSkipped&&((()=>{
                 const notesKw=["notes","observations","comments","description","remarks"];
                 const isNotesField=notesKw.some(k=>(f.name||"").toLowerCase().includes(k));
-                const useTextarea=f.voiceEnabled||f.multiline||isNotesField;
+                const isTyrActivities=isTYR&&/activit/i.test(f.name||"");
+                // TYR: only Daily Activities gets a textarea; everything else is single-line
+                const useTextarea=isTYR?isTyrActivities:(f.voiceEnabled||f.multiline||isNotesField);
                 return useTextarea?(
-                  <textarea value={vals[f.name]||""} onChange={e=>setVal(f.name,e.target.value)} aria-label={f.name} placeholder="Tap here and use your keyboard mic to dictate..." rows={10} style={{width:"100%",boxSizing:"border-box",background:C.inp,border:`1px solid ${C.brd}`,borderRadius:10,padding:"14px 16px",fontSize:15,color:C.lt,resize:"vertical",minHeight:250,lineHeight:1.6,fontFamily:"inherit"}}/>
+                  <textarea value={vals[f.name]||""} onChange={e=>setVal(f.name,e.target.value)} aria-label={f.name} placeholder="Tap here and use your keyboard mic to dictate..." rows={6} style={{...fs,resize:"vertical",minHeight:140,lineHeight:1.6}}/>
                 ):(
-                  <input type="text" value={vals[f.name]||""} onChange={e=>setVal(f.name,e.target.value)} aria-label={f.name} placeholder={"Enter "+f.name+"..."} style={{width:"100%",boxSizing:"border-box",background:C.inp,border:`1px solid ${C.brd}`,borderRadius:10,padding:"12px 14px",fontSize:15,color:C.lt}}/>
+                  <input type="text" value={vals[f.name]||""} onChange={e=>setVal(f.name,e.target.value)} aria-label={f.name} placeholder={"Enter "+f.name+"..."} style={fs}/>
                 );
               })())}
             </div>
@@ -1548,40 +1888,18 @@ function ReportEditor({job, user, onBack, reportDate}){
           </div>
         )}
 
-        {/* ── Locked Fields (collapsible) ── */}
-        {lockFields.length>0&&(
-          <div style={{marginBottom:16}}>
-            <button type="button" aria-expanded={showLocked} onClick={()=>setShowLocked(!showLocked)} style={{width:"100%",display:"flex",alignItems:"center",gap:10,padding:"14px 16px",background:C.card,border:`1px solid ${C.brd}`,borderRadius:showLocked?"12px 12px 0 0":12,cursor:"pointer",textAlign:"left"}}>
-              <span style={{fontSize:16}}>🔒</span>
-              <span style={{flex:1,fontWeight:700,fontSize:14,color:C.mut}}>Locked Fields</span>
-              <span style={{fontSize:12,color:C.mut,background:C.inp,borderRadius:10,padding:"2px 10px",marginRight:6}}>{lockFields.length}</span>
-              <span style={{color:C.mut,fontSize:12,transform:showLocked?"rotate(180deg)":"none",transition:"transform 0.2s"}}>▼</span>
-            </button>
-            {showLocked&&(
-              <div style={{background:C.card,border:`1px solid ${C.brd}`,borderTop:"none",borderRadius:"0 0 12px 12px",padding:"8px 16px 14px"}}>
-                {/* Edit toggle */}
-                <div style={{display:"flex",justifyContent:"flex-end",marginBottom:8}}>
-                  {!lockEditing?(
-                    <button onClick={()=>setLockEditing(true)} style={{padding:"4px 12px",fontSize:12,fontWeight:700,borderRadius:6,border:`1px solid ${C.brd}`,background:"transparent",color:C.org,cursor:"pointer"}}>Edit</button>
-                  ):(
-                    <button onClick={saveLockEdits} style={{padding:"4px 12px",fontSize:12,fontWeight:700,borderRadius:6,border:`1px solid ${C.ok}`,background:C.ok,color:"#fff",cursor:"pointer"}}>Done</button>
-                  )}
-                </div>
-                {lockFields.map((f,i)=>(
-                  <div key={f.name} style={{padding:"8px 0",borderBottom:i<lockFields.length-1?`1px solid ${C.brd}`:"none"}}>
-                    <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:lockEditing?8:0}}>
-                      <span style={{fontSize:13,color:C.mut}}>{f.name}</span>
-                      {!lockEditing&&<span style={{fontSize:13,fontWeight:600,color:C.lt}}>{lockVals[f.name]||f.value||"—"}</span>}
-                    </div>
-                    {lockEditing&&(
-                      <div style={{display:"flex",gap:8,alignItems:"center"}}>
-                        <input type="text" value={lockVals[f.name]||""} onChange={e=>setLockVal(f.name,e.target.value)} style={{...fs,flex:1,padding:"8px 10px",fontSize:13}}/>
-                        <button onClick={()=>unlockField(f.name)} title="Permanently unlock this field" style={{padding:"6px 12px",fontSize:11,fontWeight:700,borderRadius:6,border:`1px solid ${C.org}`,background:"transparent",color:C.org,cursor:"pointer",whiteSpace:"nowrap",minHeight:32}}>Unlock</button>
-                      </div>
-                    )}
-                  </div>
-                ))}
+        {/* ── TYR v5: Weather Toggle ── */}
+        {isTYR&&(
+          <div style={{...cardStyle}}>
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+              <div style={{display:"flex",alignItems:"center",gap:8}}>
+                <span style={{fontSize:18}}>🌤</span>
+                <span style={{fontSize:15,fontWeight:700,color:C.lt}}>Weather</span>
               </div>
+              <button onClick={()=>toggleTyrWeather(!tyrWeatherOn)} style={{padding:"8px 18px",borderRadius:10,border:`1px solid ${tyrWeatherOn?C.ok:C.brd}`,background:tyrWeatherOn?C.ok:C.inp,color:tyrWeatherOn?"#fff":C.mut,fontSize:13,fontWeight:700,cursor:"pointer"}}>{tyrWeatherLoading?"Loading...":tyrWeatherOn?"On":"Off"}</button>
+            </div>
+            {tyrWeatherOn&&tyrWeather&&(
+              <div style={{marginTop:10,padding:"10px 14px",background:C.inp,borderRadius:10,fontSize:14,color:C.lt,fontWeight:500}}>{tyrWeather}</div>
             )}
           </div>
         )}
@@ -1589,34 +1907,90 @@ function ReportEditor({job, user, onBack, reportDate}){
         {/* ── Editable fields ── */}
         {editFields.length>0&&(
           <div style={{marginBottom:20}}>
-            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:10}}>
-              <div style={{fontSize:12,fontWeight:700,color:C.org,textTransform:"uppercase",letterSpacing:1}}>Fill In Today</div>
-              {editFields.filter(f=>!f.autoFill&&vals[f.name]).length>1&&(
-                <button onClick={async()=>{const toLock=editFields.filter(f=>!f.autoFill&&vals[f.name]&&!skippedFields[f.name]);if(toLock.length===0)return;if(!await askConfirm("Lock "+toLock.length+" filled field"+(toLock.length!==1?"s":"")+"? They'll keep their current values for all future reports."))return;toLock.forEach(f=>relockField(f.name));}} style={{padding:"6px 12px",fontSize:11,fontWeight:700,borderRadius:6,border:`1px solid ${C.blu}`,background:C.blu+"22",color:C.blu,cursor:"pointer",minHeight:32}}>🔒 Lock All Filled</button>
-              )}
-            </div>
-            {/* Auto-fill fields (Date, Report #, Name) — compact inline row */}
-            {(()=>{
-              const autoFields=editFields.filter(f=>f.autoFill==="date"||f.autoFill==="increment"||f.autoFill==="name");
-              if(autoFields.length===0)return null;
-              return(
-                <div style={{display:"flex",flexWrap:"wrap",gap:8,marginBottom:14,padding:"10px 14px",background:C.inp,borderRadius:10,border:`1px solid ${C.brd}`}}>
-                  {autoFields.map(f=>(
-                    <div key={f.name} style={{display:"flex",alignItems:"center",gap:6}}>
-                      <span style={{fontSize:11,color:C.mut,fontWeight:600}}>{f.name}:</span>
-                      <span style={{fontSize:13,color:C.lt,fontWeight:600}}>{vals[f.name]||"—"}</span>
+            {/* ── TYR v5: Contractor Grid — card style at top ── */}
+            {isTYR&&(
+              <div style={{...cardStyle}}>
+                {sectionLabel("👷","CONTRACTORS ON SITE",selectedContractors.length||null)}
+                {/* Active contractor bubbles — saved, static cards with MP stepper + delete */}
+                {selectedContractors.length>0&&(
+                  <div style={{display:"flex",flexDirection:"column",gap:6,marginBottom:12}}>
+                    {selectedContractors.map((sc,idx)=>(
+                      <div key={sc.company_name} style={{display:"flex",alignItems:"center",gap:8,padding:"8px 12px",borderRadius:10,background:C.card,border:`1px solid ${C.org}33`}}>
+                        <div style={{width:24,height:24,borderRadius:6,background:C.org+"22",color:C.org,fontSize:11,fontWeight:800,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>{idx<4?"L"+(idx+1):"R"+(idx-3)}</div>
+                        <div style={{flex:1,minWidth:0}}>
+                          <div style={{fontSize:14,fontWeight:600,color:C.txt,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{sc.company_name}</div>
+                        </div>
+                        <div style={{display:"flex",alignItems:"center",gap:5,flexShrink:0}}>
+                          <button onClick={()=>updateContractorManpower(sc.company_name,Math.max(0,(sc.manpower||0)-1))} style={{width:28,height:28,borderRadius:6,border:`1px solid ${C.brd}`,background:C.inp,color:C.lt,fontSize:15,fontWeight:700,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",padding:0}}>−</button>
+                          <div style={{textAlign:"center",minWidth:28}}>
+                            <div style={{fontSize:15,fontWeight:700,color:C.org,lineHeight:1}}>{sc.manpower||0}</div>
+                            <div style={{fontSize:8,color:C.mut,marginTop:1}}>MP</div>
+                          </div>
+                          <button onClick={()=>updateContractorManpower(sc.company_name,(sc.manpower||0)+1)} style={{width:28,height:28,borderRadius:6,border:`1px solid ${C.brd}`,background:C.inp,color:C.lt,fontSize:15,fontWeight:700,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",padding:0}}>+</button>
+                        </div>
+                        <button onClick={()=>toggleContractor(sc.company_name)} style={{background:"none",border:"none",color:C.err,fontSize:18,cursor:"pointer",padding:"4px",opacity:0.6}}>✕</button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {/* Add contractor — pick from job list or type new */}
+                {selectedContractors.length<8&&(
+                  <div style={{border:`2px dashed ${C.brd}`,borderRadius:10,padding:12}}>
+                    {jobContractors.filter(jc=>!selectedContractors.find(sc=>sc.company_name===jc.company_name)).length>0&&(
+                      <div style={{display:"flex",flexWrap:"wrap",gap:6,marginBottom:8}}>
+                        {jobContractors.filter(jc=>!selectedContractors.find(sc=>sc.company_name===jc.company_name)).map(jc=>(
+                          <button key={jc.id} onClick={()=>toggleContractor(jc.company_name)} style={{padding:"6px 14px",borderRadius:8,border:`1px solid ${C.brd}`,background:C.inp,color:C.lt,fontSize:13,fontWeight:600,cursor:"pointer"}}>+ {jc.company_name}</button>
+                        ))}
+                      </div>
+                    )}
+                    <div style={{display:"flex",gap:6}}>
+                      <input type="text" id="tyrAddContractor" placeholder="New contractor name..." onKeyDown={e=>{if(e.key==="Enter"&&e.target.value.trim()){toggleContractor(e.target.value.trim());e.target.value="";}}} style={{...fs,flex:1}}/>
+                      <button onClick={()=>{const el=document.getElementById("tyrAddContractor");if(el&&el.value.trim()){toggleContractor(el.value.trim());el.value="";}}} style={{padding:"10px 16px",background:C.org,border:"none",borderRadius:8,color:"#fff",fontSize:13,fontWeight:700,cursor:"pointer"}}>Add</button>
                     </div>
-                  ))}
+                  </div>
+                )}
+                {selectedContractors.length>=8&&<div style={{fontSize:11,color:C.mut,marginTop:6,textAlign:"center"}}>Maximum 8 contractors (4 per column on template)</div>}
+
+                {/* ── RFIs / CCDs / ASIs / Submittals — separate input ── */}
+                <div style={{marginTop:14}}>
+                  <label style={{fontSize:14,fontWeight:700,color:C.lt,marginBottom:6,display:"block"}}>RFIs / CCDs / ASIs / Submittals</label>
+                  <input type="text" value={vals["RFIs/CCDs/ASIs/Submittals"]||""} onChange={e=>setVal("RFIs/CCDs/ASIs/Submittals",e.target.value)} placeholder="Separate with / for different rows..." style={{...fs}}/>
+                  <div style={{fontSize:12,color:C.mut,marginTop:4}}>Use / to separate items (e.g. RFI 001 / CCD 2 / ASI 3)</div>
                 </div>
-              );
-            })()}
-            {/* Regular editable fields */}
-            {editFields.filter(f=>!(f.autoFill==="date"||f.autoFill==="increment"||f.autoFill==="name")).map(f=>{
+              </div>
+            )}
+
+            {/* Regular editable fields — card wrapper */}
+            <div style={{...cardStyle}}>
+            {sectionLabel("📋","REPORT FIELDS")}
+            {editFields.filter(f=>{
+              if(f.autoFill==="date"||f.autoFill==="increment"||f.autoFill==="name")return false;
+              // TYR: hide contractor/MP/manpower fields — handled by contractor grid above
+              if(isTYR){
+                const fn=(f.name||"").toLowerCase();
+                if(/^contractor|^mp$|^mp:|manpower|crew\s*size|rfis|ccds|asis|submittal/i.test(fn))return false;
+              }
+              return true;
+            }).map(f=>{
               const isSkipped=skippedFields[f.name];
+              // ── TYR v4: Categorize fields ──
+              const fn=(f.name||"").toLowerCase();
+              const isTyrReadOnly=isTYR&&(/project|owner|address|general.?statement|location|site\s*address|job\s*site/i.test(fn))&&!(/activit|note|rfi|hours|weather|inspect/i.test(fn));
+              const isTyrHours=isTYR&&/hours|hrs/i.test(fn);
+              const isTyrActivities=isTYR&&/activit/i.test(fn);
+              const isTyrGeneralStmt=isTYR&&/general.?statement/i.test(fn);
               return(
-                <div key={f.name} style={{marginBottom:14,opacity:isSkipped?0.4:1,transition:"opacity 0.2s"}}>
+                <div key={f.name} style={{marginBottom:isTyrReadOnly?8:14,opacity:isSkipped?0.4:1,transition:"opacity 0.2s"}}>
+                  {/* ── TYR v4: Read-only project info fields ── */}
+                  {isTyrReadOnly&&!isSkipped?(
+                    <div style={{display:"flex",alignItems:"center",gap:8,padding:"6px 0"}}>
+                      <span style={{fontSize:12,color:C.mut,fontWeight:600,minWidth:90}}>{f.name}:</span>
+                      <span style={{fontSize:13,color:C.lt,fontWeight:500}}>{vals[f.name]||lockVals[f.name]||f.value||"—"}</span>
+                    </div>
+                  ):(
+                  <>
                   <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:6}}>
-                    <label style={{fontSize:13,fontWeight:600,color:isSkipped?C.mut:C.lt}}>{f.name}{isSkipped?" — skipped":""}</label>
+                    <label style={{fontSize:14,fontWeight:700,color:isSkipped?C.mut:C.lt}}>{f.name}{isSkipped?" — skipped":""}</label>
                     <div style={{display:"flex",gap:4,alignItems:"center"}}>
                       {f.voiceEnabled&&!isSkipped&&<span style={{fontSize:10,fontWeight:700,color:C.org,background:C.org+"22",padding:"2px 8px",borderRadius:4}}>VOICE</span>}
                       {!isSkipped&&vals[f.name]&&(
@@ -1626,19 +2000,26 @@ function ReportEditor({job, user, onBack, reportDate}){
                     </div>
                   </div>
                   {!isSkipped&&((()=>{
-                    // HARD RULE: notes/observations/comments fields ALWAYS render as a large textarea, never a single-line input
                     const notesKw=["notes","observations","comments","description","remarks"];
-                    const isNotesField=notesKw.some(k=>(f.name||"").toLowerCase().includes(k));
-                    const useTextarea=f.voiceEnabled||f.multiline||isNotesField;
+                    const isNotesField=notesKw.some(k=>fn.includes(k));
+                    // TYR: only Daily Activities gets a textarea; all others are single-line inputs
+                    const useTextarea=isTYR?isTyrActivities:(f.voiceEnabled||f.multiline||isNotesField);
+                    // TYR v4: Hours fields get inline number input
+                    if(isTyrHours)return(
+                      <input type="number" inputMode="decimal" value={vals[f.name]||""} onChange={e=>setVal(f.name,e.target.value)} aria-label={f.name} placeholder="0" style={{width:100,boxSizing:"border-box",padding:"10px 14px",background:C.inp,border:`1px solid ${C.brd}`,borderRadius:10,color:C.lt,fontSize:15,textAlign:"center"}}/>
+                    );
                     return useTextarea?(
-                      <textarea value={vals[f.name]||""} onChange={e=>setVal(f.name,e.target.value)} aria-label={f.name} placeholder="Tap here and use your keyboard mic to dictate..." rows={10} style={{width:"100%",boxSizing:"border-box",padding:"14px 16px",background:C.inp,border:`1px solid ${C.brd}`,borderRadius:10,color:C.txt,fontSize:15,resize:"vertical",minHeight:250,lineHeight:1.6,fontFamily:"inherit"}}/>
+                      <textarea value={vals[f.name]||""} onChange={e=>setVal(f.name,e.target.value)} aria-label={f.name} placeholder="Tap here and use your keyboard mic to dictate..." rows={6} style={{...fs,resize:"vertical",minHeight:140,lineHeight:1.6}}/>
                     ):(
                       <input type="text" value={vals[f.name]||""} onChange={e=>setVal(f.name,e.target.value)} aria-label={f.name} placeholder={"Enter "+f.name+"..."} style={fs}/>
                     );
                   })())}
+                  </>
+                  )}
                 </div>
               );
             })}
+          </div>
           </div>
         )}
 
@@ -1650,57 +2031,95 @@ function ReportEditor({job, user, onBack, reportDate}){
           </div>
         )}
 
-        {/* ── Photos ── */}
-        <div style={{marginBottom:20}}>
-          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:10}}>
-            <div style={{fontSize:12,fontWeight:700,color:C.org,textTransform:"uppercase",letterSpacing:1}}>Photos</div>
+        {/* ── Photos — card style ── */}
+        <div style={{...cardStyle}}>
+          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:14}}>
+            {sectionLabel("📷","PHOTOS",photos.length||null)}
             <div style={{display:"flex",gap:4}}>
               {layouts.map(({k,l})=>(
-                <button key={k} onClick={()=>setPhotoLayout(k)} style={{padding:"6px 10px",fontSize:11,fontWeight:700,borderRadius:6,cursor:"pointer",minHeight:32,background:photoLayout===k?C.org:"transparent",border:`1px solid ${photoLayout===k?C.org:C.brd}`,color:photoLayout===k?"#fff":C.mut}}>{l}</button>
+                <button key={k} onClick={()=>setPhotoLayout(k)} style={{padding:"6px 10px",fontSize:11,fontWeight:700,borderRadius:8,cursor:"pointer",minHeight:32,background:photoLayout===k?C.org:"transparent",border:`1px solid ${photoLayout===k?C.org:C.brd}`,color:photoLayout===k?"#fff":C.mut}}>{l}</button>
               ))}
             </div>
           </div>
 
           {/* Photo grid */}
           {photos.length>0&&(
-            <div style={{display:"grid",gridTemplateColumns:photoLayout==="1"?"1fr":photoLayout==="2"?"1fr 1fr":"1fr 1fr",gap:8,marginBottom:12}}>
+            <div style={{display:"grid",gridTemplateColumns:photoLayout==="1"?"1fr":photoLayout==="2"?"1fr 1fr":"1fr 1fr",gap:10,marginBottom:14}}>
               {photos.map(p=>{const aiKey="fr-"+p.id;return(
-                <div key={p.id} style={{position:"relative",borderRadius:8,overflow:"hidden",border:`1px solid ${C.brd}`,aspectRatio:photoLayout==="1"?"auto":"1"}}>
+                <div key={p.id} style={{position:"relative",borderRadius:12,overflow:"hidden",border:`1px solid ${C.brd}`,aspectRatio:photoLayout==="1"?"auto":"1"}}>
                   <img src={p.src} alt={p.name} style={{width:"100%",height:"100%",objectFit:"cover",display:"block"}}/>
-                  <button onClick={()=>setPhotos(prev=>prev.filter(x=>x.id!==p.id))} style={{position:"absolute",top:4,right:4,width:32,height:32,borderRadius:"50%",background:"rgba(0,0,0,0.7)",border:"none",color:"#fff",fontSize:14,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}>✕</button>
-                  {job.field_config?.aiPhotos&&<button disabled={aiDescribing[aiKey]||aiLimitReached} onClick={async()=>{const notesF=editFields.find(f=>f.voiceEnabled&&/notes|observations|comments/i.test(f.name));const desc=await describePhoto(p.src,`Job: ${job?.name||""}`,aiKey);if(desc&&notesF)setVals(v=>({...v,[notesF.name]:(v[notesF.name]?v[notesF.name]+"\n":"")+desc}));else if(desc)showToast("AI: "+desc.slice(0,80));}} style={{position:"absolute",bottom:4,left:4,padding:"3px 7px",borderRadius:5,background:aiLimitReached?"#666":aiDescribing[aiKey]?C.blu:C.org,border:"none",color:"#fff",fontSize:10,fontWeight:700,cursor:aiDescribing[aiKey]?"wait":aiLimitReached?"not-allowed":"pointer",opacity:aiDescribing[aiKey]||aiLimitReached?0.7:0.9}}>{aiDescribing[aiKey]?"···":aiLimitReached?"—":"AI"}</button>}
+                  <button onClick={()=>setPhotos(prev=>prev.filter(x=>x.id!==p.id))} style={{position:"absolute",top:6,right:6,width:34,height:34,borderRadius:"50%",background:"rgba(0,0,0,0.7)",border:"none",color:"#fff",fontSize:16,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}>✕</button>
+                  {job.field_config?.aiPhotos&&<button disabled={aiDescribing[aiKey]||aiLimitReached} onClick={async()=>{const notesF=editFields.find(f=>f.voiceEnabled&&/notes|observations|comments/i.test(f.name));const desc=await describePhoto(p.src,`Job: ${job?.name||""}`,aiKey);if(desc&&notesF)setVals(v=>({...v,[notesF.name]:(v[notesF.name]?v[notesF.name]+"\n":"")+desc}));else if(desc)showToast("AI: "+desc.slice(0,80));}} style={{position:"absolute",bottom:6,left:6,padding:"4px 8px",borderRadius:6,background:aiLimitReached?"#666":aiDescribing[aiKey]?C.blu:C.org,border:"none",color:"#fff",fontSize:11,fontWeight:700,cursor:aiDescribing[aiKey]?"wait":aiLimitReached?"not-allowed":"pointer",opacity:aiDescribing[aiKey]||aiLimitReached?0.7:0.9}}>{aiDescribing[aiKey]?"···":aiLimitReached?"—":"AI"}</button>}
                 </div>
               );})}
             </div>
           )}
 
-          {/* Two photo buttons */}
-          <div style={{display:"flex",gap:10}}>
-            <button onClick={()=>{photoRef.current?.click();}} style={{flex:1,padding:"14px 0",background:C.card,border:`1px solid ${C.brd}`,borderRadius:10,color:C.lt,fontSize:14,fontWeight:600,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",gap:8}}>
-              <span>📷</span> Add Photo
-            </button>
-          </div>
+          <button onClick={()=>{photoRef.current?.click();}} style={{width:"100%",padding:"18px",background:C.inp,border:`2px dashed ${C.brd}`,borderRadius:14,color:C.mut,fontSize:16,fontWeight:700,cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",gap:6}}>
+            <span style={{fontSize:28}}>📸</span>
+            <span>Tap to Add Photos</span>
+            <span style={{fontSize:12,color:C.mut+"99"}}>Take a photo or choose from gallery</span>
+          </button>
           <input ref={photoRef} type="file" accept="image/*" multiple onChange={handlePhoto} style={{display:"none"}}/>
-          <div style={{fontSize:11,color:C.mut,marginTop:8}}>Photos will display as {layouts.find(l=>l.k===photoLayout)?.l} in the final PDF</div>
+          <div style={{fontSize:12,color:C.mut,marginTop:8,textAlign:"center"}}>Photos display as {layouts.find(l=>l.k===photoLayout)?.l} in the final PDF</div>
         </div>
+
+        {/* ── Auto-filled & Locked Fields — pushed to bottom ── */}
+        {(()=>{
+          const autoFields=editFields.filter(f=>f.autoFill==="date"||f.autoFill==="increment"||f.autoFill==="name");
+          if(autoFields.length===0&&lockFields.length===0)return null;
+          return(
+            <div style={{...cardStyle}}>
+              {sectionLabel("🔒","AUTO-FILLED")}
+              {autoFields.map((f,i)=>(
+                <div key={f.name} style={{display:"flex",alignItems:"center",padding:"12px 0",borderBottom:i<autoFields.length-1||(lockFields.length>0)?`1px solid ${C.brd}`:"none"}}>
+                  <span style={{fontSize:15,color:C.mut,width:110,fontWeight:600}}>{f.name}</span>
+                  <span style={{fontSize:16,color:C.lt,fontWeight:600}}>{vals[f.name]||"—"}</span>
+                </div>
+              ))}
+              {lockFields.length>0&&(
+                <>
+                  {lockFields.map((f,i)=>(
+                    <div key={f.name} style={{display:"flex",alignItems:"center",padding:"12px 0",borderBottom:i<lockFields.length-1?`1px solid ${C.brd}`:"none"}}>
+                      <span style={{fontSize:15,color:C.mut,width:110,fontWeight:600}}>{f.name}</span>
+                      {lockEditing?(
+                        <div style={{flex:1,display:"flex",gap:8,alignItems:"center"}}>
+                          <input type="text" value={lockVals[f.name]||""} onChange={e=>setLockVal(f.name,e.target.value)} style={{...fs,flex:1,padding:"10px 12px",fontSize:14}}/>
+                          <button onClick={()=>unlockField(f.name)} style={{padding:"6px 12px",fontSize:12,fontWeight:700,borderRadius:8,border:`1px solid ${C.org}`,background:"transparent",color:C.org,cursor:"pointer",whiteSpace:"nowrap"}}>Unlock</button>
+                        </div>
+                      ):(
+                        <span style={{fontSize:16,color:C.lt,fontWeight:600}}>{lockVals[f.name]||f.value||"—"}</span>
+                      )}
+                    </div>
+                  ))}
+                  <div style={{display:"flex",justifyContent:"flex-end",marginTop:10}}>
+                    {!lockEditing?(
+                      <button onClick={()=>setLockEditing(true)} style={{padding:"6px 16px",fontSize:13,fontWeight:700,borderRadius:8,border:`1px solid ${C.brd}`,background:"transparent",color:C.org,cursor:"pointer"}}>Edit Locked</button>
+                    ):(
+                      <button onClick={saveLockEdits} style={{padding:"6px 16px",fontSize:13,fontWeight:700,borderRadius:8,border:`1px solid ${C.ok}`,background:C.ok,color:"#fff",cursor:"pointer"}}>Done</button>
+                    )}
+                  </div>
+                </>
+              )}
+            </div>
+          );
+        })()}
 
       </div>}
 
-      {/* Fixed bottom bar */}
+      {/* Fixed bottom bar — improved */}
       {!fieldMode&&(
-      <div style={{position:"fixed",bottom:0,left:0,right:0,padding:"12px 20px",borderTop:`1px solid ${C.brd}`,background:C.card,zIndex:100}}>
-        <div style={{maxWidth:600,margin:"0 auto",display:"flex",flexDirection:"column",gap:8}}>
+      <div style={{position:"fixed",bottom:0,left:0,right:0,padding:"14px 20px 20px",borderTop:`2px solid ${C.brd}`,background:C.card,zIndex:100,boxShadow:"0 -4px 20px rgba(0,0,0,0.4)"}}>
+        <div style={{maxWidth:600,margin:"0 auto",display:"flex",flexDirection:"column",gap:10}}>
           <div style={{display:"flex",gap:10}}>
-            {reportStatus!=="submitted"&&(
-              <button onClick={async()=>{await saveWorking();showToast("Draft saved");}} disabled={saving||submitting||viewLoading} style={{flex:1,padding:"14px 0",background:C.blu,border:"none",borderRadius:10,color:"#fff",fontSize:14,fontWeight:700,cursor:saving?"default":"pointer",opacity:saving?0.6:1,minHeight:44}}>
-                {saving?"Saving...":"Save Draft"}
+              <button onClick={async()=>{await saveWorking();showToast(reportStatus==="submitted"?"Changes saved":"Draft saved");}} disabled={saving||submitting||viewLoading} style={{flex:1,padding:"16px 0",background:C.inp,border:`1px solid ${C.brd}`,borderRadius:14,color:C.lt,fontSize:15,fontWeight:700,cursor:saving?"default":"pointer",opacity:saving?0.6:1,minHeight:48}}>
+                {saving?"Saving...":reportStatus==="submitted"?"Save Changes":"Save Draft"}
               </button>
-            )}
-            <button onClick={viewReport} disabled={viewLoading||submitting} style={{flex:1,padding:"14px 0",background:"transparent",border:`1px solid ${C.brd}`,borderRadius:10,color:C.lt,fontSize:14,fontWeight:700,cursor:viewLoading?"default":"pointer",opacity:viewLoading?0.6:1,minHeight:44}}>
+            <button onClick={viewReport} disabled={viewLoading||submitting} style={{flex:1,padding:"16px 0",background:"transparent",border:`1px solid ${C.brd}`,borderRadius:14,color:C.lt,fontSize:15,fontWeight:700,cursor:viewLoading?"default":"pointer",opacity:viewLoading?0.6:1,minHeight:48}}>
               {viewLoading?"Loading...":"View Report"}
             </button>
           </div>
-          <button onClick={submitReport} disabled={submitting||viewLoading} className="btn-o" style={{width:"100%",padding:"14px 0",background:C.org,border:"none",borderRadius:10,color:"#fff",fontSize:15,fontWeight:700,cursor:submitting?"default":"pointer",opacity:submitting?0.6:1,minHeight:44}}>
+          <button onClick={submitReport} disabled={submitting||viewLoading} className="btn-o" style={{width:"100%",padding:"16px 0",background:`linear-gradient(135deg, ${C.org} 0%, #d4631f 100%)`,border:"none",borderRadius:14,color:"#fff",fontSize:17,fontWeight:800,cursor:submitting?"default":"pointer",opacity:submitting?0.6:1,minHeight:52,boxShadow:`0 3px 12px ${C.org}66`,letterSpacing:"0.3px"}}>
             {submitting?"Submitting...":reportStatus==="submitted"?"Update & Resubmit":"Submit Report"}
           </button>
         </div>
