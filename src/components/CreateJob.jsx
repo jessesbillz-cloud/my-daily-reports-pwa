@@ -3,7 +3,7 @@ import { C } from '../constants/theme';
 import { db } from '../utils/db';
 import { AUTH_TOKEN, refreshAuthToken } from '../utils/auth';
 import { api } from '../utils/api';
-import { SB_URL, SB_KEY } from '../constants/supabase';
+import { SB_URL, SB_KEY, TYR_COMPANY_ID, ENHANCED_TYR_ID } from '../constants/supabase';
 import { askConfirm } from './ConfirmOverlay';
 import { extractPdfTextStructure, readAcroFormFields } from '../utils/auth';
 import { ensurePdfLib, ensureMammoth } from '../utils/pdf';
@@ -308,50 +308,26 @@ function CreateJob({user, onBack, onCreated}){
     setReportTitle(storedPattern||tpl.original_filename?.replace(/\.[^.]+$/,"")||tpl.name||"");
     setTplSaved(adjusted.length>0);
     setShowSaved(false);
-    // Download the template file — try multiple storage paths with auth
+    // Download the template file using central download function
     if(tpl.storage_path){
-        const isCompanyBucket=tpl.storage_path.startsWith("company-templates/");
         if(!AUTH_TOKEN){throw new Error("Authentication required to download template");}
-        const authHeaders={apikey:SB_KEY,Authorization:`Bearer ${AUTH_TOKEN}`};
-        // Build ordered list of download URLs to try
-        const urls=[];
-        if(isCompanyBucket){
-          const path=tpl.storage_path.replace("company-templates/","");
-          urls.push({url:`${SB_URL}/storage/v1/object/company-templates/${path}`,label:"company-templates (auth)"});
-          urls.push({url:`${SB_URL}/storage/v1/object/public/company-templates/${path}`,label:"company-templates (public)",noAuth:true});
-        }else{
-          // Non-prefixed path — try report-source-docs first, then company-templates as fallback
-          urls.push({url:`${SB_URL}/storage/v1/object/report-source-docs/${tpl.storage_path}`,label:"report-source-docs (auth)"});
-          urls.push({url:`${SB_URL}/storage/v1/object/company-templates/${tpl.storage_path}`,label:"company-templates (auth)"});
-          urls.push({url:`${SB_URL}/storage/v1/object/public/company-templates/${tpl.storage_path}`,label:"company-templates (public)",noAuth:true});
-        }
-        let resp=null;
-        for(const attempt of urls){
-          console.log("[useSavedTemplate] Trying download:",attempt.label,attempt.url);
-          try{
-            resp=attempt.noAuth?await fetch(attempt.url):await fetch(attempt.url,{headers:authHeaders});
-            console.log("[useSavedTemplate] Download status:",resp.status,"from",attempt.label);
-            if(resp.ok)break;
-          }catch(fetchErr){console.warn("[useSavedTemplate] Fetch error from",attempt.label,":",fetchErr.message);resp=null;}
-        }
-        if(resp&&resp.ok){
-          const blob=await resp.blob();
+        try{
+          const buf=await db.downloadTemplateBytes(tpl.storage_path);
+          const blob=new Blob([buf]);
           const ext=tpl.file_type||tpl.original_filename?.split(".").pop().toLowerCase()||"pdf";
-          const file=new File([blob],tpl.original_filename||tpl.file_name||`template.${ext}`,{type:blob.type});
+          const file=new File([blob],tpl.original_filename||tpl.file_name||`template.${ext}`,{type:ext==="pdf"?"application/pdf":"application/octet-stream"});
           setTf(file);
-          const u8=new Uint8Array(await blob.arrayBuffer());
+          const u8=new Uint8Array(buf);
           const chunks=[];for(let i=0;i<u8.length;i+=8192)chunks.push(String.fromCharCode.apply(null,u8.subarray(i,i+8192)));
           setTfB64(btoa(chunks.join("")));
           // If no fields were loaded (company template without field_config), auto-parse the file
           if(adjusted.length===0){
-            const buf=await blob.arrayBuffer();
             if(ext==="pdf")await parseFields(buf,file.name);
             else if(ext==="docx"||ext==="doc")await parseDocxFields(buf,file.name);
           }
-        }else{
-          const errBody=resp?await resp.text().catch(()=>""):"";
-          console.error("[useSavedTemplate] All download attempts failed. Last status:",resp?.status,errBody);
-          setErr("Could not load template file"+(resp?" ("+resp.status+")":"")+". Try uploading the file manually.");
+        }catch(dlErr){
+          console.error("[useSavedTemplate] Download failed:",dlErr);
+          setErr("Could not load template file. Try uploading the file manually.");
         }
     }else if(adjusted.length===0){
       setErr("This template doesn't have a file yet. Upload a PDF to get started.");
@@ -731,7 +707,14 @@ function CreateJob({user, onBack, onCreated}){
                 </div>
               </div>
               <div style={{padding:8}}>
-                {fields.map(f=>(
+                {fields.filter(f=>{
+                  // TYR: hide contractor/MP/manpower/RFI/equipment/trade fields — handled by dedicated sections in ReportEditor
+                  if(jobSelectedCompany?.id===TYR_COMPANY_ID||jobSelectedCompany?.id===ENHANCED_TYR_ID){
+                    const fn=(f.name||"").toLowerCase();
+                    if(/contractor|^mp$|^mp[:\s]|manpower|crew\s*size|rfis|ccds|asis|submittal|equipment|trade/i.test(fn))return false;
+                  }
+                  return true;
+                }).map(f=>(
                   <div key={f.name} style={{padding:"10px 12px",background:f.mode==="lock"&&!f.lockAfterCreate?C.bg:C.card,border:`1px solid ${f.lockAfterCreate?C.org:C.brd}`,borderRadius:8,marginBottom:6,opacity:f.mode==="lock"&&!f.lockAfterCreate?0.7:1}}>
                     {/* Row 1: Field name + mode buttons */}
                     <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:8}}>

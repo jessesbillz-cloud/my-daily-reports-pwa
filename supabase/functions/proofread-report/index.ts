@@ -68,32 +68,35 @@ serve(async (req) => {
       );
     }
 
-    // Format fields as numbered list for the model
+    // Format fields — use ||| delimiter so AI doesn't confuse field name with value
     const fieldText = fieldEntries
-      .map(([name, val], i) => `[${i}] ${name}: ${val}`)
+      .map(([name, val], i) => `[${i}] ||| ${val}`)
       .join("\n");
 
-    const systemPrompt = `You are a proofreader for construction daily inspection reports. Your ONLY job is to fix errors. Do NOT rewrite, rephrase, restructure, or improve the text.
+    const systemPrompt = `You proofread construction inspection report text. You make MINIMAL corrections only.
 
-Fix ONLY these issues:
-- Spelling errors (including voice-to-text mistakes like "steal" → "steel", "pored" → "poured", "site" ↔ "sight")
-- Missing or incorrect capitalization (start of sentences, proper nouns)
-- Missing punctuation (periods at end of sentences, commas in lists)
-- Obvious grammar errors from voice dictation (wrong word, missing word, duplicate word)
-- Abbreviation consistency (keep industry shorthand like CMU, GPR, rebar, MEP as-is)
+You MUST keep the original words, phrasing, and sentence structure. Only fix:
+- Misspelled words (e.g. "blcoks" → "blocks", "pored" → "poured")
+- Missing capital letter at start of a sentence
+- Missing period at end of a sentence
+- Obviously wrong word from voice-to-text (e.g. "steal beams" → "steel beams")
 
-Do NOT change:
-- Writing style, tone, or word choice (if the meaning is clear, leave it)
-- Sentence structure or order
-- Technical terms, trade names, measurements, numbers
-- Field notes shorthand or informal phrasing (inspectors write brief notes, not essays)
-- Content that is already correct
+You must NOT:
+- Rewrite or rephrase ANY sentence
+- Replace words with synonyms (e.g. do NOT change "I read emails" to "Reviewed communications")
+- Add new content or sentences that the user did not write
+- Remove sentences or shorten the text
+- Change the tone, style, or vocabulary
+- Include anything except the corrected text value in your output
 
-Response format — return ONLY a JSON object mapping field index to corrected text. Only include fields that had corrections. If nothing needed fixing, return {}.
+The input uses format: [index] ||| text value
+Return ONLY the text value (the part after |||), not the index or delimiter.
+
+Return a JSON object mapping index to corrected text. Only include entries you changed. If nothing needs fixing, return {}.
 
 Example input:
-[0] General: the concrete was pored today at the east wing. rebar inspection passed
-[1] Activities: installed 12 CMU blcoks on the 3rd floor north wall
+[0] ||| the concrete was pored today at the east wing. rebar inspection passed
+[1] ||| installed 12 CMU blcoks on the 3rd floor north wall
 
 Example output:
 {"0":"The concrete was poured today at the east wing. Rebar inspection passed.","1":"Installed 12 CMU blocks on the 3rd floor north wall."}`;

@@ -538,7 +538,7 @@ function CompaniesTab({hGet,h}){
               try{
                 const ext=file.name.split(".").pop().toLowerCase();
                 const u8=new Uint8Array(await file.arrayBuffer());
-                const storagePath=selCo.id+"/"+Date.now()+"_"+file.name;
+                const storagePath=selCo.name.trim().replace(/\s+/g," ")+"/"+Date.now()+"_"+file.name;
                 const ct=ext==="pdf"?"application/pdf":"application/vnd.openxmlformats-officedocument.wordprocessingml.document";
                 let upR=await fetch(SB_URL+"/storage/v1/object/company-templates/"+storagePath,{method:"POST",headers:{"apikey":SB_KEY,"Authorization":"Bearer "+session.access_token,"Content-Type":ct},body:new Blob([u8],{type:ct})});
                 if(!upR.ok)upR=await fetch(SB_URL+"/storage/v1/object/company-templates/"+storagePath,{method:"PUT",headers:{"apikey":SB_KEY,"Authorization":"Bearer "+session.access_token,"Content-Type":ct},body:new Blob([u8],{type:ct})});
@@ -775,7 +775,7 @@ function TemplatesTab({hGet,h,session}){
     try{
       const ext=file.name.split(".").pop().toLowerCase();
       const u8=new Uint8Array(await file.arrayBuffer());
-      const storagePath=`${selCo.id}/${Date.now()}_${file.name}`;
+      const storagePath=`${selCo.name.trim().replace(/\s+/g," ")}/${Date.now()}_${file.name}`;
       const ct=ext==="pdf"?"application/pdf":"application/vnd.openxmlformats-officedocument.wordprocessingml.document";
       addLog("Uploading to company-templates...","info");
       let upR=await fetch(`${SB_URL}/storage/v1/object/company-templates/${storagePath}`,{method:"POST",headers:{"apikey":SB_KEY,"Authorization":"Bearer "+session.access_token,"Content-Type":ct},body:new Blob([u8],{type:ct})});

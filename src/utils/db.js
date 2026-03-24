@@ -111,37 +111,39 @@ class Database {
     await this._ensureFresh()
     const p = `${uid}/${jid}/template.${ext || "pdf"}`
     const ct = blob.type || "application/octet-stream"
+    const h = {
+      apikey: SB_KEY,
+      Authorization: `Bearer ${getAuthToken()}`,
+      "Content-Type": ct,
+      "x-upsert": "true"
+    }
+    console.log("[ulTpl] uploading", p, "size:", blob.size, "type:", ct)
+
+    // Try POST with upsert
     let r = await fetch(`${SB_URL}/storage/v1/object/report-source-docs/${p}`, {
-      method: "POST",
-      headers: {
-        apikey: SB_KEY,
-        Authorization: `Bearer ${getAuthToken()}`,
-        "Content-Type": ct
-      },
-      body: blob
+      method: "POST", headers: h, body: blob
     })
 
+    // If POST fails (duplicate/policy), fall back to PUT (update)
     if (!r.ok) {
+      const postErr = await r.text().catch(() => "")
+      console.log("[ulTpl] POST failed:", r.status, postErr, "— trying PUT")
       r = await fetch(`${SB_URL}/storage/v1/object/report-source-docs/${p}`, {
-        method: "PUT",
-        headers: {
-          apikey: SB_KEY,
-          Authorization: `Bearer ${getAuthToken()}`,
-          "Content-Type": ct
-        },
-        body: blob
+        method: "PUT", headers: h, body: blob
       })
-
-      if (!r.ok) {
-        const errBody = await r.text().catch(() => "")
-        throw new Error(
-          "Template upload failed" +
-          (r.status === 401 ? " — session expired, please sign out and back in" : "") +
-          (r.status === 413 ? " — file too large" : ": " + r.status + " " + (errBody || ""))
-        )
-      }
     }
 
+    if (!r.ok) {
+      const errBody = await r.text().catch(() => "")
+      console.error("[ulTpl] both POST+PUT failed:", r.status, errBody)
+      throw new Error(
+        "Template upload failed" +
+        (r.status === 401 ? " — session expired, please sign out and back in" : "") +
+        (r.status === 413 ? " — file too large" : ": " + r.status + " " + (errBody || ""))
+      )
+    }
+
+    console.log("[ulTpl] success:", p)
     return p
   }
 
@@ -401,6 +403,32 @@ class Database {
     return d[0] || null
   }
 
+  async getJobPhotos(jobId) {
+    await this._ensureFresh()
+    try {
+      // Fetch reports in batches to avoid loading all content at once
+      // Only content column contains photos — limit to 20 most recent reports
+      const r = await fetch(
+        `${SB_URL}/rest/v1/reports?select=id,report_date,report_number,content&job_id=eq.${jobId}&order=report_date.desc&limit=20`,
+        { headers: this._h() }
+      )
+      if (!r.ok) return []
+      const reports = await r.json()
+      const photos = []
+      for (const rpt of reports) {
+        try {
+          const c = typeof rpt.content === "string" ? JSON.parse(rpt.content) : rpt.content
+          if (c && Array.isArray(c.photos)) {
+            for (const p of c.photos) {
+              if (p.src) photos.push({ id: p.id || Date.now() + Math.random(), src: p.src, name: p.name || "", report_date: rpt.report_date, report_number: rpt.report_number })
+            }
+          }
+        } catch (e) { /* skip unparseable content */ }
+      }
+      return photos
+    } catch (e) { console.error("getJobPhotos:", e); return [] }
+  }
+
   async deleteReport(reportId, jobId, reportDate) {
     await this._ensureFresh()
     const r = await fetch(`${SB_URL}/rest/v1/reports?id=eq.${reportId}`, {
@@ -451,6 +479,38 @@ class Database {
     return d[0] || null
   }
 
+  // Search a storage bucket for a file by name (searches all folders)
+  // Matches exact name OR files ending with _fileName (timestamp prefix convention)
+  async findFileInBucket(bucket, fileName) {
+    const authH = { apikey: SB_KEY, Authorization: `Bearer ${getAuthToken()}`, "Content-Type": "application/json" }
+    const matchesFile = (f) => f.name === fileName || f.name.endsWith("_" + fileName)
+    // List root folders first
+    const foldersR = await fetch(`${SB_URL}/storage/v1/object/list/${bucket}`, {
+      method: "POST", headers: authH, body: JSON.stringify({ prefix: "", limit: 200 })
+    })
+    if (!foldersR.ok) return null
+    const items = await foldersR.json()
+    console.log("[findFile] bucket:", bucket, "looking for:", fileName, "root items:", items.length)
+    // Check root level files
+    const rootMatch = items.find(i => matchesFile(i) && i.metadata !== null)
+    if (rootMatch) return rootMatch.name
+    // Search inside each folder
+    for (const item of items) {
+      if (item.id === null || item.metadata === null) {
+        // This is a folder — search inside it
+        const subR = await fetch(`${SB_URL}/storage/v1/object/list/${bucket}`, {
+          method: "POST", headers: authH, body: JSON.stringify({ prefix: item.name + "/", limit: 200 })
+        })
+        if (!subR.ok) continue
+        const subItems = await subR.json()
+        console.log("[findFile] folder:", item.name, "files:", subItems.map(f => f.name))
+        const match = subItems.find(f => matchesFile(f))
+        if (match) return item.name + "/" + match.name
+      }
+    }
+    return null
+  }
+
   async downloadTemplateBytes(storagePath) {
     await this._ensureFresh()
     if (this._tplBytesCache[storagePath]) {
@@ -461,29 +521,38 @@ class Database {
     const authH = () => ({ apikey: SB_KEY, Authorization: `Bearer ${getAuthToken()}` })
     let r
 
-    if (isCompany) {
-      const path = storagePath.replace("company-templates/", "")
-      // Try authenticated first (bucket is private), then public fallback
-      r = await fetch(`${SB_URL}/storage/v1/object/company-templates/${path}`, { headers: authH() })
-      if (!r.ok) r = await fetch(`${SB_URL}/storage/v1/object/public/company-templates/${path}`)
-    } else {
-      // Try report-source-docs first (user's own files), then company-templates as fallback
-      r = await fetch(`${SB_URL}/storage/v1/object/report-source-docs/${storagePath}`, { headers: authH() })
-      if (r.status === 401 || r.status === 403) {
-        const refreshed = await refreshAuthToken()
-        if (refreshed) {
-          r = await fetch(`${SB_URL}/storage/v1/object/report-source-docs/${storagePath}`, { headers: authH() })
-        }
-      }
-      // If still failed, try company-templates bucket (non-prefixed company template paths)
-      if (!r.ok) {
-        console.log("[db] report-source-docs failed for", storagePath, "— trying company-templates bucket")
-        r = await fetch(`${SB_URL}/storage/v1/object/company-templates/${storagePath}`, { headers: authH() })
-        if (!r.ok) r = await fetch(`${SB_URL}/storage/v1/object/public/company-templates/${storagePath}`)
+    // Build the raw path (strip bucket prefix)
+    const rawPath = isCompany ? storagePath.replace("company-templates/", "") : storagePath
+    const encodedPath = rawPath.split("/").map(s => encodeURIComponent(s)).join("/")
+    console.log("[downloadTpl] storagePath:", storagePath, "rawPath:", rawPath, "encoded:", encodedPath)
+
+    // Try all combinations: company-templates (auth + public) and report-source-docs
+    const urls = [
+      { url: `${SB_URL}/storage/v1/object/company-templates/${encodedPath}`, auth: true },
+      { url: `${SB_URL}/storage/v1/object/public/company-templates/${encodedPath}`, auth: false },
+      { url: `${SB_URL}/storage/v1/object/report-source-docs/${encodedPath}`, auth: true }
+    ]
+
+    for (const { url, auth } of urls) {
+      r = await fetch(url, auth ? { headers: authH() } : {})
+      console.log("[downloadTpl]", r.status, url)
+      if (r.ok) break
+    }
+
+    // If all failed, search the bucket for the file by name
+    if (!r || !r.ok) {
+      const fileName = rawPath.split("/").pop()
+      console.log("[downloadTpl] direct paths failed — searching bucket for:", fileName)
+      const found = await this.findFileInBucket("company-templates", fileName)
+      if (found) {
+        const foundEncoded = found.split("/").map(s => encodeURIComponent(s)).join("/")
+        console.log("[downloadTpl] found file at:", found)
+        r = await fetch(`${SB_URL}/storage/v1/object/company-templates/${foundEncoded}`, { headers: authH() })
+        if (!r.ok) r = await fetch(`${SB_URL}/storage/v1/object/public/company-templates/${foundEncoded}`)
       }
     }
 
-    if (!r.ok) throw new Error("Could not download template (" + r.status + "). Try signing out and back in.")
+    if (!r || !r.ok) throw new Error("Could not download template (" + (r ? r.status : "no response") + "). File may be missing from storage.")
 
     const buf = await r.arrayBuffer()
     this._tplBytesCache[storagePath] = new Uint8Array(buf)

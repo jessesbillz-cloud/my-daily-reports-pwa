@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { C } from '../constants/theme';
 import { db } from '../utils/db';
 import { AUTH_TOKEN, refreshAuthToken, authDiag, preflightCheck } from '../utils/auth';
-import { SB_URL, TYR_COMPANY_ID } from '../constants/supabase';
+import { SB_URL, TYR_COMPANY_ID, ENHANCED_TYR_ID } from '../constants/supabase';
 import { api } from '../utils/api';
 import { ensurePdfLib, ensurePdfJs, ensureMammoth } from '../utils/pdf';
 import { askConfirm } from './ConfirmOverlay';
@@ -128,15 +128,19 @@ function ReportEditor({job, user, onBack, reportDate}){
 
   const [reportStatus,setReportStatus]=useState(null);
   // ── TYR v3: scoped contractor picker ──
-  const isTYR=job.company_id===TYR_COMPANY_ID;
+  const isTYR=job.company_id===TYR_COMPANY_ID;           // Original TYR template
+  const isEnhancedTYR=job.company_id===ENHANCED_TYR_ID;  // V5 fixed template
+  const isAnyTYR=isTYR||isEnhancedTYR;                   // Shared TYR behavior
   const [jobContractors,setJobContractors]=useState([]);
   const [selectedContractors,setSelectedContractors]=useState([]);
   const toggleContractor=(name)=>{setSelectedContractors(p=>{const exists=p.find(c=>c.company_name===name);if(exists)return p.filter(c=>c.company_name!==name);return[...p,{company_name:name,manpower:0,hours_regular:0,hours_overtime:0}];});};
   const updateContractorManpower=(name,val)=>{setSelectedContractors(p=>p.map(c=>c.company_name===name?{...c,manpower:parseInt(val)||0}:c));};
   const updateContractorHours=(name,field,val)=>{setSelectedContractors(p=>p.map(c=>c.company_name===name?{...c,[field]:parseFloat(val)||0}:c));};
-  useEffect(()=>{if(!isTYR)return;(async()=>{try{const c=await db.getJobContractors(job.id);setJobContractors(c);}catch(e){console.error("Load contractors:",e);}})();},[job.id,isTYR]);
+  const updateContractorEquipment=(name,val)=>{setSelectedContractors(p=>p.map(c=>c.company_name===name?{...c,equipment:val}:c));};
+  const updateContractorTrade=(name,val)=>{setSelectedContractors(p=>p.map(c=>c.company_name===name?{...c,trade:val}:c));};
+  useEffect(()=>{if(!isAnyTYR)return;(async()=>{try{const c=await db.getJobContractors(job.id);setJobContractors(c);}catch(e){console.error("Load contractors:",e);}})();},[job.id,isAnyTYR]);
   // TYR v4: Auto-fill general statement from job settings into matching field
-  useEffect(()=>{if(!isTYR||!job.general_statement)return;const gsField=editFields.find(f=>/general.?statement/i.test(f.name||""));if(gsField&&!vals[gsField.name]){setVals(p=>({...p,[gsField.name]:job.general_statement}));}},[ isTYR,editFields.length]);
+  useEffect(()=>{if(!isAnyTYR||!job.general_statement)return;const gsField=editFields.find(f=>/general.?statement/i.test(f.name||""));if(gsField&&!vals[gsField.name]){setVals(p=>({...p,[gsField.name]:job.general_statement}));}},[ isAnyTYR,editFields.length]);
 
   // TYR v5: Weather toggle + auto-fetch
   const [tyrWeatherOn,setTyrWeatherOn]=useState(false);
@@ -212,7 +216,7 @@ function ReportEditor({job, user, onBack, reportDate}){
             if(c.lockVals)setLockVals(p=>({...p,...c.lockVals}));
             if(c.photos)setPhotos(c.photos);
             if(c.photoLayout)setPhotoLayout(c.photoLayout);
-            if(isTYR&&c.contractors)setSelectedContractors(c.contractors);
+            if(isAnyTYR&&c.contractors)setSelectedContractors(c.contractors);
             if(c.sigTimestamps)setSigTimestamps(c.sigTimestamps);
             // Apply notes dedup to restored fields (fixes old drafts saved with duplicates)
             if(c.lockFields){const editHasN=(c.editFields||initEdit).some(f=>isNotes(f.name));setLockFields(editHasN?c.lockFields.filter(f=>!isNotes(f.name)):dedupNotes(c.lockFields));}
@@ -252,6 +256,8 @@ function ReportEditor({job, user, onBack, reportDate}){
   },[]);
 
   const [fieldMode,setFieldMode]=useState(false);
+  const [contractorsOpen,setContractorsOpen]=useState(true);
+  const [autoFilledOpen,setAutoFilledOpen]=useState(false);
   const fieldPhotoRef=useRef(null);
   const [cameraOpen,setCameraOpen]=useState(false);
   const videoRef=useRef(null);
@@ -393,7 +399,7 @@ function ReportEditor({job, user, onBack, reportDate}){
       // Limit photo data in save payload to prevent oversized JSON / frozen UI
       // Keep only src + name (strip any extra metadata), and cap at 20 photos
       const safePhotos=photos.slice(0,20).map(p=>({id:p.id,src:p.src,name:p.name}));
-      const content={vals,lockVals,photos:safePhotos,photoLayout,lockFields,editFields,sigTimestamps,...(isTYR?{contractors:selectedContractors}:{})};
+      const content={vals,lockVals,photos:safePhotos,photoLayout,lockFields,editFields,sigTimestamps,...(isAnyTYR?{contractors:selectedContractors}:{})};
       let contentStr;
       try{contentStr=JSON.stringify(content);}catch(e){
         console.error("JSON serialize failed:",e);
@@ -515,9 +521,8 @@ function ReportEditor({job, user, onBack, reportDate}){
     });
   };
 
-  // ── TYR v5: Draw ALL TYR fields on canvas preview at hardcoded positions ──
+  // ── Enhanced TYR (V5): Draw ALL fields on canvas preview at hardcoded positions ──
   const drawTyrFieldsOnCanvas=(ctx,fields,scale)=>{
-    if(!isTYR)return;
     const v2={};fields.forEach(f=>{if(f.val)v2[(f.name||"").toLowerCase().trim()]=f.val;});
     const wordMatch2=(fn,kw)=>{const re=new RegExp("(^|[\\s_\\-\\.:#])"+kw.replace(/[.*+?^${}()|[\]\\]/g,"\\$&"),"i");return re.test(fn);};
     const fv=(...keys)=>{for(const k of keys){for(const[fn,val]of Object.entries(v2)){if(wordMatch2(fn,k))return val;}}return"";};
@@ -540,11 +545,21 @@ function ReportEditor({job, user, onBack, reportDate}){
       const leftPad=6*scale;const maxW=w*scale-leftPad-4*scale;
       const textStartY=topY*scale+fSz;
       const bottomPx=bottomY*scale;
-      const words=text.replace(/\n/g," ").split(" ").filter(Boolean);
-      const lines=[];let cur="";
-      words.forEach(wd=>{const test=cur?cur+" "+wd:wd;if(ctx.measureText(test).width>maxW&&cur){lines.push(cur);cur=wd;}else cur=test;});
-      if(cur)lines.push(cur);
-      lines.forEach((ln,i)=>{const ly=textStartY+i*fSz*1.3;if(ly<bottomPx)ctx.fillText(ln,x*scale+leftPad,ly);});
+      const rawLines=text.split(/\n/).filter(l=>l.trim());
+      const useBullets=rawLines.length>1;
+      const bullet="\u2022  ";const bulletW=useBullets?ctx.measureText(bullet).width:0;
+      const lines=[];
+      rawLines.forEach(rl=>{
+        const clean=rl.replace(/^[\-\•\*]\s*/,"").trim();if(!clean)return;
+        const words=clean.split(" ");let cur="";let first=true;
+        words.forEach(wd=>{const test=cur?cur+" "+wd:wd;if(ctx.measureText(test).width>(maxW-bulletW)&&cur){lines.push({text:first&&useBullets?bullet+cur:cur,xOff:first?leftPad:leftPad+bulletW,newBullet:first});first=false;cur=wd;}else cur=test;});
+        if(cur)lines.push({text:first&&useBullets?bullet+cur:cur,xOff:first?leftPad:leftPad+bulletW,newBullet:first});
+      });
+      // 1.3 line spacing within a bullet, double space (fSz*2) between bullets
+      let yOff=0;lines.forEach((ln,i)=>{
+        if(i>0)yOff+=(ln.newBullet&&useBullets)?fSz*2.6:fSz*1.3;
+        const ly=textStartY+yOff;if(ly<bottomPx)ctx.fillText(ln.text,x*scale+ln.xOff,ly);
+      });
     };
     // Header fields (bold)
     cell(fv("district"),109.3,125.2,190.6,rh,sz,true);
@@ -574,9 +589,116 @@ function ReportEditor({job, user, onBack, reportDate}){
     }
   };
 
-  // ── TYR v5: Draw contractor table on canvas preview — exact template coordinates ──
+  // ── TYR Original: Draw ALL fields on canvas at hardcoded positions (original template layout) ──
+  const drawTyrOriginalFieldsOnCanvas=(ctx,fields,scale)=>{
+    const v2={};fields.forEach(f=>{if(f.val)v2[(f.name||"").toLowerCase().trim()]=f.val;});
+    const wordMatch2=(fn,kw)=>{const re=new RegExp("(^|[\\s_\\-\\.:#])"+kw.replace(/[.*+?^${}()|[\]\\]/g,"\\$&"),"i");return re.test(fn);};
+    const fv=(...keys)=>{for(const k of keys){for(const[fn,val]of Object.entries(v2)){if(wordMatch2(fn,k))return val;}}return"";};
+    const fv2=(a,b)=>{for(const[fn,val]of Object.entries(v2)){if(wordMatch2(fn,a)&&wordMatch2(fn,b))return val;}return"";};
+    const sz=10*scale;const szSm=9*scale;const rh=14.8;
+    ctx.fillStyle="#000000";
+    // Helper: draw single-line cell with auto-shrink
+    const cell=(text,x,topY,w,h,useSz,bold)=>{
+      if(!text)return;const s=String(text);const fSz=useSz||sz;
+      ctx.font=(bold?"bold ":"")+fSz+"px Helvetica, Arial, sans-serif";
+      let tw=ctx.measureText(s).width;let drawSz=fSz;
+      if(w&&tw>w-6){drawSz=Math.max(6*scale,fSz*(w-6*scale)/tw);ctx.font=(bold?"bold ":"")+drawSz+"px Helvetica, Arial, sans-serif";}
+      const textY=topY*scale+(h*scale+drawSz)/2-drawSz*0.15;
+      ctx.fillText(s,(x+3)*scale,textY);
+    };
+    // Helper: draw multiline wrapped text on canvas
+    const multi=(text,x,topY,w,bottomY,useSz)=>{
+      if(!text)return;const fSz=useSz||sz;
+      ctx.font=fSz+"px Helvetica, Arial, sans-serif";
+      const leftPad=6*scale;const maxW=w*scale-leftPad-4*scale;
+      const textStartY=topY*scale+fSz;
+      const bottomPx=bottomY*scale;
+      const rawLines=text.split(/\n/).filter(l=>l.trim());
+      const useBullets=rawLines.length>1;
+      const bullet="\u2022  ";const bulletW=useBullets?ctx.measureText(bullet).width:0;
+      const lines=[];
+      rawLines.forEach(rl=>{
+        const clean=rl.replace(/^[\-\•\*]\s*/,"").trim();if(!clean)return;
+        const words=clean.split(" ");let cur="";let first=true;
+        words.forEach(wd=>{const test=cur?cur+" "+wd:wd;if(ctx.measureText(test).width>(maxW-bulletW)&&cur){lines.push({text:first&&useBullets?bullet+cur:cur,xOff:first?leftPad:leftPad+bulletW,newBullet:first});first=false;cur=wd;}else cur=test;});
+        if(cur)lines.push({text:first&&useBullets?bullet+cur:cur,xOff:first?leftPad:leftPad+bulletW,newBullet:first});
+      });
+      let yOff=0;lines.forEach((ln,i)=>{
+        if(i>0)yOff+=(ln.newBullet&&useBullets)?fSz*2.6:fSz*1.3;
+        const ly=textStartY+yOff;if(ly<bottomPx)ctx.fillText(ln.text,x*scale+ln.xOff,ly);
+      });
+    };
+    // ── Header fields (bold) — original template positions ──
+    cell(fv("district"),109.3,127.5,190.6,rh,sz,true);
+    cell(fv2("project","name"),424.4,127.5,164.1,rh,sz,true);
+    // Address — merged cell spanning full width, taller row (h=27.5)
+    cell(fv("address"),109.3,144.5,474.2,27.5,sz,true);
+    cell(fv("dsa"),109.3,174.2,190.6,rh,sz,true);
+    cell(fv("tyr project","project #","project#"),424.4,174.2,164.1,rh,sz,true);
+    cell(fv("date"),109.3,191.2,190.6,rh,sz,true);
+    cell(fv("weather"),424.4,191.2,164.1,rh,szSm,true);
+    // Hours row (not bold, taller row h=27.5 but draw in first sub-row)
+    cell(fv("reg"),109.3,208.2,100.5,rh,sz,false);
+    cell(fv("ot"),316.4,208.2,96.6,rh,sz,false);
+    cell(fv("dt"),523.5,208.2,65.0,rh,sz,false);
+    // ── General (cream box) ──
+    multi(fv("general"),25.2,258.4,562.0,286.4,sz);
+    // ── Daily Activities (cream content box below label row) ──
+    multi(fv("activit"),25.2,369.9,562.0,429.9,sz);
+    // ── Single-line bottom fields ──
+    cell(fv("inspection","request"),135,432.1,452,rh,szSm,false);
+    cell(fv("rfi"),55,449.2,245,rh,szSm,false);
+    cell(fv("submittal"),370,449.2,217,rh,szSm,false);
+    cell(fv("ccd"),55,466.2,245,rh,szSm,false);
+    cell(fv("asi"),345,466.2,242,rh,szSm,false);
+    cell(fv("site visit"),80,483.3,507,rh,szSm,false);
+    cell(fv("note","comment"),140,500.3,447,rh,szSm,false);
+    // ── Signature at bottom ──
+    const sigEnabled=job.field_config?.digitalSignature!==false;
+    const sigVal=fv("signature","inspector")||user?.user_metadata?.full_name||user?.email?.split("@")[0]||"";
+    if(sigEnabled&&sigVal){
+      ctx.font=(8*scale)+"px Helvetica, Arial, sans-serif";
+      ctx.fillStyle="#1a1a1a";
+      ctx.fillText("Signed by "+sigVal,25*scale,575*scale);
+      ctx.font=(5.5*scale)+"px Helvetica, Arial, sans-serif";
+      ctx.fillStyle="#666666";
+      ctx.fillText("powered by My Daily Reports",25*scale,583*scale);
+      ctx.fillStyle="#000000";
+    }
+  };
+
+  // ── TYR Original: Draw contractor table on canvas — 4-column grid ──
+  const drawTyrOriginalContractorOnCanvas=(ctx,scale)=>{
+    if(selectedContractors.length===0)return;
+    const sz=9*scale;
+    // 4-column layout: Name | Manpower | Equipment | Trade
+    const colX=[25.2,181.2,334.0,471.6];
+    const colW=[156,153,138,119]; // approximate widths between dividers
+    // 3 data rows
+    const rowTops=[305.7,322.8,339.8];
+    ctx.fillStyle="#000000";
+    ctx.font=sz+"px Helvetica, Arial, sans-serif";
+    selectedContractors.forEach((c,i)=>{
+      if(i>=rowTops.length)return;
+      const textY=rowTops[i]*scale+sz+2*scale;
+      // Name
+      const name=c.company_name||"";
+      let nameSz=sz;
+      if(ctx.measureText(name).width>colW[0]*scale-6){nameSz=Math.max(5*scale,sz*(colW[0]*scale-6)/ctx.measureText(name).width);ctx.font=nameSz+"px Helvetica, Arial, sans-serif";}
+      ctx.fillText(name,(colX[0]+3)*scale,textY);
+      ctx.font=sz+"px Helvetica, Arial, sans-serif";
+      // MP
+      ctx.fillText(String(c.manpower||0),(colX[1]+3)*scale,textY);
+      // Equipment
+      ctx.fillText(c.equipment||"",(colX[2]+3)*scale,textY);
+      // Trade
+      ctx.fillText(c.trade||"",(colX[3]+3)*scale,textY);
+    });
+  };
+
+  // ── Enhanced TYR (V5): Draw contractor table on canvas preview — exact template coordinates ──
   const drawContractorTableOnCanvas=(ctx,scale,pageH)=>{
-    if(!isTYR||selectedContractors.length===0)return;
+    if(selectedContractors.length===0)return;
     const sz=10*scale;
     // Template grey box columns (pdfplumber top-left coords, scaled)
     const leftNameX=25.2*scale;
@@ -660,6 +782,7 @@ function ReportEditor({job, user, onBack, reportDate}){
       await ensurePdfJs();
       if(!window.pdfjsLib)throw new Error("PDF viewer not loaded.");
       const allFields=buildEditableFields();
+      // Company ID determines which template rendering path to use — no filename sniffing needed
       const pjDoc=await window.pdfjsLib.getDocument({data:tplBytes}).promise;
       const previewPages=[];
       const scale=2;
@@ -678,18 +801,28 @@ function ReportEditor({job, user, onBack, reportDate}){
         }
         // Draw field values on this page (flat preview)
         const pageH=vp1.height;
-        if(isTYR&&pi===1){
-          // TYR: use hardcoded positions for all fields (matches PDF output exactly)
+        if(isEnhancedTYR&&pi===1){
+          // Enhanced TYR (V5): hardcoded positions
           drawTyrFieldsOnCanvas(ctx,allFields,scale);
           drawContractorTableOnCanvas(ctx,scale,pageH);
+        }else if(isTYR&&pi===1){
+          // Original TYR: separate hardcoded positions
+          drawTyrOriginalFieldsOnCanvas(ctx,allFields,scale);
+          drawTyrOriginalContractorOnCanvas(ctx,scale);
         }else{
           drawFieldsOnCanvas(ctx,allFields,pi,scale,pageH);
         }
         previewPages.push(cvs.toDataURL("image/jpeg",0.92));
         cvs.width=0;cvs.height=0;
       }
-      // Always show flat rendered preview (matches actual PDF output)
-      setEditablePreview(null);
+      // TYR templates: flat rendered preview (hardcoded positions match PDF exactly)
+      // All other templates: editable preview with field overlays
+      if(isAnyTYR){
+        setEditablePreview(null);
+      }else if(isDesktop&&cleanPages.length>0){
+        const posFields=allFields.filter(f=>f.x!=null&&f.y!=null);
+        setEditablePreview({pages:cleanPages,fields:posFields});
+      }
       // Render photos as additional preview pages — paginate to match PDF output
       if(photos.length>0){
         const perPage=photoLayout==="1"?1:photoLayout==="2"?2:4;
@@ -714,56 +847,63 @@ function ReportEditor({job, user, onBack, reportDate}){
           }catch(e){loaded.push(null);}
         }
         const validPhotos=loaded.filter(Boolean);
+        const attachLabelHP=16*scale; // "ATTACHMENT" label height in preview
         const newPhotoPage=()=>{
           const cvs=document.createElement("canvas");cvs.width=pgW;cvs.height=pgH;
           const ctx=cvs.getContext("2d");
           ctx.fillStyle="#ffffff";ctx.fillRect(0,0,pgW,pgH);
-          ctx.fillStyle="#666666";ctx.font=(12*scale)+"px Georgia, Cambria, serif";
-          ctx.fillText("Photos — "+job.name,36*scale,40*scale);
+          // "ATTACHMENT" label
+          ctx.fillStyle="#000000";ctx.font="bold "+(11*scale)+"px Helvetica, Arial, sans-serif";
+          ctx.fillText("ATTACHMENT",36*scale,52*scale);
           return {cvs,ctx};
         };
-        const drawPhoto=(ctx,p,x,y,maxW,maxH)=>{
+        // Draw photo inside a bordered box (matches PDF output)
+        const drawPhotoInBoxP=(ctx,p,bx,by,bw,bh)=>{
           const {im,ratio,corrW,corrH}=p;
+          // Border box
+          ctx.strokeStyle="#000000";ctx.lineWidth=1;
+          ctx.strokeRect(bx,by,bw,bh);
+          ctx.fillStyle="#ffffff";ctx.fillRect(bx+1,by+1,bw-2,bh-2);
+          // Fit image inside box with padding
+          const pad=8*scale;
+          const innerW=bw-pad*2;const innerH=bh-pad*2;
           let imgW,imgH;
-          if(ratio>=1){imgW=Math.min(maxW,maxH*ratio);imgH=imgW/ratio;}
-          else{imgH=Math.min(maxH,maxW/ratio);imgW=imgH*ratio;}
-          // Draw via temp canvas to ensure EXIF rotation is applied
+          if(ratio>=1){imgW=Math.min(innerW,innerH*ratio);imgH=imgW/ratio;}
+          else{imgH=Math.min(innerH,innerW/ratio);imgW=imgH*ratio;}
           const tc=document.createElement("canvas");tc.width=corrW||im.naturalWidth;tc.height=corrH||im.naturalHeight;
           tc.getContext("2d").drawImage(im,0,0,tc.width,tc.height);
-          ctx.drawImage(tc,x+(maxW-imgW)/2,y+(maxH-imgH)/2,imgW,imgH);
-          tc.width=0;tc.height=0; // free memory
+          ctx.drawImage(tc,bx+pad+(innerW-imgW)/2,by+pad+(innerH-imgH)/2,imgW,imgH);
+          tc.width=0;tc.height=0;
         };
+        const boxTopP=60*scale+attachLabelHP;
+        const boxAreaHP=usableHP-20*scale-attachLabelHP;
         let idx=0;
         while(idx<validPhotos.length){
           if(photoLayout==="1"){
             const {cvs,ctx}=newPhotoPage();
-            drawPhoto(ctx,validPhotos[idx],(pgW-Math.min(bodyW,380*scale))/2,60*scale,Math.min(bodyW,380*scale),usableHP-20*scale);
+            drawPhotoInBoxP(ctx,validPhotos[idx],36*scale,boxTopP,bodyW,boxAreaHP);
             previewPages.push(cvs.toDataURL("image/jpeg",0.92));cvs.width=0;cvs.height=0;
             idx++;
           }else if(photoLayout==="2"){
             const pair=[validPhotos[idx]];
             if(idx+1<validPhotos.length)pair.push(validPhotos[idx+1]);
             const {cvs,ctx}=newPhotoPage();
-            if(pair.length===1){
-              drawPhoto(ctx,pair[0],(pgW-Math.min(bodyW,380*scale))/2,60*scale,Math.min(bodyW,380*scale),usableHP-20*scale);
-            }else{
-              // Side-by-side — 2 columns
-              const colGap=12*scale;
-              const colW=(bodyW-colGap)/2;
-              pair.forEach((p,c)=>{
-                drawPhoto(ctx,p,36*scale+c*(colW+colGap),60*scale,colW,usableHP-20*scale);
-              });
-            }
+            const gap=10*scale;
+            const bh=pair.length===1?boxAreaHP:(boxAreaHP-gap)/2;
+            pair.forEach((p,r)=>{
+              drawPhotoInBoxP(ctx,p,36*scale,boxTopP+r*(bh+gap),bodyW,bh);
+            });
             previewPages.push(cvs.toDataURL("image/jpeg",0.92));cvs.width=0;cvs.height=0;
             idx+=pair.length;
           }else{
             // 4 per page — 2x2 grid
             const chunk=validPhotos.slice(idx,idx+4);
             const {cvs,ctx}=newPhotoPage();
-            const slotW=(bodyW-12*scale)/2;const slotH=(usableHP-20*scale-12*scale)/2;
+            const gx=10*scale;const gy=10*scale;
+            const bw=(bodyW-gx)/2;const bh=(boxAreaHP-gy)/2;
             chunk.forEach((p,ci)=>{
               const col=ci%2;const row=Math.floor(ci/2);
-              drawPhoto(ctx,p,36*scale+col*(slotW+12*scale),60*scale+row*(slotH+12*scale),slotW,slotH);
+              drawPhotoInBoxP(ctx,p,36*scale+col*(bw+gx),boxTopP+row*(bh+gy),bw,bh);
             });
             previewPages.push(cvs.toDataURL("image/jpeg",0.92));cvs.width=0;cvs.height=0;
             idx+=chunk.length;
@@ -798,6 +938,7 @@ function ReportEditor({job, user, onBack, reportDate}){
       if(!tplBytes||tplBytes.byteLength===0){throw new Error("Template download failed — file may be missing from storage. Go to Job Settings and re-upload your template.");}
       const isPdfTemplate=tplRecord.file_type==="pdf";
       const isDocxTemplate=tplRecord.file_type==="docx"||tplRecord.file_type==="doc";
+      // Company ID determines rendering path — no filename sniffing
 
       // ── 1b. Build fields + AI proofread (before any path) ──
       const allFields=buildEditableFields();
@@ -806,26 +947,33 @@ function ReportEditor({job, user, onBack, reportDate}){
       if(job.field_config?.aiProofread){
         try{
           setSubmitStep("Proofreading...");
+          console.log("[submit] AI Proofreading is ON — collecting text fields...");
           const textFields={};
           allFields.forEach(f=>{
-            if(f.val&&typeof f.val==="string"&&f.val.trim().length>2){
+            if(f.val&&typeof f.val==="string"&&f.val.trim().length>10){
               const ln=f.name.toLowerCase();
-              // Skip auto-fill fields (date, name, number), only proofread user-typed content
-              if(!f.autoFill&&!(/^(date|day|report.?no|report.?number|inspector|prepared.?by)$/i.test(ln)))
+              // WHITELIST: only proofread the free-text note fields where inspectors dictate
+              if(/general|activit|inspection.*request|site.?visit|note|comment|observation|description|remark/i.test(ln))
                 textFields[f.name]=f.val;
             }
           });
+          console.log("[submit] Sending",Object.keys(textFields).length,"fields to proofread:",Object.keys(textFields));
           if(Object.keys(textFields).length>0){
             const proofData=await api.proofreadReport({fields:textFields});
+            console.log("[submit] Proofread response:",JSON.stringify(proofData));
             if(proofData?.corrected&&Object.keys(proofData.corrected).length>0){
-              console.log("[submit] Proofread corrections:",proofData.corrected);
+              console.log("[submit] Applying",Object.keys(proofData.corrected).length,"corrections");
               allFields.forEach(f=>{if(proofData.corrected[f.name])f.val=proofData.corrected[f.name];});
+            }else{
+              console.log("[submit] No corrections needed");
             }
           }
         }catch(proofErr){
-          console.warn("[submit] Proofread failed (non-blocking):",proofErr.message);
+          console.error("[submit] Proofread FAILED:",proofErr.message,proofErr);
           // Non-blocking — report still submits with original text
         }
+      }else{
+        console.log("[submit] AI Proofreading is OFF for this job");
       }
 
       // ── DOCX path: send to edge function for XML editing ──
@@ -918,9 +1066,9 @@ function ReportEditor({job, user, onBack, reportDate}){
         allFields.forEach(f=>{if(f.autoFill||f.mode==="edit")vals[f.name]=f.val;else lockVals[f.name]=f.val;});
         const storagePath=`${user.id}/${job.id}/reports/${docxFilename}`;
         await api.uploadStorage(storagePath,docxBlob,"application/octet-stream");
-        const reportContent={vals,lockVals,photos:[],photoLayout:"1",lockFields:[],editFields:allFields,...(isTYR?{contractors:selectedContractors}:{})};
+        const reportContent={vals,lockVals,photos:[],photoLayout:"1",lockFields:[],editFields:allFields,...(isAnyTYR?{contractors:selectedContractors}:{})};
         await db.saveReport({job_id:job.id,user_id:user.id,report_date:submitDate,status:"submitted",content:JSON.stringify(reportContent),updated_at:new Date().toISOString()});
-        if(isTYR&&selectedContractors.length>0&&draftId)try{await db.saveReportContractors(draftId,job.id,user.id,selectedContractors);}catch(e){console.error("Save report contractors:",e);}
+        if(isAnyTYR&&selectedContractors.length>0&&draftId)try{await db.saveReportContractors(draftId,job.id,user.id,selectedContractors);}catch(e){console.error("Save report contractors:",e);}
         const userName=user.user_metadata?.full_name||user.email?.split("@")[0]||"Inspector";
         const emailHtml=`<div style="font-family:-apple-system,sans-serif;max-width:600px;"><div style="background:#e8742a;padding:20px 24px;border-radius:8px 8px 0 0;"><h1 style="color:#fff;margin:0;font-size:20px;">My Daily Reports</h1></div><div style="background:#f9f9f9;padding:24px;border:1px solid #e0e0e0;border-top:none;border-radius:0 0 8px 8px;"><p style="color:#333;font-size:16px;">${userName} has submitted the daily report for <strong>${job.name}</strong> on ${todayDisplay}.</p><p style="color:#555;font-size:14px;">The filled DOCX report is attached.</p></div></div>`;
         const rawTeam=job.team_emails||[];
@@ -1071,8 +1219,8 @@ function ReportEditor({job, user, onBack, reportDate}){
 
       // ── 3. Fill fields by coordinates ──
       if(fcSource!=="acroform"){
-      if(isTYR&&pages.length>0){
-        // ── TYR v5: Hardcoded field positions from template analysis ──
+      if(isEnhancedTYR&&pages.length>0){
+        // ── Enhanced TYR (V5): Hardcoded field positions from template analysis ──
         // All coordinates in pdfplumber top-left system; convert: pdfY = 792 - top
         const pg1=pages[0];const pgH=pg1.getHeight();
         const sz=10;const szSm=9;
@@ -1105,7 +1253,7 @@ function ReportEditor({job, user, onBack, reportDate}){
           const textAfterBullet=leftPad+bulletW;const wrapMaxW=maxW-bulletW;
           const lines=[];
           rawLines.forEach(rl=>{const clean=rl.replace(/^[\-\•\*]\s*/,"").trim();if(!clean)return;const words=clean.split(" ");let cur="";let first=true;words.forEach(wd=>{const test=cur?cur+" "+wd:wd;const tw2=f.widthOfTextAtSize(test,fSz);if(tw2>wrapMaxW&&cur){lines.push({text:first?(useBullets?bullet:"")+cur:cur,xOff:first?leftPad:textAfterBullet,newBullet:first});first=false;cur=wd;}else cur=test;});if(cur)lines.push({text:first?(useBullets?bullet:"")+cur:cur,xOff:first?leftPad:textAfterBullet,newBullet:first});});
-          let yOff=0;lines.forEach((ln,i)=>{if(i>0)yOff+=(ln.newBullet&&useBullets)?fSz*2:fSz*lineSpacing;const ly=textStartY-yOff;if(ly>=fieldBottomPDF)pg1.drawText(ln.text,{x:x+ln.xOff,y:ly,size:fSz,font:f,color:rgb(0,0,0)});});
+          let yOff=0;lines.forEach((ln,i)=>{if(i>0)yOff+=(ln.newBullet&&useBullets)?fSz*2.6:fSz*lineSpacing;const ly=textStartY-yOff;if(ly>=fieldBottomPDF)pg1.drawText(ln.text,{x:x+ln.xOff,y:ly,size:fSz,font:f,color:rgb(0,0,0)});});
         };
 
         // Build value lookup from form fields — exact name → value map
@@ -1157,20 +1305,22 @@ function ReportEditor({job, user, onBack, reportDate}){
         // (was duplicating General field values; user will re-upload template v6 without this row)
 
         // ── Signature (just above footer, ~y=474) ──
+        const sigEnabled=job.field_config?.digitalSignature!==false;
         const sigField=allFields.find(f=>((f.name||"").toLowerCase().includes("signature")||(f.autoFill==="name"&&(f.name||"").toLowerCase().includes("inspector"))));
-        if(sigField&&sigField.val){
+        const sigName=sigField?.val||user?.user_metadata?.full_name||user?.email?.split("@")[0]||"";
+        if(sigEnabled&&sigName){
           const sigSz=sz*0.85;
           const sigY=pgH-478; // place signature right below Notes section
-          const sigTime=sigTimestamps[sigField.name]?new Date(sigTimestamps[sigField.name]):new Date();
+          const sigTime=sigField?.name&&sigTimestamps[sigField.name]?new Date(sigTimestamps[sigField.name]):new Date();
           const dayName=sigTime.toLocaleDateString("en-US",{weekday:"long"});
           const datePart=sigTime.toLocaleDateString("en-US",{month:"long",day:"numeric",year:"numeric"});
           const timePart=sigTime.toLocaleTimeString("en-US",{hour:"numeric",minute:"2-digit",hour12:true});
-          pg1.drawText("Signed by "+String(sigField.val),{x:27,y:sigY,size:sigSz,font:tyrFontItalic,color:rgb(0.1,0.1,0.1)});
+          pg1.drawText("Signed by "+String(sigName),{x:27,y:sigY,size:sigSz,font:tyrFontItalic,color:rgb(0.1,0.1,0.1)});
           pg1.drawText(dayName+", "+datePart+" at "+timePart,{x:27,y:sigY-sigSz*1.15,size:sigSz*0.65,font:tyrFont,color:rgb(0.4,0.4,0.4)});
           pg1.drawText("powered by My Daily Reports",{x:27,y:sigY-sigSz*2.1,size:sigSz*0.55,font:tyrFontItalic,color:rgb(0.6,0.6,0.6)});
         }
-      }else{
-      // ── Standard (non-TYR) field drawing ──
+      }else if(!isTYR){
+      // ── Standard (non-TYR) field drawing — skip for original TYR (has its own block below) ──
       {
         allFields.forEach(f=>{
           if(f.x==null||f.y==null||!f.val)return;
@@ -1228,7 +1378,7 @@ function ReportEditor({job, user, onBack, reportDate}){
       // ── TYR v5: Draw contractor table on PDF page 1 — exact template coordinates ──
       // Template has 2-column contractor layout: Left(Name+MP) Right(Name+MP) + RFIs column
       // 4 data rows, so max 8 contractors (4 left + 4 right)
-      if(isTYR&&selectedContractors.length>0&&pages.length>0){
+      if(isEnhancedTYR&&selectedContractors.length>0&&pages.length>0){
         const pg1=pages[0];
         const pgH=pg1.getHeight(); // 792
         const sz=10;
@@ -1269,6 +1419,116 @@ function ReportEditor({job, user, onBack, reportDate}){
         }
       }
 
+      // ── TYR Original: Hardcoded field positions for the original TYR_Daily_Report_Template ──
+      // Completely separate from v5_fixed — different row positions, 4-col contractor grid, signature lines
+      if(isTYR&&pages.length>0){
+        const pg1=pages[0];const pgH=pg1.getHeight();
+        const sz=10;const szSm=9;
+        const tyrFont=await pdfDoc.embedFont(StandardFonts.Helvetica);
+        const tyrFontBold=await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+        const tyrFontItalic=await pdfDoc.embedFont(StandardFonts.HelveticaOblique);
+        // Helper: draw single-line text, vertically centered in cell, auto-shrink
+        const drawCell=(text,x,topY,w,h,useSz,useFont)=>{
+          if(!text)return;
+          const s=String(text);let fs=useSz||sz;const f2=useFont||tyrFont;
+          const tw=f2.widthOfTextAtSize(s,fs);
+          if(w&&tw>w-6)fs=Math.max(6,fs*(w-6)/tw);
+          const pdfY=pgH-topY-(h+fs)/2+fs*0.15;
+          pg1.drawText(s,{x:x+3,y:pdfY,size:fs,font:f2,color:rgb(0,0,0)});
+        };
+        // Helper: draw multiline text with word-wrap inside a box
+        const drawMulti=(text,x,topY,w,h,{lineSpacing=1.3,useFontSz,useF,noBullets,bottomLimit}={})=>{
+          if(!text)return;
+          const fSz=useFontSz||sz;const f=useF||tyrFont;
+          const leftPad=6;const fieldTopPDF=pgH-topY;const fieldBottomPDF=bottomLimit!=null?bottomLimit:(pgH-topY-h);
+          const textStartY=fieldTopPDF-fSz;const maxW=w-leftPad-4;
+          const rawLines=text.split(/\n/).filter(l=>l.trim());
+          const useBullets=!noBullets&&rawLines.length>1;
+          const bullet="\u2022  ";const bulletW=useBullets?f.widthOfTextAtSize(bullet,fSz):0;
+          const textAfterBullet=leftPad+bulletW;const wrapMaxW=maxW-bulletW;
+          const lines=[];
+          rawLines.forEach(rl=>{const clean=rl.replace(/^[\-\•\*]\s*/,"").trim();if(!clean)return;const words=clean.split(" ");let cur="";let first=true;words.forEach(wd=>{const test=cur?cur+" "+wd:wd;const tw2=f.widthOfTextAtSize(test,fSz);if(tw2>wrapMaxW&&cur){lines.push({text:first?(useBullets?bullet:"")+cur:cur,xOff:first?leftPad:textAfterBullet,newBullet:first});first=false;cur=wd;}else cur=test;});if(cur)lines.push({text:first?(useBullets?bullet:"")+cur:cur,xOff:first?leftPad:textAfterBullet,newBullet:first});});
+          let yOff=0;lines.forEach((ln,i)=>{if(i>0)yOff+=(ln.newBullet&&useBullets)?fSz*2.6:fSz*lineSpacing;const ly=textStartY-yOff;if(ly>=fieldBottomPDF)pg1.drawText(ln.text,{x:x+ln.xOff,y:ly,size:fSz,font:f,color:rgb(0,0,0)});});
+        };
+
+        // Build value lookup
+        const v={};allFields.forEach(f=>{if(f.val)v[(f.name||"").toLowerCase().trim()]=f.val;});
+        const wordMatch=(fn,kw)=>{const re=new RegExp("(^|[\\s_\\-\\.:#])"+kw.replace(/[.*+?^${}()|[\]\\]/g,"\\$&"),"i");return re.test(fn);};
+        const findVal=(...keys)=>{for(const k of keys){for(const[fn,fv]of Object.entries(v)){if(wordMatch(fn,k))return fv;}}return"";};
+        const findVal2=(a,b)=>{for(const[fn,fv]of Object.entries(v)){if(wordMatch(fn,a)&&wordMatch(fn,b))return fv;}return"";};
+        const rh=14.8;
+
+        // ── Header fields (original template positions) ──
+        // All values: 9pt regular for consistency
+        drawCell(findVal("district"),109.3,127.5,190.6,rh,szSm,tyrFont);
+        drawCell(findVal2("project","name"),424.4,127.5,164.1,rh,szSm,tyrFont);
+        // Address — merged cell spanning full width (h=27.5)
+        drawCell(findVal("address"),109.3,144.5,474.2,27.5,szSm,tyrFont);
+        drawCell(findVal("dsa"),109.3,174.2,190.6,rh,szSm,tyrFont);
+        drawCell(findVal("tyr project","project #","project#"),424.4,174.2,164.1,rh,szSm,tyrFont);
+        drawCell(findVal("date"),109.3,191.2,190.6,rh,szSm,tyrFont);
+        drawCell(findVal("weather"),424.4,191.2,164.1,rh,szSm,tyrFont);
+        // Hours row
+        drawCell(findVal("reg"),109.3,208.2,100.5,rh,szSm,tyrFont);
+        drawCell(findVal("ot"),316.4,208.2,96.6,rh,szSm,tyrFont);
+        drawCell(findVal("dt"),523.5,208.2,65.0,rh,szSm,tyrFont);
+
+        // ── General (cream box: top=258.4, h=28) ──
+        // x=75 to start after "General:" label, not on top of it
+        drawMulti(findVal("general"),75,258.4,512.0,28,{lineSpacing:1.3,noBullets:true,bottomLimit:pgH-286.4});
+
+        // ── Daily Activities (cream content box: top=369.9, h=60) ──
+        drawMulti(findVal("activit"),25.2,369.9,562.0,60.0,{lineSpacing:1.3});
+
+        // ── Single-line fields (inspection requests, RFIs, etc.) ──
+        drawCell(findVal("inspection","request"),135,432.1,452,rh,szSm,tyrFont);
+        drawCell(findVal("rfi"),55,449.2,245,rh,szSm,tyrFont);
+        drawCell(findVal("submittal"),370,449.2,217,rh,szSm,tyrFont);
+        drawCell(findVal("ccd"),55,466.2,245,rh,szSm,tyrFont);
+        drawCell(findVal("asi"),345,466.2,242,rh,szSm,tyrFont);
+        drawCell(findVal("site visit"),80,483.3,507,rh,szSm,tyrFont);
+        drawCell(findVal("note","comment"),140,500.3,447,rh,szSm,tyrFont);
+
+        // ── Contractor table (4 columns: Name, MP, Equipment, Trade) — 3 data rows ──
+        if(selectedContractors.length>0){
+          const colX=[25.2,181.2,334.0,471.6];
+          const colW=[156,153,138,119];
+          // Row tops in pdfplumber coords: 305.7, 322.8, 339.8
+          const rowTops=[305.7,322.8,339.8];
+          selectedContractors.forEach((c,i)=>{
+            if(i>=rowTops.length)return;
+            const rowTop=rowTops[i];
+            // Name
+            drawCell(c.company_name||"",colX[0],rowTop,colW[0],rh,szSm,tyrFont);
+            // Manpower
+            drawCell(String(c.manpower||0),colX[1],rowTop,colW[1],rh,szSm,tyrFont);
+            // Equipment
+            drawCell(c.equipment||"",colX[2],rowTop,colW[2],rh,szSm,tyrFont);
+            // Trade
+            drawCell(c.trade||"",colX[3],rowTop,colW[3],rh,szSm,tyrFont);
+          });
+        }
+
+        // ── Signature (at signature line positions: top=586.8, left line x=20-421, right line x=438-592) ──
+        const sigEnabled=job.field_config?.digitalSignature!==false;
+        const sigField=allFields.find(f=>((f.name||"").toLowerCase().includes("signature")||(f.autoFill==="name"&&(f.name||"").toLowerCase().includes("inspector"))));
+        const sigName=sigField?.val||user?.user_metadata?.full_name||user?.email?.split("@")[0]||"";
+        if(sigEnabled&&sigName){
+          const sigSz=sz*0.85;
+          const sigY=pgH-575; // just above the signature lines at y=586.8
+          const sigTime=sigField?.name&&sigTimestamps[sigField.name]?new Date(sigTimestamps[sigField.name]):new Date();
+          const dayName=sigTime.toLocaleDateString("en-US",{weekday:"long"});
+          const datePart=sigTime.toLocaleDateString("en-US",{month:"long",day:"numeric",year:"numeric"});
+          const timePart=sigTime.toLocaleTimeString("en-US",{hour:"numeric",minute:"2-digit",hour12:true});
+          // Left side: inspector signature
+          pg1.drawText("Signed by "+String(sigName),{x:27,y:sigY,size:sigSz,font:tyrFontItalic,color:rgb(0.1,0.1,0.1)});
+          pg1.drawText(dayName+", "+datePart+" at "+timePart,{x:27,y:sigY-sigSz*1.15,size:sigSz*0.65,font:tyrFont,color:rgb(0.4,0.4,0.4)});
+          // Right side: date signed
+          pg1.drawText("Date: "+datePart,{x:445,y:sigY,size:sigSz,font:tyrFontItalic,color:rgb(0.1,0.1,0.1)});
+          pg1.drawText("powered by My Daily Reports",{x:27,y:sigY-sigSz*2.1,size:sigSz*0.55,font:tyrFontItalic,color:rgb(0.6,0.6,0.6)});
+        }
+      }
+
       // ── 5. Remove empty trailing pages (no fields reference them) before adding photos ──
       if(pdfDoc.getPageCount()>1){
         const maxFieldPage=Math.max(...allFields.map(f=>f.page||1),1);
@@ -1283,7 +1543,7 @@ function ReportEditor({job, user, onBack, reportDate}){
         // Determine where header ends and footer starts from field positions (top-left coords)
         const p1Fields=allFields.filter(f=>f.y!=null&&(f.page||1)===1);
         let headerBottomTL=80,footerTopTL=pageH-40; // defaults in top-left coords
-        if(isTYR){
+        if(isAnyTYR){
           // TYR template: header ends at y=93 (logo area), footer at y=495
           headerBottomTL=93;
           footerTopTL=495;
@@ -1326,92 +1586,90 @@ function ReportEditor({job, user, onBack, reportDate}){
         const perPage=photoLayout==="1"?1:photoLayout==="2"?2:4;
         const bodyW=pageW-72;
 
+        // "ATTACHMENT" label font
+        const attachFont=await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+        const attachSize=11;
+        const attachLabelH=attachSize+6; // height reserved for "ATTACHMENT" label
+
         const addPhotoPage=()=>{
           const np=pdfDoc.addPage([pageW,pageH]);
           if(fullPageEmbed){
             np.drawPage(fullPageEmbed,{x:0,y:0,width:pageW,height:pageH});
-            // White-out the body area between header and footer so photos draw on clean background
-            np.drawRectangle({x:0,y:footerTopPDF,width:pageW,height:headerBottomPDF-footerTopPDF,color:rgb(1,1,1)});
+            // White-out the body area between header and footer — extend 2px extra each side
+            np.drawRectangle({x:0,y:footerTopPDF-2,width:pageW,height:(headerBottomPDF-footerTopPDF)+4,color:rgb(1,1,1)});
           }
+          // Draw "ATTACHMENT" label below header
+          np.drawText("ATTACHMENT",{x:36,y:photoAreaTop-attachSize,size:attachSize,font:attachFont,color:rgb(0,0,0)});
           return np;
+        };
+
+        // Helper: draw a thin border box, then the image centered inside it
+        const drawPhotoInBox=(pg,img,ratio,boxX,boxY,boxW,boxH)=>{
+          // Draw border box (thin black outline)
+          pg.drawRectangle({x:boxX,y:boxY,width:boxW,height:boxH,borderColor:rgb(0,0,0),borderWidth:0.75,color:rgb(1,1,1)});
+          // Fit image inside box with 8pt padding
+          const pad=8;
+          const innerW=boxW-pad*2;const innerH=boxH-pad*2;
+          let imgW,imgH;
+          if(ratio>=1){imgW=Math.min(innerW,innerH*ratio);imgH=imgW/ratio;}
+          else{imgH=Math.min(innerH,innerW/ratio);imgW=imgH*ratio;}
+          const imgX=boxX+pad+(innerW-imgW)/2;
+          const imgY=boxY+pad+(innerH-imgH)/2;
+          pg.drawImage(img,{x:imgX,y:imgY,width:imgW,height:imgH});
         };
 
         // Helper: draw caption text centered below an image
         const drawCaption=(pg,caption,imgX,imgY,imgW)=>{
           if(!caption)return;
           const maxCaptionW=imgW+40;
-          // Truncate if too long
           let txt=caption.length>120?caption.slice(0,117)+"...":caption;
           const tw=captionFont.widthOfTextAtSize(txt,captionSize);
           const cx=imgX+(imgW-Math.min(tw,maxCaptionW))/2;
           pg.drawText(txt,{x:Math.max(36,cx),y:imgY-captionSize-4,size:captionSize,font:captionFont,color:rgb(0.3,0.3,0.3),maxWidth:maxCaptionW});
         };
 
+        // Available area for photo boxes (below "ATTACHMENT" label)
+        const boxAreaTop=photoAreaTop-attachLabelH-6;
+        const boxAreaH=boxAreaTop-photoAreaBottom-10;
+
         for(let i=0;i<embeddedPhotos.length;){
           if(photoLayout==="1"){
-            // 1 per page — centered
+            // 1 per page — large centered photo in bordered box (matches VIS/standard style)
             const pg=addPhotoPage();
             const {img,ratio,caption}=embeddedPhotos[i];
-            const capH=caption?captionSize+8:0;
-            const maxW=Math.min(bodyW,380);const maxH=usableH-20-capH;
-            let imgW,imgH;
-            if(ratio>=1){imgW=Math.min(maxW,maxH*ratio);imgH=imgW/ratio;}
-            else{imgH=Math.min(maxH,maxW/ratio);imgW=imgH*ratio;}
-            const imgX=(pageW-imgW)/2;
-            const imgY=photoAreaTop-10-imgH+(usableH-20-capH-imgH)/2+capH;
-            pg.drawImage(img,{x:imgX,y:imgY,width:imgW,height:imgH});
-            drawCaption(pg,caption,imgX,imgY,imgW);
+            const boxX=36;const boxW=bodyW;
+            const boxH=boxAreaH;const boxY=boxAreaTop-boxH;
+            drawPhotoInBox(pg,img,ratio,boxX,boxY,boxW,boxH);
+            if(caption) drawCaption(pg,caption,boxX,boxY,boxW);
             i++;
           }else if(photoLayout==="2"){
-            // Smart 2-per-page: detect orientation for layout
+            // 2 per page — stacked vertically in bordered boxes
             const pair=[embeddedPhotos[i]];
             if(i+1<embeddedPhotos.length)pair.push(embeddedPhotos[i+1]);
             const pg=addPhotoPage();
-            if(pair.length===1){
-              // Single remaining photo — center it
-              const {img,ratio}=pair[0];
-              const maxW=Math.min(bodyW,380);const maxH=usableH-20;
-              let imgW,imgH;
-              if(ratio>=1){imgW=Math.min(maxW,maxH*ratio);imgH=imgW/ratio;}
-              else{imgH=Math.min(maxH,maxW/ratio);imgW=imgH*ratio;}
-              pg.drawImage(img,{x:(pageW-imgW)/2,y:photoAreaTop-10-imgH+(usableH-20-imgH)/2,width:imgW,height:imgH});
-            }else{
-              // Side-by-side — 2 columns
-              const colGap=12;
-              const colW=(bodyW-colGap)/2;
-              const maxH=usableH-20;
-              pair.forEach((p,c)=>{
-                const {img,ratio,caption}=p;
-                const capH=caption?captionSize+8:0;
-                let imgW,imgH;
-                if(ratio>=1){imgW=Math.min(colW,maxH*ratio);imgH=imgW/ratio;}
-                else{imgH=Math.min(maxH-capH,(colW)/ratio);imgW=imgH*ratio;}
-                if(imgW>colW){imgH=imgH*(colW/imgW);imgW=colW;}
-                if(imgH>maxH-capH){imgW=imgW*((maxH-capH)/imgH);imgH=maxH-capH;}
-                const xPos=36+c*(colW+colGap)+(colW-imgW)/2;
-                const yPos=photoAreaTop-10-imgH+(maxH-capH-imgH)/2+capH;
-                pg.drawImage(img,{x:xPos,y:Math.max(yPos,photoAreaBottom),width:imgW,height:imgH});
-                drawCaption(pg,caption,xPos,Math.max(yPos,photoAreaBottom),imgW);
-              });
-            }
+            const boxGap=10;
+            const boxX=36;const boxW=bodyW;
+            const boxH=pair.length===1?boxAreaH:(boxAreaH-boxGap)/2;
+            pair.forEach((p,r)=>{
+              const {img,ratio,caption}=p;
+              const boxY=boxAreaTop-boxH-(r*(boxH+boxGap));
+              drawPhotoInBox(pg,img,ratio,boxX,boxY,boxW,boxH);
+              if(caption) drawCaption(pg,caption,boxX,boxY,boxW);
+            });
             i+=pair.length;
           }else{
-            // 4 per page — 2x2 grid
+            // 4 per page — 2x2 grid in bordered boxes
             const cols=2;const rows=2;
             const chunk=embeddedPhotos.slice(i,i+4);
             const pg=addPhotoPage();
-            const slotW=(bodyW-12)/cols;const slotH=(usableH-20-12)/rows;
+            const gapX=10;const gapY=10;
+            const boxW=(bodyW-gapX)/cols;const boxH=(boxAreaH-gapY)/rows;
             chunk.forEach((p,idx)=>{
               const {img,ratio}=p;
-              let imgW,imgH;
-              if(ratio>=1){imgW=Math.min(slotW,slotH*ratio);imgH=imgW/ratio;}
-              else{imgH=Math.min(slotH,slotW/ratio);imgW=imgH*ratio;}
               const col=idx%cols;const row=Math.floor(idx/cols);
-              const slotX=36+col*(slotW+12);
-              const rowTop=photoAreaTop-10-(row*(slotH+12));
-              const xPos=slotX+(slotW-imgW)/2;
-              const yPos=rowTop-imgH+(slotH-imgH)/2;
-              pg.drawImage(img,{x:xPos,y:Math.max(yPos,photoAreaBottom),width:imgW,height:imgH});
+              const boxX=36+col*(boxW+gapX);
+              const boxY=boxAreaTop-boxH-(row*(boxH+gapY));
+              drawPhotoInBox(pg,img,ratio,boxX,boxY,boxW,boxH);
             });
             i+=chunk.length;
           }
@@ -1509,12 +1767,12 @@ function ReportEditor({job, user, onBack, reportDate}){
       await api.uploadStorage(storagePath,pdfBlob,"application/pdf");
 
       setSubmitStep("Saving report...");
-      const reportContent={vals,lockVals,photos,photoLayout,lockFields,editFields,...(isTYR?{contractors:selectedContractors}:{})};
+      const reportContent={vals,lockVals,photos,photoLayout,lockFields,editFields,...(isAnyTYR?{contractors:selectedContractors}:{})};
       await db.saveReport({
         job_id:job.id,user_id:user.id,report_date:submitDate,status:"submitted",
         content:JSON.stringify(reportContent),updated_at:new Date().toISOString()
       });
-      if(isTYR&&selectedContractors.length>0&&draftId)try{await db.saveReportContractors(draftId,job.id,user.id,selectedContractors);}catch(e){console.error("Save report contractors:",e);}
+      if(isAnyTYR&&selectedContractors.length>0&&draftId)try{await db.saveReportContractors(draftId,job.id,user.id,selectedContractors);}catch(e){console.error("Save report contractors:",e);}
 
       const userName=user.user_metadata?.full_name||user.email?.split("@")[0]||"Inspector";
       // Build optional photo thumbnails for email
@@ -1833,8 +2091,8 @@ function ReportEditor({job, user, onBack, reportDate}){
           {/* Editable fields — only non-auto, non-skipped */}
           {editFields.filter(f=>{
             if(f.autoFill==="date"||f.autoFill==="increment"||f.autoFill==="name")return false;
-            // TYR: hide contractor/MP/manpower/RFI fields — handled by dedicated sections on main screen
-            if(isTYR){const fn=(f.name||"").toLowerCase();if(/contractor|^mp$|^mp[:\s]|manpower|crew\s*size|rfis|ccds|asis|submittal/i.test(fn))return false;}
+            // TYR: field mode only shows Daily Activities — everything else is on the full editor
+            if(isAnyTYR){return /activit/i.test(f.name||"");}
             return true;
           }).map(f=>{
             const isSkipped=skippedFields[f.name];
@@ -1852,9 +2110,9 @@ function ReportEditor({job, user, onBack, reportDate}){
               {!isSkipped&&((()=>{
                 const notesKw=["notes","observations","comments","description","remarks"];
                 const isNotesField=notesKw.some(k=>(f.name||"").toLowerCase().includes(k));
-                const isTyrActivities=isTYR&&/activit/i.test(f.name||"");
+                const isTyrActivities=isAnyTYR&&/activit/i.test(f.name||"");
                 // TYR: only Daily Activities gets a textarea; everything else is single-line
-                const useTextarea=isTYR?isTyrActivities:(f.voiceEnabled||f.multiline||isNotesField);
+                const useTextarea=isAnyTYR?isTyrActivities:(f.voiceEnabled||f.multiline||isNotesField);
                 return useTextarea?(
                   <textarea value={vals[f.name]||""} onChange={e=>setVal(f.name,e.target.value)} aria-label={f.name} placeholder="Tap here and use your keyboard mic to dictate..." rows={6} style={{...fs,resize:"vertical",minHeight:140,lineHeight:1.6}}/>
                 ):(
@@ -1888,8 +2146,8 @@ function ReportEditor({job, user, onBack, reportDate}){
           </div>
         )}
 
-        {/* ── TYR v5: Weather Toggle ── */}
-        {isTYR&&(
+        {/* ── TYR: Weather Toggle ── */}
+        {isAnyTYR&&(
           <div style={{...cardStyle}}>
             <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
               <div style={{display:"flex",alignItems:"center",gap:8}}>
@@ -1907,34 +2165,65 @@ function ReportEditor({job, user, onBack, reportDate}){
         {/* ── Editable fields ── */}
         {editFields.length>0&&(
           <div style={{marginBottom:20}}>
-            {/* ── TYR v5: Contractor Grid — card style at top ── */}
-            {isTYR&&(
+            {/* ── Contractor Grid — card style at top (both TYR variants) ── */}
+            {isAnyTYR&&(
               <div style={{...cardStyle}}>
-                {sectionLabel("👷","CONTRACTORS ON SITE",selectedContractors.length||null)}
-                {/* Active contractor bubbles — saved, static cards with MP stepper + delete */}
+                <button onClick={()=>setContractorsOpen(!contractorsOpen)} style={{width:"100%",background:"none",border:"none",cursor:"pointer",padding:0,textAlign:"left",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+                  <div style={{fontSize:13,color:C.mut,fontWeight:700,display:"flex",alignItems:"center",gap:8}}>
+                    <span style={{fontSize:16}}>👷</span><span style={{letterSpacing:1}}>CONTRACTORS ON SITE</span>
+                    {selectedContractors.length>0&&<span style={{fontSize:12,color:C.org,fontWeight:700,background:C.org+"18",borderRadius:12,padding:"2px 10px"}}>{selectedContractors.length}</span>}
+                  </div>
+                  <div style={{display:"flex",alignItems:"center",gap:8}}>
+                    {selectedContractors.length>0&&!contractorsOpen&&<span style={{fontSize:10,color:C.ok,fontWeight:700,background:C.ok+"22",borderRadius:6,padding:"2px 8px"}}>SAVED</span>}
+                    <span style={{fontSize:14,color:C.mut,transition:"transform 0.2s",transform:contractorsOpen?"rotate(180deg)":"rotate(0deg)"}}>▼</span>
+                  </div>
+                </button>
+                {!contractorsOpen&&selectedContractors.length>0&&(
+                  <div style={{marginTop:8,fontSize:12,color:C.mut,lineHeight:1.5}}>
+                    {selectedContractors.map(c=>c.company_name+(c.manpower?" ("+c.manpower+" MP)":"")).join(", ")}
+                  </div>
+                )}
+                {contractorsOpen&&<div style={{marginTop:14}}>
+                {/* Active contractor cards */}
                 {selectedContractors.length>0&&(
                   <div style={{display:"flex",flexDirection:"column",gap:6,marginBottom:12}}>
                     {selectedContractors.map((sc,idx)=>(
-                      <div key={sc.company_name} style={{display:"flex",alignItems:"center",gap:8,padding:"8px 12px",borderRadius:10,background:C.card,border:`1px solid ${C.org}33`}}>
-                        <div style={{width:24,height:24,borderRadius:6,background:C.org+"22",color:C.org,fontSize:11,fontWeight:800,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>{idx<4?"L"+(idx+1):"R"+(idx-3)}</div>
-                        <div style={{flex:1,minWidth:0}}>
-                          <div style={{fontSize:14,fontWeight:600,color:C.txt,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{sc.company_name}</div>
-                        </div>
-                        <div style={{display:"flex",alignItems:"center",gap:5,flexShrink:0}}>
-                          <button onClick={()=>updateContractorManpower(sc.company_name,Math.max(0,(sc.manpower||0)-1))} style={{width:28,height:28,borderRadius:6,border:`1px solid ${C.brd}`,background:C.inp,color:C.lt,fontSize:15,fontWeight:700,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",padding:0}}>−</button>
-                          <div style={{textAlign:"center",minWidth:28}}>
-                            <div style={{fontSize:15,fontWeight:700,color:C.org,lineHeight:1}}>{sc.manpower||0}</div>
-                            <div style={{fontSize:8,color:C.mut,marginTop:1}}>MP</div>
+                      <div key={sc.company_name} style={{padding:"8px 12px",borderRadius:10,background:C.card,border:`1px solid ${C.org}33`}}>
+                        {/* Row 1: Number badge + Name + MP stepper + delete */}
+                        <div style={{display:"flex",alignItems:"center",gap:8}}>
+                          <div style={{width:24,height:24,borderRadius:6,background:C.org+"22",color:C.org,fontSize:11,fontWeight:800,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>{idx+1}</div>
+                          <div style={{flex:1,minWidth:0}}>
+                            <div style={{fontSize:14,fontWeight:600,color:C.txt,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{sc.company_name}</div>
                           </div>
-                          <button onClick={()=>updateContractorManpower(sc.company_name,(sc.manpower||0)+1)} style={{width:28,height:28,borderRadius:6,border:`1px solid ${C.brd}`,background:C.inp,color:C.lt,fontSize:15,fontWeight:700,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",padding:0}}>+</button>
+                          <div style={{display:"flex",alignItems:"center",gap:5,flexShrink:0}}>
+                            <button onClick={()=>updateContractorManpower(sc.company_name,Math.max(0,(sc.manpower||0)-1))} style={{width:28,height:28,borderRadius:6,border:`1px solid ${C.brd}`,background:C.inp,color:C.lt,fontSize:15,fontWeight:700,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",padding:0}}>−</button>
+                            <div style={{textAlign:"center",minWidth:28}}>
+                              <div style={{fontSize:15,fontWeight:700,color:C.org,lineHeight:1}}>{sc.manpower||0}</div>
+                              <div style={{fontSize:8,color:C.mut,marginTop:1}}>MP</div>
+                            </div>
+                            <button onClick={()=>updateContractorManpower(sc.company_name,(sc.manpower||0)+1)} style={{width:28,height:28,borderRadius:6,border:`1px solid ${C.brd}`,background:C.inp,color:C.lt,fontSize:15,fontWeight:700,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",padding:0}}>+</button>
+                          </div>
+                          <button onClick={()=>toggleContractor(sc.company_name)} style={{background:"none",border:"none",color:C.err,fontSize:18,cursor:"pointer",padding:"4px",opacity:0.6}}>✕</button>
                         </div>
-                        <button onClick={()=>toggleContractor(sc.company_name)} style={{background:"none",border:"none",color:C.err,fontSize:18,cursor:"pointer",padding:"4px",opacity:0.6}}>✕</button>
+                        {/* Row 2: Equipment + Trade inputs (Original TYR only — 4-column template) */}
+                        {isTYR&&(
+                          <div style={{display:"flex",gap:8,marginTop:6,paddingLeft:32}}>
+                            <div style={{flex:1}}>
+                              <label style={{fontSize:10,fontWeight:600,color:C.mut,display:"block",marginBottom:2}}>Equipment</label>
+                              <input type="text" value={sc.equipment||""} onChange={e=>updateContractorEquipment(sc.company_name,e.target.value)} placeholder="Equipment..." style={{...fs,fontSize:12,padding:"6px 8px"}}/>
+                            </div>
+                            <div style={{flex:1}}>
+                              <label style={{fontSize:10,fontWeight:600,color:C.mut,display:"block",marginBottom:2}}>Trade</label>
+                              <input type="text" value={sc.trade||""} onChange={e=>updateContractorTrade(sc.company_name,e.target.value)} placeholder="Trade..." style={{...fs,fontSize:12,padding:"6px 8px"}}/>
+                            </div>
+                          </div>
+                        )}
                       </div>
                     ))}
                   </div>
                 )}
                 {/* Add contractor — pick from job list or type new */}
-                {selectedContractors.length<8&&(
+                {selectedContractors.length<(isTYR?3:8)&&(
                   <div style={{border:`2px dashed ${C.brd}`,borderRadius:10,padding:12}}>
                     {jobContractors.filter(jc=>!selectedContractors.find(sc=>sc.company_name===jc.company_name)).length>0&&(
                       <div style={{display:"flex",flexWrap:"wrap",gap:6,marginBottom:8}}>
@@ -1949,14 +2238,17 @@ function ReportEditor({job, user, onBack, reportDate}){
                     </div>
                   </div>
                 )}
-                {selectedContractors.length>=8&&<div style={{fontSize:11,color:C.mut,marginTop:6,textAlign:"center"}}>Maximum 8 contractors (4 per column on template)</div>}
+                {selectedContractors.length>=(isTYR?3:8)&&<div style={{fontSize:11,color:C.mut,marginTop:6,textAlign:"center"}}>Maximum {isTYR?3:8} contractors ({isTYR?"3 rows":"4 per column"} on template)</div>}
 
-                {/* ── RFIs / CCDs / ASIs / Submittals — separate input ── */}
+                {/* ── RFIs / CCDs / ASIs / Submittals — Enhanced TYR (V5) only ── */}
+                {isEnhancedTYR&&(
                 <div style={{marginTop:14}}>
                   <label style={{fontSize:14,fontWeight:700,color:C.lt,marginBottom:6,display:"block"}}>RFIs / CCDs / ASIs / Submittals</label>
                   <input type="text" value={vals["RFIs/CCDs/ASIs/Submittals"]||""} onChange={e=>setVal("RFIs/CCDs/ASIs/Submittals",e.target.value)} placeholder="Separate with / for different rows..." style={{...fs}}/>
                   <div style={{fontSize:12,color:C.mut,marginTop:4}}>Use / to separate items (e.g. RFI 001 / CCD 2 / ASI 3)</div>
                 </div>
+                )}
+                </div>}
               </div>
             )}
 
@@ -1965,20 +2257,20 @@ function ReportEditor({job, user, onBack, reportDate}){
             {sectionLabel("📋","REPORT FIELDS")}
             {editFields.filter(f=>{
               if(f.autoFill==="date"||f.autoFill==="increment"||f.autoFill==="name")return false;
-              // TYR: hide contractor/MP/manpower fields — handled by contractor grid above
-              if(isTYR){
+              // TYR: hide contractor/MP/manpower/RFI/equipment/trade fields — handled by dedicated sections above
+              if(isAnyTYR){
                 const fn=(f.name||"").toLowerCase();
-                if(/^contractor|^mp$|^mp:|manpower|crew\s*size|rfis|ccds|asis|submittal/i.test(fn))return false;
+                if(/contractor|^mp$|^mp[:\s]|manpower|crew\s*size|rfis|ccds|asis|submittal|equipment|trade/i.test(fn))return false;
               }
               return true;
             }).map(f=>{
               const isSkipped=skippedFields[f.name];
               // ── TYR v4: Categorize fields ──
               const fn=(f.name||"").toLowerCase();
-              const isTyrReadOnly=isTYR&&(/project|owner|address|general.?statement|location|site\s*address|job\s*site/i.test(fn))&&!(/activit|note|rfi|hours|weather|inspect/i.test(fn));
-              const isTyrHours=isTYR&&/hours|hrs/i.test(fn);
-              const isTyrActivities=isTYR&&/activit/i.test(fn);
-              const isTyrGeneralStmt=isTYR&&/general.?statement/i.test(fn);
+              const isTyrReadOnly=isAnyTYR&&(/project|owner|address|general.?statement|location|site\s*address|job\s*site/i.test(fn))&&!(/activit|note|rfi|hours|weather|inspect/i.test(fn));
+              const isTyrHours=isAnyTYR&&/hours|hrs/i.test(fn);
+              const isTyrActivities=isAnyTYR&&/activit/i.test(fn);
+              const isTyrGeneralStmt=isAnyTYR&&/general.?statement/i.test(fn);
               return(
                 <div key={f.name} style={{marginBottom:isTyrReadOnly?8:14,opacity:isSkipped?0.4:1,transition:"opacity 0.2s"}}>
                   {/* ── TYR v4: Read-only project info fields ── */}
@@ -2003,7 +2295,7 @@ function ReportEditor({job, user, onBack, reportDate}){
                     const notesKw=["notes","observations","comments","description","remarks"];
                     const isNotesField=notesKw.some(k=>fn.includes(k));
                     // TYR: only Daily Activities gets a textarea; all others are single-line inputs
-                    const useTextarea=isTYR?isTyrActivities:(f.voiceEnabled||f.multiline||isNotesField);
+                    const useTextarea=isAnyTYR?isTyrActivities:(f.voiceEnabled||f.multiline||isNotesField);
                     // TYR v4: Hours fields get inline number input
                     if(isTyrHours)return(
                       <input type="number" inputMode="decimal" value={vals[f.name]||""} onChange={e=>setVal(f.name,e.target.value)} aria-label={f.name} placeholder="0" style={{width:100,boxSizing:"border-box",padding:"10px 14px",background:C.inp,border:`1px solid ${C.brd}`,borderRadius:10,color:C.lt,fontSize:15,textAlign:"center"}}/>
@@ -2064,13 +2356,21 @@ function ReportEditor({job, user, onBack, reportDate}){
           <div style={{fontSize:12,color:C.mut,marginTop:8,textAlign:"center"}}>Photos display as {layouts.find(l=>l.k===photoLayout)?.l} in the final PDF</div>
         </div>
 
-        {/* ── Auto-filled & Locked Fields — pushed to bottom ── */}
+        {/* ── Auto-filled & Locked Fields — pushed to bottom, collapsible ── */}
         {(()=>{
           const autoFields=editFields.filter(f=>f.autoFill==="date"||f.autoFill==="increment"||f.autoFill==="name");
           if(autoFields.length===0&&lockFields.length===0)return null;
+          const totalCount=autoFields.length+lockFields.length;
           return(
             <div style={{...cardStyle}}>
-              {sectionLabel("🔒","AUTO-FILLED")}
+              <button onClick={()=>setAutoFilledOpen(!autoFilledOpen)} style={{width:"100%",background:"none",border:"none",cursor:"pointer",padding:0,textAlign:"left",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+                <div style={{fontSize:13,color:C.mut,fontWeight:700,display:"flex",alignItems:"center",gap:8}}>
+                  <span style={{fontSize:16}}>🔒</span><span style={{letterSpacing:1}}>AUTO-FILLED</span>
+                  <span style={{fontSize:12,color:C.mut,fontWeight:700,background:C.inp,borderRadius:12,padding:"2px 10px"}}>{totalCount}</span>
+                </div>
+                <span style={{fontSize:14,color:C.mut,transition:"transform 0.2s",transform:autoFilledOpen?"rotate(180deg)":"rotate(0deg)"}}>▼</span>
+              </button>
+              {autoFilledOpen&&<div style={{marginTop:14}}>
               {autoFields.map((f,i)=>(
                 <div key={f.name} style={{display:"flex",alignItems:"center",padding:"12px 0",borderBottom:i<autoFields.length-1||(lockFields.length>0)?`1px solid ${C.brd}`:"none"}}>
                   <span style={{fontSize:15,color:C.mut,width:110,fontWeight:600}}>{f.name}</span>
@@ -2101,6 +2401,7 @@ function ReportEditor({job, user, onBack, reportDate}){
                   </div>
                 </>
               )}
+              </div>}
             </div>
           );
         })()}

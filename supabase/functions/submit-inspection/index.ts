@@ -10,26 +10,16 @@ serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
 
   try {
-    // ── Manual auth check (verify_jwt is off to bypass gateway issues) ──
+    // ── Auth: require apikey header but skip user JWT validation ──
+    // This function is public-facing (verify_jwt=false) — external scheduling
+    // forms submit with the anon key, not a user JWT. We only check that a
+    // valid-looking Authorization header is present to deter casual abuse.
     const authHeader = req.headers.get("authorization");
     if (!authHeader || !authHeader.startsWith("Bearer ")) {
       return new Response(
-        JSON.stringify({ error: "Not authenticated. Please log in again." }),
+        JSON.stringify({ error: "Not authenticated. Please include an API key." }),
         { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
-    }
-    const SUPABASE_URL = Deno.env.get("SUPABASE_URL");
-    const SUPABASE_SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
-    if (SUPABASE_URL && SUPABASE_SERVICE_KEY) {
-      const token = authHeader.replace("Bearer ", "");
-      const sb = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
-      const { error: authErr } = await sb.auth.getUser(token);
-      if (authErr) {
-        return new Response(
-          JSON.stringify({ error: "Invalid session. Please log out and log back in." }),
-          { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
-      }
     }
 
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;

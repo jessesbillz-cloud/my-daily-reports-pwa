@@ -3,7 +3,7 @@ import { C, SL } from '../constants/theme';
 import { db } from '../utils/db';
 import { AUTH_TOKEN, refreshAuthToken, extractPdfTextStructure } from '../utils/auth';
 import { api } from '../utils/api';
-import { SB_URL, SB_KEY, TYR_COMPANY_ID } from '../constants/supabase';
+import { SB_URL, SB_KEY, TYR_COMPANY_ID, ENHANCED_TYR_ID } from '../constants/supabase';
 import { ensurePdfLib, ensurePdfJs } from '../utils/pdf';
 import WorkLogEditor from './WorkLogEditor';
 import ReportEditor from './ReportEditor';
@@ -22,6 +22,7 @@ function JobDetail({job, user, onBack, onDeleted}){
   const jobLogoInputRef=useRef(null);
   const [jobLogoUrl,setJobLogoUrl]=useState(job.logo_url||null);
   const [jobLogoUploading,setJobLogoUploading]=useState(false);
+  const [companyLogoUrl,setCompanyLogoUrl]=useState(null);
   const handleReuploadTemplate=async(e)=>{
     const f=e.target.files?.[0];if(!f)return;
     const ext=f.name.split(".").pop().toLowerCase();
@@ -48,17 +49,7 @@ function JobDetail({job, user, onBack, onDeleted}){
       const tpl=await db.getTemplate(job.id);
       if(!tpl||!tpl.storage_path){showToast("No template found for this job.");return;}
       if(!AUTH_TOKEN){showToast("Authentication required to download template");return;}
-      // Try downloading from multiple storage locations
-      const authHeaders={apikey:SB_KEY,Authorization:`Bearer ${AUTH_TOKEN}`};
-      const sp=tpl.storage_path;
-      const isCompany=sp.startsWith("company-templates/");
-      const urls=[];
-      if(isCompany){const p=sp.replace("company-templates/","");urls.push(`${SB_URL}/storage/v1/object/company-templates/${p}`,`${SB_URL}/storage/v1/object/public/company-templates/${p}`);}
-      else{urls.push(`${SB_URL}/storage/v1/object/report-source-docs/${sp}`,`${SB_URL}/storage/v1/object/company-templates/${sp}`,`${SB_URL}/storage/v1/object/public/company-templates/${sp}`);}
-      let tplResp=null;
-      for(const u of urls){tplResp=await fetch(u,{headers:authHeaders});if(tplResp.ok)break;}
-      if(!tplResp||!tplResp.ok)throw new Error("Could not download template file.");
-      const buf=await tplResp.arrayBuffer();
+      const buf=await db.downloadTemplateBytes(tpl.storage_path);
       // Extract real text positions client-side with pdf.js
       const textItems=await extractPdfTextStructure(new Uint8Array(buf));
       if(!textItems||textItems.length===0)throw new Error("No extractable text found in this PDF.");
@@ -84,6 +75,8 @@ function JobDetail({job, user, onBack, onDeleted}){
   const [showCompleted,setShowCompleted]=useState(false);
   const [showWorking,setShowWorking]=useState(false);
   const [showPhotos,setShowPhotos]=useState(false);
+  const [jobPhotos,setJobPhotos]=useState([]);
+  const [lightboxPhoto,setLightboxPhoto]=useState(null);
   const [showEditJob,setShowEditJob]=useState(false);
   const [showReport,setShowReport]=useState(false);
   const [showTeam,setShowTeam]=useState(false);
@@ -116,7 +109,8 @@ function JobDetail({job, user, onBack, onDeleted}){
   const jdPreset=(p)=>{setJdSched(p);setJdDays([]);if(p==="as_needed")setJdRemOn(false);};
   const jdEffSch=()=>{if(jdSched==="weekly"||jdSched==="as_needed")return jdSched;if(jdDays.length===5&&["Mon","Tue","Wed","Thu","Fri"].every(d=>jdDays.includes(d))&&!jdDays.includes("Sat")&&!jdDays.includes("Sun"))return"daily_mf";if(jdDays.length===7)return"daily_7";if(jdDays.length>0)return"custom";return jdSched||"as_needed";};
   const [jdSlug,setJdSlug]=useState("");
-  useEffect(()=>{db.getProfile(user.id).then(p=>{if(p?.slug)setJdSlug(p.slug);}).catch(()=>{});},[user.id]);
+  useEffect(()=>{db.getProfile(user.id).then(p=>{if(p?.slug)setJdSlug(p.slug);if(p?.company_id)db.getCompanyLogoUrl(p.company_id).then(url=>{if(url)setCompanyLogoUrl(url);}).catch(()=>{});}).catch(()=>{});},[user.id]);
+  useEffect(()=>{if(job.job_type==="worklog"&&!jobLogoUrl)db.getJobLogoUrl(job.id).then(url=>{if(url)setJobLogoUrl(url);}).catch(()=>{});},[job.id,job.job_type]);
   const [showFieldEdit,setShowFieldEdit]=useState(false);
   const [fieldEditFields,setFieldEditFields]=useState(null); // null=not loaded
   const [fieldEditSaving,setFieldEditSaving]=useState(false);
@@ -124,8 +118,57 @@ function JobDetail({job, user, onBack, onDeleted}){
   const [visualEditorB64,setVisualEditorB64]=useState(null);
 
   const [tplFilename,setTplFilename]=useState(null);
+  const [showCompanyTpls,setShowCompanyTpls]=useState(false);
+  const [companyTpls,setCompanyTpls]=useState([]);
+  const [loadingCompanyTpls,setLoadingCompanyTpls]=useState(false);
+  const [applyingCompanyTpl,setApplyingCompanyTpl]=useState(null);
+  const loadCompanyTemplates=async()=>{
+    if(companyTpls.length>0){setShowCompanyTpls(!showCompanyTpls);return;}
+    setLoadingCompanyTpls(true);
+    try{
+      // Load templates for this job's company
+      const cid=job.company_id;
+      if(!cid){showToast("No company linked to this job");return;}
+      const tpls=await db.getCompanyTemplates(cid);
+      console.log("[loadCompanyTpls] found:",tpls.map(t=>({id:t.id,name:t.template_name,path:t.storage_path})));
+      setCompanyTpls(tpls);
+      setShowCompanyTpls(true);
+      if(tpls.length===0)showToast("No company templates found");
+    }catch(e){console.error("Load company templates:",e);showToast("Failed to load company templates");}
+    finally{setLoadingCompanyTpls(false);}
+  };
+  const applyCompanyTemplate=async(tpl)=>{
+    setApplyingCompanyTpl(tpl.id);
+    try{
+      // Download the company template file
+      // Download using central downloadTemplateBytes (handles all path variants + bucket search)
+      const sp=tpl.storage_path;
+      console.log("[applyTpl] downloading template, storage_path:",sp);
+      const buf=await db.downloadTemplateBytes(sp);
+      const blob=new Blob([buf],{type:"application/pdf"});
+      console.log("[applyTpl] downloaded, size:",blob.size);
+      const ext=tpl.file_type||"pdf";
+      // Upload to this job's template storage
+      const uploadBlob=new Blob([await blob.arrayBuffer()],{type:blob.type||"application/pdf"});
+      const newSp=await db.ulTpl(user.id,job.id,uploadBlob,ext);
+      // Update or create template record for this job
+      const existing=await db.getTemplate(job.id);
+      const fname=tpl.original_filename||tpl.file_name||`template.${ext}`;
+      if(existing){
+        await api.rest.patchTemplate(existing.id,{storage_path:newSp,original_filename:fname,file_type:ext});
+      }else{
+        await db.mkTpl({user_id:user.id,job_id:job.id,name:fname,original_filename:fname,file_type:ext,storage_path:newSp,field_config:tpl.field_config||[]});
+      }
+      setTplFilename(fname);
+      setShowCompanyTpls(false);
+      showToast("Template applied: "+fname);
+    }catch(e){console.error("Apply company template:",e);showToast("Failed: "+e.message);}
+    finally{setApplyingCompanyTpl(null);}
+  };
   // ── TYR v3: Contractor management (only for TYR jobs) ──
   const isTYR=job.company_id===TYR_COMPANY_ID;
+  const isEnhancedTYR=job.company_id===ENHANCED_TYR_ID;
+  const isAnyTYR=isTYR||isEnhancedTYR;
   const [showContractors,setShowContractors]=useState(false);
   const [jobContractors,setJobContractors]=useState([]);
   const [newContractorName,setNewContractorName]=useState("");
@@ -135,10 +178,10 @@ function JobDetail({job, user, onBack, onDeleted}){
   const [generalStmt,setGeneralStmt]=useState(job.general_statement||"");
   const [generalStmtSaving,setGeneralStmtSaving]=useState(false);
   const loadContractors=useCallback(async()=>{
-    if(!isTYR)return;
+    if(!isAnyTYR)return;
     try{const c=await db.getJobContractors(job.id);setJobContractors(c);}catch(e){console.error("Load contractors:",e);}
-  },[job.id,isTYR]);
-  useEffect(()=>{if(isTYR)loadContractors();},[isTYR,loadContractors]);
+  },[job.id,isAnyTYR]);
+  useEffect(()=>{if(isAnyTYR)loadContractors();},[isAnyTYR,loadContractors]);
 
   const loadReports=useCallback(async()=>{
     try{
@@ -147,11 +190,14 @@ function JobDetail({job, user, onBack, onDeleted}){
     }catch(e){console.error(e);}
     finally{setLoading(false);}
   },[job.id]);
+  const loadJobPhotos=useCallback(async()=>{
+    try{const p=await db.getJobPhotos(job.id);setJobPhotos(p);}catch(e){console.error("loadJobPhotos:",e);}
+  },[job.id]);
   const loadTplFilename=useCallback(async()=>{
     try{const t=await db.getTemplate(job.id);if(t&&t.original_filename)setTplFilename(t.original_filename);}catch(e){}
   },[job.id]);
 
-  useEffect(()=>{loadReports();loadTplFilename();},[loadReports,loadTplFilename]);
+  useEffect(()=>{loadReports();loadTplFilename();loadJobPhotos();},[loadReports,loadTplFilename,loadJobPhotos]);
 
   const tz=Intl.DateTimeFormat().resolvedOptions().timeZone;
   const today=new Date().toLocaleDateString("en-CA",{timeZone:tz});
@@ -261,6 +307,28 @@ function JobDetail({job, user, onBack, onDeleted}){
     return n;
   };
 
+  const handleJobLogoUpload=async(e)=>{
+    const f=e.target.files?.[0];if(!f)return;
+    setJobLogoUploading(true);
+    try{
+      const url=await db.uploadJobLogo(job.id,f);
+      setJobLogoUrl(url);job.logo_url=url;
+      showToast("Logo uploaded");
+    }catch(err){showToast(err.message||"Upload failed");}
+    finally{setJobLogoUploading(false);if(jobLogoInputRef.current)jobLogoInputRef.current.value="";}
+  };
+  const useCompanyLogo=async()=>{
+    if(!companyLogoUrl){showToast("No company logo found — upload one in Account Settings");return;}
+    try{
+      await db.removeJobLogo(job.id);
+      setJobLogoUrl(null);job.logo_url=null;
+      showToast("Using company logo from your settings");
+    }catch(e){showToast("Failed to update");}
+  };
+  const removeJobLogo=async()=>{
+    try{await db.removeJobLogo(job.id);setJobLogoUrl(null);job.logo_url=null;showToast("Logo removed");}catch(e){showToast("Failed to remove");}
+  };
+
   const doDelete=async()=>{
     setDeleting(true);
     try{
@@ -288,7 +356,7 @@ function JobDetail({job, user, onBack, onDeleted}){
 
   const [editDate,setEditDate]=useState(null);
   const openReport=(date)=>{setEditDate(date||null);setReportStarted(true);setShowReport(true);};
-  const closeReport=()=>{setShowReport(false);setEditDate(null);setLoading(true);loadReports();};
+  const closeReport=()=>{setShowReport(false);setEditDate(null);setLoading(true);loadReports();loadJobPhotos();};
 
   const fs={width:"100%",padding:"12px 14px",background:C.inp,border:`1px solid ${C.brd}`,borderRadius:10,color:C.txt,fontSize:15};
   const ls={display:"block",color:C.lt,fontSize:13,fontWeight:600,marginBottom:6};
@@ -345,7 +413,7 @@ function JobDetail({job, user, onBack, onDeleted}){
           <div style={{fontWeight:700,fontSize:17,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{job.name}</div>
           {job.site_address&&<div style={{fontSize:12,color:C.mut,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{job.site_address}</div>}
         </div>
-        <button onClick={()=>setShowJobSet(!showJobSet)} style={{width:56,height:56,borderRadius:12,background:C.inp,border:`1px solid ${showJobSet?C.org:C.brd}`,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",fontSize:28,fontWeight:700,color:"#fff"}}aria-label="Job settings">⚙</button>
+        <button onClick={()=>setShowJobSet(!showJobSet)} style={{width:56,height:56,borderRadius:12,background:C.inp,border:`1px solid ${showJobSet?C.org:C.brd}`,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",fontSize:28,color:"#fff"}}aria-label="Job settings">⚙️</button>
       </div>
       </div>
 
@@ -374,14 +442,39 @@ function JobDetail({job, user, onBack, onDeleted}){
         </div>
 
         {/* ── Photo Gallery ── */}
-        <Folder icon="📷" label="Photos" count={0} color={C.blu} open={showPhotos} setOpen={setShowPhotos}>
-          <div style={{textAlign:"center",padding:"20px 0"}}>
-            <div style={{fontSize:36,marginBottom:8}}>📷</div>
-            <p style={{fontSize:14,fontWeight:600,color:C.lt,marginBottom:4}}>Job Photo Gallery</p>
-            <p style={{fontSize:12,color:C.mut,marginBottom:14}}>Store photos for this job to use in future reports</p>
-            <button onClick={()=>showToast("Photo gallery coming soon!")} className="btn-o" style={{padding:"10px 24px",background:C.org,border:"none",borderRadius:8,color:"#fff",fontSize:14,fontWeight:600,cursor:"pointer"}}>Take or Upload Photo</button>
-          </div>
+        <Folder icon="📷" label="Photos" count={jobPhotos.length} color={C.blu} open={showPhotos} setOpen={setShowPhotos}>
+          {jobPhotos.length===0?(
+            <div style={{textAlign:"center",padding:"20px 0"}}>
+              <div style={{fontSize:36,marginBottom:8}}>📷</div>
+              <p style={{fontSize:14,fontWeight:600,color:C.lt,marginBottom:4}}>No photos yet</p>
+              <p style={{fontSize:12,color:C.mut}}>Photos taken in daily reports will appear here</p>
+            </div>
+          ):(
+            <div>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:6,padding:"8px 0"}}>
+                {jobPhotos.map(p=>(
+                  <button key={p.id} onClick={()=>setLightboxPhoto(p)} style={{position:"relative",aspectRatio:"1",borderRadius:8,overflow:"hidden",border:`1px solid ${C.brd}`,background:C.inp,cursor:"pointer",padding:0}}>
+                    <img src={p.src} alt={p.name||"Photo"} style={{width:"100%",height:"100%",objectFit:"cover",display:"block"}}/>
+                  </button>
+                ))}
+              </div>
+              <div style={{fontSize:11,color:C.mut,textAlign:"center",marginTop:6}}>{jobPhotos.length} photo{jobPhotos.length!==1?"s":""} from {new Set(jobPhotos.map(p=>p.report_date)).size} report{new Set(jobPhotos.map(p=>p.report_date)).size!==1?"s":""}</div>
+            </div>
+          )}
         </Folder>
+
+        {/* Photo lightbox */}
+        {lightboxPhoto&&(
+          <div onClick={()=>setLightboxPhoto(null)} style={{position:"fixed",top:0,left:0,right:0,bottom:0,background:"rgba(0,0,0,0.92)",zIndex:9999,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:16}}>
+            <button onClick={()=>setLightboxPhoto(null)} style={{position:"absolute",top:16,right:16,width:44,height:44,borderRadius:"50%",background:"rgba(255,255,255,0.15)",border:"none",color:"#fff",fontSize:22,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}>✕</button>
+            <img src={lightboxPhoto.src} alt={lightboxPhoto.name||"Photo"} onClick={e=>e.stopPropagation()} style={{maxWidth:"100%",maxHeight:"80vh",borderRadius:8,objectFit:"contain"}}/>
+            {lightboxPhoto.report_date&&(
+              <div style={{color:"rgba(255,255,255,0.6)",fontSize:12,marginTop:12}}>
+                Report #{lightboxPhoto.report_number||"?"} — {new Date(lightboxPhoto.report_date+"T12:00:00").toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric",timeZone:tz})}
+              </div>
+            )}
+          </div>
+        )}
 
         {/* ── Working Copies Folder ── */}
         <Folder icon="📋" label="Working Copies" count={working.length} color={C.org} open={showWorking} setOpen={setShowWorking}>
@@ -476,7 +569,7 @@ function JobDetail({job, user, onBack, onDeleted}){
         )}
 
         {/* ── TYR v3: Contractors (inline) ── */}
-        {isTYR&&showContractors&&(
+        {isAnyTYR&&showContractors&&(
           <div style={{background:C.card,border:`1px solid ${C.org}`,borderRadius:12,padding:20,marginBottom:16}}>
             <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:6}}>
               <div style={{fontWeight:700,fontSize:15,color:C.org,display:"flex",alignItems:"center",gap:8}}>
@@ -504,7 +597,7 @@ function JobDetail({job, user, onBack, onDeleted}){
           </div>
         )}
 
-        {showGeneralStmt&&isTYR&&(
+        {showGeneralStmt&&isAnyTYR&&(
           <div style={{background:C.card,border:`1px solid ${C.brd}`,borderRadius:12,overflow:"hidden",marginBottom:16}}>
             <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"14px 18px",borderBottom:`1px solid ${C.brd}`}}>
               <div style={{fontWeight:700,fontSize:15,color:C.org}}>General Statement</div>
@@ -704,72 +797,65 @@ function JobDetail({job, user, onBack, onDeleted}){
             <button onClick={()=>{setShowEditJob(!showEditJob);setEditName(job.name);setEditAddr(job.site_address||"");}} style={{width:"100%",display:"flex",alignItems:"center",gap:10,padding:"14px 18px",background:"none",border:"none",borderBottom:`1px solid ${C.brd}`,cursor:"pointer",textAlign:"left"}}>
               <span style={{fontSize:16}}>✏️</span><span style={{fontSize:14,fontWeight:600,color:C.lt}}>Edit Job Details</span>
             </button>
-            {/* Job Logo */}
-            <div style={{padding:"14px 18px",borderBottom:`1px solid ${C.brd}`}}>
-              <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:8}}>
-                <span style={{fontSize:14,fontWeight:600,color:C.lt}}>Report Logo</span>
-                {jobLogoUploading&&<span style={{fontSize:11,color:C.mut}}>Uploading...</span>}
+            {job.job_type==="worklog"&&(
+              <div style={{padding:"14px 18px",borderBottom:`1px solid ${C.brd}`}}>
+                <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:10}}>
+                  <span style={{fontSize:16}}>🖼️</span><span style={{fontSize:14,fontWeight:600,color:C.lt}}>Report Logo</span>
+                </div>
+                <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:10}}>
+                  {(jobLogoUrl||companyLogoUrl)?(
+                    <img src={jobLogoUrl||companyLogoUrl} alt="Logo" style={{width:56,height:56,borderRadius:8,objectFit:"contain",background:"#fff",border:`1px solid ${C.brd}`}}/>
+                  ):(
+                    <div style={{width:56,height:56,borderRadius:8,background:C.inp,border:`1px solid ${C.brd}`,display:"flex",alignItems:"center",justifyContent:"center",color:C.mut,fontSize:11}}>No logo</div>
+                  )}
+                  <div style={{flex:1}}>
+                    {jobLogoUrl&&<div style={{fontSize:11,color:C.ok,fontWeight:600,marginBottom:4}}>Custom job logo</div>}
+                    {!jobLogoUrl&&companyLogoUrl&&<div style={{fontSize:11,color:C.ok,fontWeight:600,marginBottom:4}}>Using company logo</div>}
+                    {!jobLogoUrl&&!companyLogoUrl&&<div style={{fontSize:11,color:C.mut,marginBottom:4}}>Upload a logo or set one in Account Settings</div>}
+                  </div>
+                </div>
+                <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+                  <input ref={jobLogoInputRef} type="file" accept="image/*" onChange={handleJobLogoUpload} style={{display:"none"}}/>
+                  <button onClick={()=>jobLogoInputRef.current?.click()} disabled={jobLogoUploading} style={{padding:"8px 14px",background:C.inp,border:`1px solid ${C.brd}`,borderRadius:8,color:C.txt,fontSize:12,fontWeight:600,cursor:"pointer"}}>
+                    {jobLogoUploading?"Uploading...":"Upload Logo"}
+                  </button>
+                  {companyLogoUrl&&jobLogoUrl&&(
+                    <button onClick={useCompanyLogo} style={{padding:"8px 14px",background:C.inp,border:`1px solid ${C.brd}`,borderRadius:8,color:C.txt,fontSize:12,fontWeight:600,cursor:"pointer"}}>
+                      Use Company Logo
+                    </button>
+                  )}
+                  {jobLogoUrl&&(
+                    <button onClick={removeJobLogo} style={{padding:"8px 14px",background:"none",border:`1px solid ${C.brd}`,borderRadius:8,color:C.err,fontSize:12,fontWeight:600,cursor:"pointer"}}>
+                      Remove
+                    </button>
+                  )}
+                </div>
               </div>
-              {jobLogoUrl?(
-                <div style={{display:"flex",alignItems:"center",gap:12}}>
-                  <img src={jobLogoUrl+(jobLogoUrl.includes("?")?`&cb=${Date.now()}`:`?cb=${Date.now()}`)} style={{width:56,height:56,objectFit:"contain",borderRadius:8,border:`1px solid ${C.brd}`,background:"#fff"}} alt="Logo"/>
-                  <button onClick={()=>jobLogoInputRef.current?.click()} disabled={jobLogoUploading} style={{padding:"6px 12px",background:C.inp,border:`1px solid ${C.brd}`,borderRadius:6,color:C.lt,fontSize:12,cursor:"pointer"}}>Change</button>
-                  <button onClick={async()=>{setJobLogoUploading(true);try{await db.removeJobLogo(job.id);job.logo_url=null;setJobLogoUrl(null);showToast("Logo removed");}catch(e){showToast("Remove failed");}finally{setJobLogoUploading(false);}}} disabled={jobLogoUploading} style={{padding:"6px 12px",background:C.inp,border:`1px solid ${C.brd}`,borderRadius:6,color:C.err,fontSize:12,cursor:"pointer"}}>Remove</button>
-                </div>
-              ):(
-                <div>
-                  <button onClick={()=>jobLogoInputRef.current?.click()} disabled={jobLogoUploading} style={{padding:"10px 16px",background:C.inp,border:`1px solid ${C.brd}`,borderRadius:8,color:C.lt,fontSize:13,cursor:"pointer"}}>Upload Logo</button>
-                  <div style={{fontSize:11,color:C.mut,marginTop:4}}>Uses your company logo if not set.</div>
-                </div>
-              )}
-              <input ref={jobLogoInputRef} type="file" accept="image/*" style={{display:"none"}} onChange={async(e)=>{
-                const f=e.target.files?.[0];if(!f)return;
-                if(f.size>2*1024*1024){showToast("Logo must be under 2MB");return;}
-                if(!f.type.startsWith("image/")){showToast("Must be an image");return;}
-                setJobLogoUploading(true);
-                try{const url=await db.uploadJobLogo(job.id,f);job.logo_url=url;setJobLogoUrl(url);showToast("Logo updated!");}
-                catch(err){showToast("Upload failed: "+err.message);}
-                finally{setJobLogoUploading(false);if(jobLogoInputRef.current)jobLogoInputRef.current.value="";}
-              }}/>
-            </div>
+            )}
             <button type="button" aria-expanded={showTeam} onClick={()=>setShowTeam(!showTeam)} style={{width:"100%",display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,padding:"14px 18px",background:"none",border:"none",borderBottom:`1px solid ${C.brd}`,cursor:"pointer",textAlign:"left"}}>
               <div style={{display:"flex",alignItems:"center",gap:10}}>
                 <span style={{fontSize:14,fontWeight:600,color:C.lt}}>Project Team</span>
               </div>
               <span style={{fontSize:11,color:C.mut,background:C.inp,borderRadius:10,padding:"2px 8px"}}>{teamMembers.length}</span>
             </button>
-            <button onClick={()=>setShowSchedContacts(!showSchedContacts)} style={{width:"100%",display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,padding:"14px 18px",background:"none",border:"none",borderBottom:`1px solid ${C.brd}`,cursor:"pointer",textAlign:"left"}}>
-              <div style={{display:"flex",alignItems:"center",gap:10}}>
-                <span style={{fontSize:14,fontWeight:600,color:C.lt}}>Scheduling Contacts</span>
-              </div>
-              <span style={{fontSize:11,color:C.mut,background:C.inp,borderRadius:10,padding:"2px 8px"}}>{schedContacts.length}</span>
-            </button>
-            {isTYR&&(
-              <button type="button" aria-expanded={showContractors} onClick={()=>setShowContractors(!showContractors)} style={{width:"100%",display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,padding:"14px 18px",background:"none",border:"none",borderBottom:`1px solid ${C.brd}`,cursor:"pointer",textAlign:"left"}}>
+            {job.company_id&&(
+              <button onClick={loadCompanyTemplates} disabled={loadingCompanyTpls} style={{width:"100%",display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,padding:"14px 18px",background:"none",border:"none",borderBottom:`1px solid ${C.brd}`,cursor:"pointer",textAlign:"left"}}>
                 <div style={{display:"flex",alignItems:"center",gap:10}}>
-                  <span style={{fontSize:16}}>🏗️</span><span style={{fontSize:14,fontWeight:600,color:C.lt}}>Contractors</span>
+                  <span style={{fontSize:16}}>🏢</span><span style={{fontSize:14,fontWeight:600,color:C.lt}}>{loadingCompanyTpls?"Loading...":"Use Company Template"}</span>
                 </div>
-                <span style={{fontSize:11,color:C.mut,background:C.inp,borderRadius:10,padding:"2px 8px"}}>{jobContractors.length}</span>
+                <span style={{fontSize:14,color:C.mut}}>{showCompanyTpls?"▲":"▼"}</span>
               </button>
             )}
-            {isTYR&&(
-              <button type="button" aria-expanded={showGeneralStmt} onClick={()=>setShowGeneralStmt(!showGeneralStmt)} style={{width:"100%",display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,padding:"14px 18px",background:"none",border:"none",borderBottom:`1px solid ${C.brd}`,cursor:"pointer",textAlign:"left"}}>
-                <div style={{display:"flex",alignItems:"center",gap:10}}>
-                  <span style={{fontSize:16}}>📋</span><span style={{fontSize:14,fontWeight:600,color:C.lt}}>General Statement</span>
-                </div>
-                <span style={{fontSize:11,color:generalStmt?C.ok:C.mut,fontWeight:600}}>{generalStmt?"Set":"Not Set"}</span>
-              </button>
-            )}
-            <button onClick={()=>{if(!fieldEditFields){const fc=job.field_config||{};const all=[...(fc.editable||[]).map(f=>({...f,mode:f.autoFill==="date"?"auto-date":f.autoFill==="increment"?"auto-num":"edit"})),...(fc.locked||[]).map(f=>({...f,mode:"lock"}))];setFieldEditFields(all);}setShowFieldEdit(!showFieldEdit);}} style={{width:"100%",display:"flex",alignItems:"center",gap:10,padding:"14px 18px",background:"none",border:"none",borderBottom:`1px solid ${C.brd}`,cursor:"pointer",textAlign:"left"}}>
-              <span style={{fontSize:14,fontWeight:600,color:C.lt}}>Edit Template Fields</span>
-            </button>
-            <button onClick={()=>reuploadRef.current?.click()} disabled={reuploading} style={{width:"100%",display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,padding:"14px 18px",background:"none",border:"none",borderBottom:`1px solid ${C.brd}`,cursor:"pointer",textAlign:"left"}}>
-              <div style={{display:"flex",alignItems:"center",gap:10}}>
-                <span style={{fontSize:16}}>📄</span><span style={{fontSize:14,fontWeight:600,color:C.lt}}>{reuploading?"Uploading...":"Replace Template File"}</span>
+            {showCompanyTpls&&companyTpls.length>0&&(
+              <div style={{padding:"8px 18px",borderBottom:`1px solid ${C.brd}`,background:C.inp}}>
+                {companyTpls.map(t=>(
+                  <button key={t.id} onClick={()=>applyCompanyTemplate(t)} disabled={!!applyingCompanyTpl} style={{width:"100%",display:"flex",alignItems:"center",justifyContent:"space-between",padding:"10px 12px",margin:"4px 0",background:C.card,border:`1px solid ${C.brd}`,borderRadius:8,cursor:applyingCompanyTpl?"default":"pointer",opacity:applyingCompanyTpl===t.id?0.5:1}}>
+                    <span style={{fontSize:13,fontWeight:600,color:C.lt}}>{t.template_name||t.original_filename||t.file_name||"Template"}</span>
+                    <span style={{fontSize:11,color:C.mut}}>{applyingCompanyTpl===t.id?"Applying...":t.file_type?.toUpperCase()||"PDF"}</span>
+                  </button>
+                ))}
               </div>
-              {tplFilename&&<span style={{fontSize:11,color:C.mut,maxWidth:140,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{tplFilename}</span>}
-            </button>
-            <input ref={reuploadRef} type="file" accept=".pdf,.docx,.doc,.jpg,.jpeg,.png" onChange={handleReuploadTemplate} style={{display:"none"}}/>
+            )}
             {job.field_config&&(
               <button onClick={async()=>{const cur=!!job.weather_enabled;try{await db.updateJobWeatherEnabled(job.id,!cur);job.weather_enabled=!cur;showToast("Weather "+(job.weather_enabled?"enabled":"disabled"));}catch(e){showToast("Save failed");}}} style={{width:"100%",display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,padding:"14px 18px",background:"none",border:"none",borderBottom:`1px solid ${C.brd}`,cursor:"pointer",textAlign:"left"}}>
                 <div style={{display:"flex",alignItems:"center",gap:10}}>
@@ -790,38 +876,21 @@ function JobDetail({job, user, onBack, onDeleted}){
               </div>
               <span style={{fontSize:11,color:job.field_config?.aiProofread?C.ok:C.mut,fontWeight:600}}>{job.field_config?.aiProofread?"ON":"OFF"}</span>
             </button>
+            <button onClick={async()=>{const cur=job.field_config?.digitalSignature!==false;const fc={...(job.field_config||{}),digitalSignature:!cur};try{await db.updateJobFieldConfig(job.id,fc);job.field_config=fc;showToast("Digital Signature "+(fc.digitalSignature!==false?"enabled":"disabled"));}catch(e){showToast("Save failed");}}} style={{width:"100%",display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,padding:"14px 18px",background:"none",border:"none",borderBottom:`1px solid ${C.brd}`,cursor:"pointer",textAlign:"left"}}>
+              <div style={{display:"flex",alignItems:"center",gap:10}}>
+                <span style={{fontSize:16}}>✒️</span><span style={{fontSize:14,fontWeight:600,color:C.lt}}>Digital Signature</span>
+              </div>
+              <span style={{fontSize:11,color:job.field_config?.digitalSignature!==false?C.ok:C.mut,fontWeight:600}}>{job.field_config?.digitalSignature!==false?"ON":"OFF"}</span>
+            </button>
             <button type="button" aria-expanded={showSchedSet} onClick={()=>{setShowSchedSet(!showSchedSet);setShowTeam(false);}} style={{width:"100%",display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,padding:"14px 18px",background:"none",border:"none",borderBottom:`1px solid ${C.brd}`,cursor:"pointer",textAlign:"left"}}>
               <div style={{display:"flex",alignItems:"center",gap:10}}>
                 <span style={{fontSize:16}}>📅</span><span style={{fontSize:14,fontWeight:600,color:C.lt}}>Jobsite Scheduling</span>
               </div>
               <span style={{fontSize:11,color:schedEnabled?C.ok:C.mut,fontWeight:600}}>{schedEnabled?"ON":"OFF"}</span>
             </button>
-            <button type="button" aria-expanded={showFreqSet} aria-controls="freq-reminders-panel" onClick={()=>{setShowFreqSet(!showFreqSet);}} style={{width:"100%",display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,padding:"14px 18px",background:"none",border:"none",borderBottom:`1px solid ${C.brd}`,cursor:"pointer",textAlign:"left"}}>
-              <div style={{display:"flex",alignItems:"center",gap:10}}>
-                <span style={{fontSize:16}}>🔔</span><span style={{fontSize:14,fontWeight:600,color:C.lt}}>Frequency & Reminders</span>
-              </div>
-              <span style={{fontSize:11,color:C.mut,fontWeight:600}}>{SL[job.schedule]||job.schedule||"As Needed"}</span>
+            <button onClick={async()=>{if(!await askConfirm("Permanently delete this job and all its reports? This cannot be undone."))return;doDelete();}} disabled={deleting} style={{width:"100%",display:"flex",alignItems:"center",gap:10,padding:"14px 18px",background:"none",border:"none",cursor:deleting?"default":"pointer",textAlign:"left",opacity:deleting?0.5:1}}>
+              <span style={{fontSize:16}}>🗑️</span><span style={{fontSize:14,fontWeight:600,color:C.err}}>{deleting?"Deleting...":"Delete Job"}</span>
             </button>
-            <button onClick={async()=>{const isArch=job.is_archived===true||job.is_archived==='true'||job.is_archived==='t';const newVal=!isArch;console.log("[Archive] toggling",{jobId:job.id,rawVal:job.is_archived,typeofVal:typeof job.is_archived,isArch,newVal,jobName:job.name});try{const result=await api.rest.patchJob(job.id,{is_archived:newVal});console.log("[Archive] success",result);showToast(newVal?"Job archived":"Job restored");if(onBack)onBack();}catch(e){console.error("[Archive] FAILED:",e);showToast("Archive failed: "+e.message);}}} style={{width:"100%",display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,padding:"14px 18px",background:"none",border:"none",borderBottom:`1px solid ${C.brd}`,cursor:"pointer",textAlign:"left"}}>
-              <div style={{display:"flex",alignItems:"center",gap:10}}>
-                <span style={{fontSize:16}}>📦</span><span style={{fontSize:14,fontWeight:600,color:C.lt}}>{(job.is_archived===true||job.is_archived==='true'||job.is_archived==='t')?"Restore from Archive":"Archive This Job"}</span>
-              </div>
-            </button>
-            <div style={{padding:"14px 18px",borderTop:`1px solid #5c2023`}}>
-              {!showDel?(
-                <button onClick={()=>setShowDel(true)} style={{width:"100%",padding:"10px 16px",background:"transparent",border:"1px solid #5c2023",borderRadius:8,color:C.err,fontSize:13,fontWeight:600,cursor:"pointer"}}>Delete This Job</button>
-              ):(
-                <div>
-                  <p style={{fontSize:12,color:C.err,lineHeight:1.5,marginBottom:10}}>Permanently delete "{job.name}" and all its reports, templates, and data. Cannot be undone.</p>
-                  <div style={{display:"flex",gap:10}}>
-                    <button onClick={()=>setShowDel(false)} style={{flex:1,padding:"10px 0",background:C.inp,border:`1px solid ${C.brd}`,borderRadius:8,color:C.lt,fontSize:13,fontWeight:600,cursor:"pointer"}}>Cancel</button>
-                    <button onClick={doDelete} disabled={deleting} style={{flex:1,padding:"10px 0",background:"#ef4444",border:"none",borderRadius:8,color:"#fff",fontSize:13,fontWeight:700,cursor:deleting?"default":"pointer",opacity:deleting?0.6:1}}>
-                      {deleting?"Deleting...":"Delete Permanently"}
-                    </button>
-                  </div>
-                </div>
-              )}
-            </div>
           </div>
         )}
       </div>
