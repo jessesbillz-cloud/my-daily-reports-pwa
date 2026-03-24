@@ -838,6 +838,8 @@ function submitIRContinue(d,t,nm){
     // Add checked additional recipients
     additionalRecipients.forEach(function(r){if(r.checked!==false&&r.email)emails.push(r.email);});
     var btn=document.getElementById('submitBtn'); btn.textContent='Submitting...'; btn.disabled=true;
+    // Safety valve: re-enable button after 30s if something hangs
+    var safetyTimer=setTimeout(function(){btn.disabled=false;btn.textContent='Submit Scheduling Request';showToast('Request timed out — please try again');},30000);
     var fd=new FormData();
     allFiles.forEach(function(file,index){fd.append('file_'+index,file);});
     fd.append('project',PROJ); fd.append('gc',cleanName); if(JOB_ID)fd.append('job_id',JOB_ID);
@@ -868,6 +870,7 @@ function submitIRContinue(d,t,nm){
     .then(function(r){
         return r.json().then(function(data){ data._status=r.status; return data; });
     }).then(function(data){
+        clearTimeout(safetyTimer);
         if(data.success){ document.getElementById('requestView').style.display='none'; document.getElementById('successView').style.display='block'; loadMD(); }
         else if(data._status===409){
             var w=document.getElementById('dateWarning');
@@ -879,6 +882,7 @@ function submitIRContinue(d,t,nm){
         }
         else { showToast('Error — try again'); btn.disabled=false; btn.textContent='Submit Scheduling Request'; }
     }).catch(function(err){
+        clearTimeout(safetyTimer);
         showToast('Submit failed — try again');
         btn.disabled=false; btn.textContent='Submit Scheduling Request';
     });

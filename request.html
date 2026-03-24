@@ -677,6 +677,8 @@ function submitIR(){
     var addl=document.getElementById('additionalEmailsList').value.trim();
     if(addl) emails=emails.concat(addl.split(',').map(function(e){return e.trim();}));
     var btn=document.getElementById('submitBtn'); btn.textContent='Submitting...'; btn.disabled=true;
+    // Safety valve: re-enable button after 30s if something hangs
+    var safetyTimer=setTimeout(function(){btn.disabled=false;btn.textContent='Submit Scheduling Request';showToast('Request timed out — please try again');},30000);
     var fd=new FormData();
     allFiles.forEach(function(file,index){fd.append('file_'+index,file);});
     fd.append('project',PROJ); fd.append('gc',cleanName); if(JOB_ID)fd.append('job_id',JOB_ID);
@@ -721,6 +723,7 @@ function submitIR(){
         console.log('[submitIR] Response status:', r.status);
         return r.json().then(function(data){ data._status=r.status; return data; });
     }).then(function(data){
+        clearTimeout(safetyTimer);
         console.log('[submitIR] Response data:', JSON.stringify(data));
         if(data.success){ document.getElementById('requestView').style.display='none'; document.getElementById('successView').style.display='block'; loadMD(); }
         else if(data._status===409){
@@ -732,6 +735,7 @@ function submitIR(){
         }
         else { showToast('Error — try again'); btn.disabled=false; btn.textContent='Submit Scheduling Request'; }
     }).catch(function(err){
+        clearTimeout(safetyTimer);
         console.error('[submitIR] Fetch error:', err);
         showToast('Submit failed — try again');
         btn.disabled=false; btn.textContent='Submit Scheduling Request';
