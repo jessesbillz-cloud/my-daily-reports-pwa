@@ -138,6 +138,12 @@ details[open] .collapsible-summary::after { content: '−'; }
 </div>
 <input type="file" id="photoIn" onchange="handleFileSelection(this)" multiple accept="image/*,.pdf" style="display:none;">
 <div id="filePreviewGrid" class="file-list-container"></div>
+<div id="aiFillRow" style="display:none;margin-bottom:14px;">
+    <button type="button" id="aiFillBtn" onclick="aiParseSchedulingPhoto()" style="width:100%;padding:12px;background:linear-gradient(135deg,#5a8fc0,#7b61ff);border:none;border-radius:8px;color:#fff;font-size:14px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;">
+        <span style="font-size:16px;">&#10024;</span> AI Fill from Photo
+    </button>
+    <div id="aiFillStatus" style="display:none;text-align:center;color:#5a8fc0;font-size:12px;font-weight:600;margin-top:6px;"></div>
+</div>
 <label class="field-label" for="iDate">Date *</label>
 <input type="date" id="iDate" class="field-input" min="">
 <div id="dateWarning" style="display:none;color:#ef4444;font-size:12px;font-weight:600;margin-top:-10px;margin-bottom:10px;"></div>
@@ -382,6 +388,72 @@ function renderFileGrid(){
         removeBtn.onclick=function(){removeFile(index);};
         item.appendChild(removeBtn); grid.appendChild(item);
     });
+    // Show/hide AI Fill button — show if there's at least one image file
+    var hasImage=allFiles.some(function(f){return f.type.startsWith('image/');});
+    document.getElementById('aiFillRow').style.display=hasImage?'block':'none';
+}
+function aiParseSchedulingPhoto(){
+    // Find first image file
+    var imgFile=allFiles.find(function(f){return f.type.startsWith('image/');});
+    if(!imgFile){showToast('No image to analyze');return;}
+    var btn=document.getElementById('aiFillBtn');
+    var status=document.getElementById('aiFillStatus');
+    btn.disabled=true; btn.style.opacity='0.5';
+    status.style.display='block'; status.textContent='Analyzing photo...';
+
+    var reader=new FileReader();
+    reader.onload=function(){
+        var base64=reader.result;
+        fetch(SB+'/functions/v1/describe-photo',{
+            method:'POST',
+            headers:{'Content-Type':'application/json','Authorization':'Bearer '+AK,'apikey':AK},
+            body:JSON.stringify({image_base64:base64,mode:'parse_scheduling'})
+        }).then(function(r){return r.json();}).then(function(data){
+            btn.disabled=false; btn.style.opacity='1';
+            if(data.error){status.textContent='Error: '+data.error;return;}
+            var desc=data.description||'';
+            // Parse JSON from response (strip markdown fences if present)
+            desc=desc.replace(/```json\s*/,'').replace(/```\s*/,'').trim();
+            try{
+                var parsed=JSON.parse(desc);
+                aiApplySchedulingData(parsed);
+                status.textContent='Fields filled! Review and submit.';
+                status.style.color='#22c55e';
+                setTimeout(function(){status.style.color='#5a8fc0';},3000);
+            }catch(e){
+                console.error('AI parse error:',e,'Raw:',desc);
+                status.textContent='Could not parse response. Try a clearer photo.';
+            }
+        }).catch(function(e){
+            btn.disabled=false; btn.style.opacity='1';
+            status.textContent='Failed: '+e.message;
+        });
+    };
+    reader.readAsDataURL(imgFile);
+}
+function aiApplySchedulingData(d){
+    // Date
+    if(d.date){document.getElementById('iDate').value=d.date;document.getElementById('iDate').dispatchEvent(new Event('change'));}
+    // Time
+    if(d.time){
+        var sel=document.getElementById('iTime');
+        var timeVal=d.time==='flexible'?'flexible':d.time;
+        for(var i=0;i<sel.options.length;i++){if(sel.options[i].value===timeVal){sel.selectedIndex=i;break;}}
+    }
+    // Duration
+    if(d.duration){setDur(String(d.duration));}
+    // Type (Special or Regular)
+    if(d.type){setType(d.type);}
+    // Special type
+    if(d.special_type){
+        var sSel=document.getElementById('specialType');
+        for(var i=0;i<sSel.options.length;i++){if(sSel.options[i].value===d.special_type){sSel.selectedIndex=i;break;}}
+    }
+    // Identifier / title
+    if(d.identifier){document.getElementById('iIdentifier').value=d.identifier;}
+    // Notes
+    if(d.notes){document.getElementById('iNotes').value=d.notes;}
+    showToast('AI filled '+Object.keys(d).length+' fields');
 }
 function showDay(d){
     var list=document.getElementById('dayDetailList');
@@ -717,8 +789,9 @@ function refreshDropdownAndEmails(){
 function checkSchedulingConflicts(date,time,types,dur){
     var dayEvents=(mD[date]||[]).filter(function(e){return e.status!=='cancelled' && e.status!=='deleted';});
     if(dayEvents.length===0) return null;
-    var blockingTypes=['Concrete','Shotcrete','Grout'];
-    var isBlocking=types.some(function(t){return blockingTypes.indexOf(t)>=0;});
+    // Special inspections (Concrete/Shotcrete/Grout) no longer block — only Regular vs Regular conflicts
+    var isRegular=types.indexOf('Regular')>=0;
+    if(!isRegular) return null; // Special inspections never conflict
     var reqMinutes=parseInt(time.split(':')[0])*60+parseInt(time.split(':')[1]);
     var reqEnd=reqMinutes+parseInt(dur||60);
     var warnings=[];
@@ -733,13 +806,8 @@ function checkSchedulingConflicts(date,time,types,dur){
         var overlaps=(reqMinutes<eEnd && reqEnd>eMin);
         if(!overlaps) return;
         var eTypes=e.inspection_types||[];
-        var eIsBlocking=eTypes.some(function(t){return blockingTypes.indexOf(t)>=0;});
-        // Rule 1: Blocking types cannot overlap anything (across different jobs only)
-        if(isBlocking || eIsBlocking){
-            warnings.push((eTypes.join('/')||'Inspection')+' at '+eTime+' ('+e.project+') — blocking type conflict');
-        }
-        // Rule 2: Regular cannot overlap Regular across different jobs
-        else if(types.indexOf('Regular')>=0 && eTypes.indexOf('Regular')>=0){
+        // Only Regular vs Regular across different jobs triggers a warning
+        if(eTypes.indexOf('Regular')>=0){
             warnings.push('Regular at '+eTime+' ('+e.project+') — cannot overlap Regular across jobs');
         }
     });

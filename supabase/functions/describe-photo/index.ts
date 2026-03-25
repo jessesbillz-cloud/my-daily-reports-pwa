@@ -11,7 +11,12 @@ serve(async (req) => {
   }
 
   try {
-    // ── Manual auth check (verify_jwt is off to bypass gateway issues) ──
+    // ── Parse body first so we can check mode before auth ──
+    const { image_base64, context, mode } = await req.json();
+
+    // ── Auth check ──
+    // For parse_scheduling mode (public scheduling page), just require a Bearer token
+    // For all other modes, validate the JWT against Supabase auth
     const authHeader = req.headers.get("authorization");
     if (!authHeader || !authHeader.startsWith("Bearer ")) {
       return new Response(
@@ -19,22 +24,24 @@ serve(async (req) => {
         { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
-    const SUPABASE_URL = Deno.env.get("SUPABASE_URL");
-    const SUPABASE_SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
-    if (SUPABASE_URL && SUPABASE_SERVICE_KEY) {
-      const { createClient } = await import("https://esm.sh/@supabase/supabase-js@2");
+
+    const isSchedulingPublic = mode === "parse_scheduling";
+    if (!isSchedulingPublic) {
+      const SUPABASE_URL = Deno.env.get("SUPABASE_URL");
+      const SUPABASE_SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
       const token = authHeader.replace("Bearer ", "");
-      const sb = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
-      const { error: authErr } = await sb.auth.getUser(token);
-      if (authErr) {
-        return new Response(
-          JSON.stringify({ error: "Invalid session. Please log out and log back in." }),
-          { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
+      if (SUPABASE_URL && SUPABASE_SERVICE_KEY) {
+        const { createClient } = await import("https://esm.sh/@supabase/supabase-js@2");
+        const sb = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
+        const { error: authErr } = await sb.auth.getUser(token);
+        if (authErr) {
+          return new Response(
+            JSON.stringify({ error: "Invalid session. Please log out and log back in." }),
+            { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          );
+        }
       }
     }
-
-    const { image_base64, context } = await req.json();
 
     if (!image_base64) {
       return new Response(
@@ -73,7 +80,35 @@ serve(async (req) => {
     else if (base64Data.startsWith("R0lG")) mediaType = "image/gif";
     else if (base64Data.startsWith("UklG")) mediaType = "image/webp";
 
-    const systemPrompt = `You write ONE SHORT LINE photo descriptions for construction daily inspection reports. Maximum 8-12 words.
+    // ── Mode: parse_scheduling — extract scheduling request fields from photo ──
+    const isSchedulingMode = mode === "parse_scheduling";
+
+    const schedulingSystemPrompt = `You extract scheduling/inspection request data from photos of forms, emails, texts, or handwritten notes.
+
+Return ONLY a valid JSON object with these fields (omit any you can't determine):
+{
+  "date": "YYYY-MM-DD",
+  "time": "HH:MM" (24h format, round to nearest 30min: 05:00,05:30,06:00,...,17:00, or "flexible"),
+  "duration": 30 or 60 or 120 or 240 or 480,
+  "type": "Special" or "Regular",
+  "special_type": "Concrete" or "Shotcrete" or "Grout" or "Welding" or "Bolting" or "Epoxy" or "Soils" or "Material ID" or "Material ID CWI" or "UT/MP" or "Pull Test" or "Post Inst. Anchor" or "Fireproofing",
+  "identifier": "request number or title if visible",
+  "notes": "any additional details from the document",
+  "subcontractor": "subcontractor name if mentioned"
+}
+
+Rules:
+- Return ONLY the JSON. No markdown, no explanation, no code fences.
+- For time, pick the closest 30-min slot (e.g. 7:15 → "07:00", 9:45 → "10:00").
+- If the document says "morning" use "08:00", "afternoon" use "13:00", "ASAP" or "first thing" use "07:00".
+- If time is unclear or says "anytime"/"flexible", use "flexible".
+- Default duration to 60 if not specified.
+- If you see concrete/shotcrete/grout work mentioned, type is "Special" with the matching special_type.
+- If you see welding/bolting/soils etc., type is "Special" with matching special_type.
+- If it's a general inspection with no special trade, type is "Regular".
+- Extract everything you can read from the image. Be thorough.`;
+
+    const defaultSystemPrompt = `You write ONE SHORT LINE photo descriptions for construction daily inspection reports. Maximum 8-12 words.
 
 Rules:
 - ONE line only. Brief. To the point. Like a field note, not a paragraph.
@@ -85,15 +120,19 @@ Rules:
 - If you can identify the building or area from context, include it briefly.
 - Skip anything you can't confidently identify.`;
 
-    const userPrompt = context
-      ? `Describe this photo for a daily report. Context: ${context}`
-      : "Describe this photo for a professional daily report.";
+    const systemPrompt = isSchedulingMode ? schedulingSystemPrompt : defaultSystemPrompt;
+
+    const userPrompt = isSchedulingMode
+      ? "Extract all scheduling/inspection request data from this image. Return JSON only."
+      : context
+        ? `Describe this photo for a daily report. Context: ${context}`
+        : "Describe this photo for a professional daily report.";
 
     console.log("[describe-photo] Calling Claude API, image size:", base64Data.length, "context:", context?.slice(0, 80));
 
     const apiBody = JSON.stringify({
       model: "claude-haiku-4-5-20251001",
-      max_tokens: 60,
+      max_tokens: isSchedulingMode ? 500 : 60,
       system: systemPrompt,
       messages: [
         {

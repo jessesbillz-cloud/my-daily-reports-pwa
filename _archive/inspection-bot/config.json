@@ -1,0 +1,51 @@
+{
+  "polling_interval_minutes": 5,
+  "projects": {
+    "oceanside": {
+      "full_name": "Oceanside District Office",
+      "folder": "Oceanside_District_Office",
+      "notes_table_index": 1,
+      "notes_row_index": 5,
+      "notes_cell_index": 0,
+      "date_format": "MMM DD, YYYY",
+      "signature_date_format": "MM/DD/YYYY",
+      "keep_first_paragraph": false,
+      "date_locations": [
+        {"table": 0, "row": 3, "cell": 1},
+        {"table": 3, "row": 0, "cell": 2}
+      ],
+      "notes_header": "Inspection and Onsite Activities:",
+      "dsa_required": true
+    },
+    "hunter hall": {
+      "full_name": "CSUSM ISE Building",
+      "folder": "CSUSM_ISE_Building",
+      "notes_table_index": 1,
+      "notes_row_index": 0,
+      "notes_cell_index": 0,
+      "date_format": "DD MMM YYYY",
+      "keep_first_paragraph": true,
+      "date_locations": [
+        {"table": 0, "row": 1, "cell": 1}
+      ],
+      "notes_header": "IOR Notes:",
+      "preserved_text": "Available for daily communication to process requests, review RFI's, read and respond to emails with project team and stay in the loop with changes",
+      "dsa_required": false
+    },
+    "woodland park": {
+      "full_name": "Woodland Park Mod",
+      "folder": "Woodland_Park",
+      "notes_table_index": 1,
+      "notes_row_index": 0,
+      "notes_cell_index": 0,
+      "date_format": "DD MMMM YYYY",
+      "keep_first_paragraph": true,
+      "date_locations": [
+        {"table": 0, "row": 1, "cell": 1}
+      ],
+      "notes_header": "IOR Notes:",
+      "preserved_text": "Available for daily communication to process requests, review RFI's, read and respond to emails with project team and stay in the loop with changes",
+      "dsa_required": true
+    }
+  }
+}

@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>My Daily Reports - Stop Doing the Same Job Twice</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="description" content="The documentation app that saves you 2 hours every night. Built by Jesse Saltzman, field professional and retired Marine.">
+<style>
+/* Mobile-First, Larger Font Base */
+body { font-family: 'Segoe UI', Roboto, Arial, sans-serif; margin: 0; background: #0f0f0f; color: #fff; line-height: 1.6; font-size: 20px; }
+.nav { background: rgba(26,26,26,0.95); padding: 20px 0; text-align: center; position: sticky; top: 0; z-index: 100; border-bottom: 1px solid #333; display: flex; flex-wrap: wrap; justify-content: center; gap: 15px; }
+.nav a { color: #ccc; text-decoration: none; font-weight: 600; font-size: 1.1rem; transition: color 0.2s; }
+.nav a:hover { color: #e8742a; }
+/* Stacked Hero Section */
+.hero { background: linear-gradient(180deg, #1a1a1a 0%, #0f0f0f 100%); padding: 80px 20px; text-align: center; border-bottom: 1px solid #333; }
+.hero h1 { font-size: 3.2rem; color: #fff; margin: 0 0 15px 0; font-weight: 800; line-height: 1.1; letter-spacing: -1px; }
+.hero .tagline { font-size: 1.5rem; color: #e8742a; margin: 0 0 30px 0; font-weight: 700; line-height: 1.3; }
+.hero p.subtext { font-size: 1.2rem; color: #aaa; margin: 0 auto 40px; max-width: 600px; }
+/* Big, tap-friendly buttons */
+.btn { background: #e8742a; color: #fff; padding: 20px 40px; text-decoration: none; border-radius: 10px; font-weight: bold; font-size: 1.3rem; display: inline-block; transition: transform 0.2s, background 0.2s; border: none; cursor: pointer; width: 100%; max-width: 400px; box-sizing: border-box; }
+.btn:hover { background: #ff853a; transform: translateY(-2px); }
+.container { max-width: 800px; margin: 0 auto; padding: 30px 20px; }
+.section-title { color: #5a8fc0; font-size: 2.2rem; margin: 60px 0 30px 0; text-align: center; font-weight: 800; line-height: 1.2; }
+/* The Callout Box */
+.callout-box { background: #1a1a1a; padding: 40px 30px; border-radius: 15px; border-left: 6px solid #e8742a; margin: 50px 0; text-align: left; }
+.callout-box h2 { color: #fff; font-size: 1.8rem; margin-top: 0; }
+.callout-box p { color: #ccc; font-size: 1.2rem; margin-bottom: 0; }
+/* Stacked Problem Timeline */
+.problem-timeline { background: #1a1a1a; padding: 40px 30px; border-radius: 15px; border: 1px solid #333; margin: 40px 0; }
+.time-slot { margin-bottom: 30px; border-left: 4px solid #5a8fc0; padding-left: 25px; }
+.time-label { color: #5a8fc0; font-weight: 800; font-size: 1.4rem; margin-bottom: 5px; }
+.time-slot p { margin: 0; color: #ccc; font-size: 1.1rem; }
+/* Stacked Bio Section */
+.bio-stack { text-align: center; margin: 80px 0; }
+.bio-stack img { width: 100%; max-width: 350px; border-radius: 15px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); margin-bottom: 30px; }
+.bio-stack h2 { color: #5a8fc0; font-size: 2rem; margin-bottom: 15px; }
+.bio-stack p { font-size: 1.2rem; text-align: left; margin-bottom: 20px; color: #ccc; }
+/* Stacked Features */
+.features-stack { display: flex; flex-direction: column; gap: 30px; margin: 40px 0; }
+.feature-card { background: #1a1a1a; padding: 35px 30px; border-radius: 15px; border: 1px solid #333; }
+.feature-card h3 { color: #e8742a; margin: 0 0 15px 0; font-size: 1.6rem; }
+.feature-card p { margin: 0; color: #ccc; font-size: 1.1rem; }
+/* Setup CTA */
+.setup-cta { background: linear-gradient(135deg, #1a2a1a, #1a1a1a); padding: 40px 30px; border-radius: 15px; border: 2px solid #22c55e; margin: 50px 0; text-align: center; }
+.setup-cta .time-badge { display: inline-block; background: #22c55e; color: #fff; font-weight: 800; font-size: 1.6rem; padding: 8px 24px; border-radius: 50px; margin-bottom: 15px; }
+.setup-cta h3 { color: #fff; font-size: 1.5rem; margin: 0 0 10px 0; }
+.setup-cta p { color: #ccc; font-size: 1.1rem; margin: 0; }
+/* Utility Links */
+.text-links { display: flex; flex-direction: column; gap: 15px; margin-top: 30px; align-items: center; }
+.text-links button { background: none; border: 2px solid #555; color: #ccc; padding: 15px 30px; border-radius: 8px; cursor: pointer; font-size: 1.1rem; font-weight: 600; width: 100%; max-width: 400px; }
+.text-links button:hover { border-color: #e8742a; color: #fff; }
+@media(min-width: 768px) {
+    body { font-size: 18px; }
+    .hero h1 { font-size: 4rem; }
+    .nav { gap: 40px; }
+    .text-links { flex-direction: row; justify-content: center; }
+}
+</style>
+</head>
+<body>
+<div class="nav">
+    <a href="/">Home</a>
+    <a href="team.html">Meet the Team</a>
+</div>
+<div class="hero">
+    <img src="image0-5.jpeg" alt="Logo" style="width:120px; margin-bottom:20px;">
+    <h1>Get Your Evenings Back.</h1>
+    <p class="tagline">Your reports. Your forms. Done before you leave the site.</p>
+    <p class="subtext">Stop doing the same job twice. My Daily Reports stays open all day so you can build your report as the work happens. By the time you leave the site, your paperwork is already done.</p>
+    <a href="https://app.mydailyreports.org" class="btn">Beta by Invitation Only</a>
+</div>
+<div class="container">
+    <div class="callout-box">
+        <h2>Built for the Field, Not the Office.</h2>
+        <p>No bloated software. No forced generic forms. Upload the exact paperwork your employer or client requires, and we put the tools right where you need them. Capture notes in real-time, format photos on the fly, and produce a report that's more accurate and thorough than anything you'd write from memory at the kitchen table.</p>
+    </div>
+
+    <div class="setup-cta">
+        <div class="time-badge">5&ndash;10 Minutes</div>
+        <h3>That's all it takes to set up your first job.</h3>
+        <p>Upload your template, name your job, and you're done. Once it's set up, you never do it again for that job. Every report after that takes a fraction of the time it used to. It's a small investment that pays off every single day.</p>
+    </div>
+
+    <h2 class="section-title">The "Double Work" Trap</h2>
+    <div class="problem-timeline">
+        <div class="time-slot">
+            <div class="time-label">7:00 AM</div>
+            <p><strong>On Site.</strong> You're doing your counts, spotting issues, and handling the morning rush. You take messy notes and snap photos.</p>
+        </div>
+        <div class="time-slot">
+            <div class="time-label">1:00 PM</div>
+            <p><strong>The Grind.</strong> You've hit multiple spots on site. Your phone is full of random photos and voice memos you'll have to sort through later.</p>
+        </div>
+        <div class="time-slot">
+            <div class="time-label">4:00 PM</div>
+            <p><strong>The Commute.</strong> An hour in traffic, knowing the real work starts when you get home.</p>
+        </div>
+        <div class="time-slot" style="border-left-color: #e8742a;">
+            <div class="time-label" style="color:#e8742a;">7:00 PM</div>
+            <p><strong>The Kitchen Table.</strong> You're finally home, but instead of being done, you're transcribing notes, resizing photos, and wrestling with files. Again.</p>
+        </div>
+    </div>
+    <div class="bio-stack">
+        <img src="jesse-suit-headshot.jpg" alt="Jesse Saltzman">
+        <h2>Built by Real Experience</h2>
+        <p><strong>Jesse Saltzman</strong> is a retired U.S. Marine (1371 Combat Engineer) and DSA Class 1 Inspector who has inspected over a half-billion dollars in construction work over the last decade.</p>
+        <p>He built this app because he was tired of spending his evenings doing paperwork. The system uses whatever specific forms your employer or client requires and completely changes the way you document your day. Build your daily report as the work happens, save hours every night, and deliver a final product that's more accurate than anything written from memory.</p>
+    </div>
+    <h2 class="section-title">Built for the Way You Actually Work</h2>
+    <div class="features-stack">
+        <div class="feature-card">
+            <h3>Your Forms, Not Ours</h3>
+            <p>Upload the exact PDF or Word templates your employer, client, or company requires. Our AI reads your document and maps every field automatically. You fill them in &mdash; we handle the rest.</p>
+        </div>
+        <div class="feature-card">
+            <h3>Talk, Don't Type</h3>
+            <p>High-accuracy voice-to-text lets you dictate observations while you walk. Your words appear on the form in real-time. No stopping, no typing, no lost details.</p>
+        </div>
+        <div class="feature-card">
+            <h3>All-Day Capture</h3>
+            <p>Keep the app open while you work. Log activities, counts, and issues as they happen so you're not trying to remember what you saw six hours ago.</p>
+        </div>
+        <div class="feature-card">
+            <h3>Photos Drop Right In</h3>
+            <p>Snap a photo inside the app. It drops directly into your report, perfectly sized. No manual copy-and-paste. No resizing. No fighting with Word.</p>
+        </div>
+        <div class="feature-card">
+            <h3>Scheduling That Lives on Your Phone</h3>
+            <p>Share a calendar link with your GC or subs. They request site visits through your link, you confirm with one tap. Approved requests sync directly to the calendar app already on your phone &mdash; Apple Calendar, Google Calendar, whatever you use. You get notifications the same way you always do. No second app to check, no separate inbox.</p>
+        </div>
+    </div>
+
+    <div class="feature-card" style="border-left: 4px solid #5a8fc0; margin: 50px 0;">
+        <h3 style="color:#5a8fc0;">iPhone, Android, Laptop &mdash; Doesn't Matter.</h3>
+        <p>My Daily Reports runs in your browser. No app store, no downloads, no platform restrictions. If you've got a web browser, you've got the app. It works the same on an iPhone, an Android, a tablet, or a desktop. When we push an update, every user gets it instantly &mdash; no downloads, no version mismatches.</p>
+    </div>
+
+    <div class="feature-card" style="border-left: 4px solid #e8742a; margin: 50px 0;">
+        <h3 style="color:#e8742a;">You're Talking to Me, Not a Mailbox</h3>
+        <p>There's no corporate support team here. When you email, you're reaching Jesse and his assistant &mdash; that's it. If something's broken, we can fix it on the spot. If you have a feature idea or something you don't like, tell us. We're building this thing for the people who actually use it, and we're always open to suggestions.</p>
+        <p style="margin-top: 15px;"><a href="mailto:inspector_jesse@outlook.com" style="color:#e8742a; text-decoration:none; font-weight:700;">inspector_jesse@outlook.com</a> &mdash; real person, real responses.</p>
+    </div>
+
+    <div style="text-align:center; margin: 60px 0;">
+        <a href="https://app.mydailyreports.org" class="btn">Beta by Invitation Only</a>
+        <div class="text-links">
+            <button onclick="openTrainingModal()">How It Works</button>
+            <button onclick="openVideoModal()">Watch Jesse Explain</button>
+        </div>
+    </div>
+
+    <div style="background:#1a1a1a; padding:50px 30px; border-radius:15px; text-align:center; border: 1px solid #333; margin-bottom: 50px;">
+        <h2 style="color:#5a8fc0; font-size: 2rem; margin-top:0;">The Bottom Line</h2>
+        <p style="font-size: 1.2rem; color: #ccc;">Professional-grade documentation that protects you and your company, without stealing your personal time.</p>
+        <p style="color:#888; font-size: 1.1rem; margin-top: 30px;">Ask about custom solutions for automated RFI retrieval and schedule tracking.</p>
+        <p style="margin-top:30px; font-size: 1.2rem;"><strong>Questions? Ideas? Something not working right?</strong> <br><a href="mailto:inspector_jesse@outlook.com" style="color:#e8742a; text-decoration:none; display: inline-block; margin-top: 10px;">Reach Jesse Directly</a></p>
+    </div>
+</div>
+
+<!-- Training Modal -->
+<div id="trainingModal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.9);z-index:1000;padding:20px;box-sizing:border-box;">
+    <div style="background:#1a1a1a;max-width:900px;margin:20px auto;border-radius:15px;overflow:hidden;max-height:90vh;display:flex;flex-direction:column; border: 1px solid #444;">
+        <div style="background:#222;padding:20px;border-bottom:1px solid #333;display:flex;justify-content:space-between;align-items:center;">
+            <h2 style="color:#5a8fc0;margin:0;font-size:1.5rem;">How It Works</h2>
+            <button onclick="closeTrainingModal()" style="background:none;border:none;color:#aaa;font-size:30px;cursor:pointer;padding:0;line-height:1;">&times;</button>
+        </div>
+        <div style="overflow-y:auto;flex:1; padding:20px;">
+            <div id="trainingGuides"></div>
+        </div>
+    </div>
+</div>
+
+<!-- Video Modal -->
+<div id="videoModal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.9);z-index:1000;padding:20px;box-sizing:border-box;">
+    <div style="background:#1a1a1a;max-width:800px;margin:20px auto;border-radius:15px;overflow:hidden;max-height:90vh; border: 1px solid #444;">
+        <div style="background:#222;padding:20px;border-bottom:1px solid #333;display:flex;justify-content:space-between;align-items:center;">
+            <h2 style="color:#5a8fc0;margin:0;font-size:1.5rem;">Watch Jesse Explain</h2>
+            <button onclick="closeVideoModal()" style="background:none;border:none;color:#aaa;font-size:30px;cursor:pointer;padding:0;line-height:1;">&times;</button>
+        </div>
+        <div style="padding:40px 20px;text-align:center;">
+            <p style="color:#fff;font-size:1.4rem;margin:0 0 15px 0;">Videos coming soon.</p>
+            <p style="color:#aaa;font-size:1.1rem;">Jesse will walk you through the real workflow &mdash; from setting up your first job to submitting a finished report, all from your phone.</p>
+        </div>
+    </div>
+</div>
+
+<script>
+const trainingGuides = [
+    {
+        color: "#22c55e", title: "Set Up in 5 Minutes",
+        subtitle: "One-time setup per job \u2014 then you never do it again",
+        steps: [
+            "<strong>Works on Any Device:</strong> iPhone, Android, tablet, laptop \u2014 doesn't matter. My Daily Reports runs in your browser. No app store, no downloads, no compatibility issues. If it has a web browser, it works.",
+            "<strong>Create an Account:</strong> Sign up at app.mydailyreports.org. Takes 30 seconds. Your data syncs across all your devices automatically.",
+            "<strong>Create a Job:</strong> Tap 'New Job' and give it a name like 'Oceanside District Office'. Add the site address and pick your report schedule.",
+            "<strong>Upload Your Template:</strong> Upload the exact PDF your company uses. The system reads it and maps every field. That's it \u2014 your job is ready to go."
+        ]
+    },
+    {
+        color: "#5a8fc0", title: "Your Daily Workflow",
+        subtitle: "Build your report as the day happens \u2014 not after",
+        steps: [
+            "<strong>Open Your Job:</strong> Tap your job from the dashboard. Your template, project info, and contractor list are already loaded.",
+            "<strong>Fill In the Day:</strong> Enter hours, tap which contractors are on site, and dictate your daily activities using voice-to-text. Add photos directly into the report.",
+            "<strong>Submit:</strong> When you're done for the day, tap submit. Your report generates as a professional PDF and gets emailed to whoever needs it."
+        ]
+    },
+    {
+        color: "#e8742a", title: "Voice Input & Photos",
+        subtitle: "Capture observations without stopping your walk",
+        steps: [
+            "<strong>Voice-to-Text:</strong> Tap the microphone on the Daily Activities field and talk. Your words appear on the form in real-time. No stopping, no typing.",
+            "<strong>Photos:</strong> Snap photos inside the app. They drop directly into your report, perfectly sized. No manual resizing or fighting with Word.",
+            "<strong>All-Day Capture:</strong> Keep the app open while you work. Log activities as they happen so you're not trying to remember six hours later."
+        ]
+    },
+    {
+        color: "#AF52DE", title: "Scheduling & Calendar",
+        subtitle: "Everything stays in the calendar you already use every day",
+        steps: [
+            "<strong>Share Your Link:</strong> Each inspector gets a scheduling URL. Share it with your GC or subs so they can request inspections directly \u2014 no phone calls, no emails back and forth.",
+            "<strong>It Goes to Your Phone's Calendar:</strong> Approved requests sync straight to the Apple Calendar or Google Calendar you already use. You get notifications, reminders, and alerts the same way you do for everything else. There's no second app to check or extra place to look.",
+            "<strong>Auto-Populate Your Report:</strong> Scheduled inspection requests automatically show up on your daily report. You don't type them in \u2014 they're already there when you start your day."
+        ]
+    }
+];
+function populateTrainingGuides() {
+    const container = document.getElementById('trainingGuides');
+    container.innerHTML = trainingGuides.map(guide => `
+        <div style="background:#222; border-radius:12px; padding:25px; border-left:5px solid ${guide.color}; margin-bottom:20px; text-align:left;">
+            <div style="margin-bottom:15px;">
+                <h3 style="color:#fff; margin:0; font-size:1.4rem;">${guide.title}</h3>
+                <p style="color:#aaa; margin:5px 0 0 0; font-size:1rem;">${guide.subtitle}</p>
+            </div>
+            <div>
+                ${guide.steps.map(step => `
+                    <div style="margin-bottom:15px; color:#ccc; font-size:1.1rem; line-height:1.5;">
+                        &bull; ${step}
+                    </div>
+                `).join('')}
+            </div>
+        </div>
+    `).join('');
+}
+function openTrainingModal() {
+    document.getElementById('trainingModal').style.display = 'block';
+    populateTrainingGuides();
+    document.body.style.overflow = 'hidden';
+}
+function closeTrainingModal() {
+    document.getElementById('trainingModal').style.display = 'none';
+    document.body.style.overflow = 'auto';
+}
+fu

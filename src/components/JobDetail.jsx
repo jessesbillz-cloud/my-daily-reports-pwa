@@ -3,6 +3,7 @@ import { C, SL } from '../constants/theme';
 import { db } from '../utils/db';
 import { AUTH_TOKEN, refreshAuthToken, extractPdfTextStructure } from '../utils/auth';
 import { api } from '../utils/api';
+import TimeCardGenerator from './TimeCardGenerator';
 import { SB_URL, SB_KEY, TYR_COMPANY_ID, ENHANCED_TYR_ID } from '../constants/supabase';
 import { ensurePdfLib, ensurePdfJs } from '../utils/pdf';
 import WorkLogEditor from './WorkLogEditor';
@@ -75,6 +76,15 @@ function JobDetail({job, user, onBack, onDeleted}){
   const [showCompleted,setShowCompleted]=useState(false);
   const [showWorking,setShowWorking]=useState(false);
   const [showPhotos,setShowPhotos]=useState(false);
+  // Time Card state
+  const [showTimeCard,setShowTimeCard]=useState(false);
+  const [showTimeCardSet,setShowTimeCardSet]=useState(false);
+  const [tcCompanyName,setTcCompanyName]=useState(job.timecard_company_name||"");
+  const [tcProjectNumber,setTcProjectNumber]=useState(job.timecard_project_number||"");
+  const [tcClientName,setTcClientName]=useState(job.timecard_client_name||"");
+  const [tcPosition,setTcPosition]=useState(job.timecard_position||"Inspector Of Record");
+  const [tcFileNaming,setTcFileNaming]=useState(job.field_config?.timecardFileNaming||"TYR Time Card - {job_name}_{date}");
+  const [tcSaving,setTcSaving]=useState(false);
   const [jobPhotos,setJobPhotos]=useState([]);
   const [lightboxPhoto,setLightboxPhoto]=useState(null);
   const [showEditJob,setShowEditJob]=useState(false);
@@ -517,6 +527,13 @@ function JobDetail({job, user, onBack, onDeleted}){
           )}
         </Folder>
 
+        {/* ── Time Card Folder (TYR only, when enabled) ── */}
+        {job.timecard_enabled&&isAnyTYR&&(
+          <Folder icon="⏱️" label="Time Card" count={0} color={C.blu} open={showTimeCard} setOpen={setShowTimeCard}>
+            <TimeCardGenerator job={job} user={user} showToast={showToast}/>
+          </Folder>
+        )}
+
         {/* ── Edit Job (inline) ── */}
         {showEditJob&&(
           <div style={{background:C.card,border:`1px solid ${C.org}`,borderRadius:12,padding:20,marginBottom:16}}>
@@ -882,6 +899,41 @@ function JobDetail({job, user, onBack, onDeleted}){
               </div>
               <span style={{fontSize:11,color:job.field_config?.digitalSignature!==false?C.ok:C.mut,fontWeight:600}}>{job.field_config?.digitalSignature!==false?"ON":"OFF"}</span>
             </button>
+            {isAnyTYR&&(<button onClick={async()=>{const cur=!!job.timecard_enabled;try{await db.updateTimeCardSettings(job.id,{timecard_enabled:!cur,timecard_company_name:job.timecard_company_name||tcCompanyName,timecard_project_number:job.timecard_project_number||tcProjectNumber,timecard_client_name:job.timecard_client_name||tcClientName,timecard_position:job.timecard_position||tcPosition});job.timecard_enabled=!cur;if(!cur)setShowTimeCardSet(true);showToast("Time Card "+(!cur?"enabled":"disabled"));}catch(e){showToast("Save failed");}}} style={{width:"100%",display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,padding:"14px 18px",background:"none",border:"none",borderBottom:`1px solid ${C.brd}`,cursor:"pointer",textAlign:"left"}}>
+              <div style={{display:"flex",alignItems:"center",gap:10}}>
+                <span style={{fontSize:16}}>⏱️</span><span style={{fontSize:14,fontWeight:600,color:C.lt}}>Time Card</span>
+              </div>
+              <span style={{fontSize:11,color:job.timecard_enabled?C.ok:C.mut,fontWeight:600}}>{job.timecard_enabled?"ON":"OFF"}</span>
+            </button>)}
+            {showTimeCardSet&&isAnyTYR&&job.timecard_enabled&&(
+              <div style={{padding:"16px 18px",borderBottom:`1px solid ${C.brd}`,display:"flex",flexDirection:"column",gap:10}}>
+                <div style={{fontSize:11,color:C.mut,fontWeight:700,letterSpacing:0.5}}>TIME CARD SETTINGS</div>
+                <div>
+                  <label style={{fontSize:11,color:C.mut,fontWeight:600,display:"block",marginBottom:3}}>Company Name</label>
+                  <input type="text" value={tcCompanyName} onChange={e=>setTcCompanyName(e.target.value)} placeholder="e.g. Breacher Up Inspections Inc." style={{width:"100%",boxSizing:"border-box",padding:"8px 10px",background:C.inp,border:`1px solid ${C.brd}`,borderRadius:8,color:C.txt,fontSize:13}}/>
+                </div>
+                <div>
+                  <label style={{fontSize:11,color:C.mut,fontWeight:600,display:"block",marginBottom:3}}>Project Number</label>
+                  <input type="text" value={tcProjectNumber} onChange={e=>setTcProjectNumber(e.target.value)} placeholder="e.g. 022724" style={{width:"100%",boxSizing:"border-box",padding:"8px 10px",background:C.inp,border:`1px solid ${C.brd}`,borderRadius:8,color:C.txt,fontSize:13}}/>
+                </div>
+                <div>
+                  <label style={{fontSize:11,color:C.mut,fontWeight:600,display:"block",marginBottom:3}}>Client Name</label>
+                  <input type="text" value={tcClientName} onChange={e=>setTcClientName(e.target.value)} placeholder="e.g. Oceanside USD" style={{width:"100%",boxSizing:"border-box",padding:"8px 10px",background:C.inp,border:`1px solid ${C.brd}`,borderRadius:8,color:C.txt,fontSize:13}}/>
+                </div>
+                <div>
+                  <label style={{fontSize:11,color:C.mut,fontWeight:600,display:"block",marginBottom:3}}>Position</label>
+                  <input type="text" value={tcPosition} onChange={e=>setTcPosition(e.target.value)} placeholder="Inspector Of Record" style={{width:"100%",boxSizing:"border-box",padding:"8px 10px",background:C.inp,border:`1px solid ${C.brd}`,borderRadius:8,color:C.txt,fontSize:13}}/>
+                </div>
+                <div>
+                  <label style={{fontSize:11,color:C.mut,fontWeight:600,display:"block",marginBottom:3}}>File Naming Convention</label>
+                  <input type="text" value={tcFileNaming} onChange={e=>setTcFileNaming(e.target.value)} placeholder="TYR Time Card - {job_name}_{date}" style={{width:"100%",boxSizing:"border-box",padding:"8px 10px",background:C.inp,border:`1px solid ${C.brd}`,borderRadius:8,color:C.txt,fontSize:13}}/>
+                  <div style={{fontSize:10,color:C.mut,marginTop:4,lineHeight:1.4}}>Tokens: {"{job_name}"}, {"{date}"}, {"{company}"}, {"{inspector}"}, {"{week_ending}"}</div>
+                </div>
+                <button onClick={async()=>{setTcSaving(true);try{await db.updateTimeCardSettings(job.id,{timecard_enabled:true,timecard_company_name:tcCompanyName,timecard_project_number:tcProjectNumber,timecard_client_name:tcClientName,timecard_position:tcPosition});const fc={...(job.field_config||{}),timecardFileNaming:tcFileNaming};await db.updateJobFieldConfig(job.id,fc);job.timecard_company_name=tcCompanyName;job.timecard_project_number=tcProjectNumber;job.timecard_client_name=tcClientName;job.timecard_position=tcPosition;job.field_config=fc;showToast("Time Card settings saved");setShowTimeCardSet(false);}catch(e){showToast("Save failed");}finally{setTcSaving(false);}}} disabled={tcSaving} style={{padding:"10px 0",background:C.org,border:"none",borderRadius:8,color:"#fff",fontSize:13,fontWeight:700,cursor:tcSaving?"default":"pointer",opacity:tcSaving?0.6:1}}>
+                  {tcSaving?"Saving...":"Save Settings"}
+                </button>
+              </div>
+            )}
             <button type="button" aria-expanded={showSchedSet} onClick={()=>{setShowSchedSet(!showSchedSet);setShowTeam(false);}} style={{width:"100%",display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,padding:"14px 18px",background:"none",border:"none",borderBottom:`1px solid ${C.brd}`,cursor:"pointer",textAlign:"left"}}>
               <div style={{display:"flex",alignItems:"center",gap:10}}>
                 <span style={{fontSize:16}}>📅</span><span style={{fontSize:14,fontWeight:600,color:C.lt}}>Jobsite Scheduling</span>

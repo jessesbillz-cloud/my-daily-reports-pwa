@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>MDR Support Dashboard</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;}
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:#0f0f0f;color:#fff;min-height:100vh;}
+.header{display:flex;align-items:center;justify-content:space-between;padding:14px 20px;border-bottom:1px solid #333;background:#1a1a1a;}
+.header h1{font-size:17px;font-weight:700;}
+.header .badge{background:#e8742a;color:#fff;border-radius:12px;padding:2px 10px;font-size:12px;font-weight:700;}
+.container{display:flex;height:calc(100vh - 52px);}
+.sidebar{width:320px;border-right:1px solid #333;overflow-y:auto;background:#1a1a1a;}
+.conv-item{padding:14px 16px;border-bottom:1px solid #222;cursor:pointer;transition:background 0.15s;}
+.conv-item:hover,.conv-item.active{background:#222;}
+.conv-item .name{font-size:14px;font-weight:600;color:#fff;}
+.conv-item .preview{font-size:12px;color:#888;margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.conv-item .meta{display:flex;justify-content:space-between;align-items:center;margin-top:6px;}
+.conv-item .time{font-size:11px;color:#666;}
+.conv-item .status{font-size:10px;font-weight:700;padding:2px 8px;border-radius:6px;}
+.status-open{background:rgba(34,197,94,0.15);color:#22c55e;}
+.status-resolved{background:rgba(90,143,192,0.15);color:#5a8fc0;}
+.status-closed{background:rgba(136,136,136,0.15);color:#888;}
+.chat-area{flex:1;display:flex;flex-direction:column;background:#0f0f0f;}
+.chat-header{padding:14px 20px;border-bottom:1px solid #333;display:flex;align-items:center;justify-content:space-between;background:#1a1a1a;}
+.chat-header .info{font-size:14px;font-weight:600;}
+.chat-header .email{font-size:12px;color:#888;margin-top:2px;}
+.messages{flex:1;overflow-y:auto;padding:16px 20px;display:flex;flex-direction:column;gap:10px;}
+.msg{max-width:70%;padding:10px 14px;border-radius:14px;font-size:13px;line-height:1.5;}
+.msg.user{align-self:flex-end;background:#e8742a;color:#fff;border-bottom-right-radius:4px;}
+.msg.agent{align-self:flex-start;background:#333;color:#fff;border-bottom-left-radius:4px;}
+.msg .ts{font-size:10px;opacity:0.6;margin-top:4px;}
+.input-bar{padding:12px 16px;border-top:1px solid #333;display:flex;gap:10px;background:#1a1a1a;}
+.input-bar input{flex:1;padding:10px 14px;background:#222;border:1px solid #333;border-radius:8px;color:#fff;font-size:13px;outline:none;}
+.input-bar input:focus{border-color:#e8742a;}
+.input-bar button{padding:10px 20px;background:#e8742a;border:none;border-radius:8px;color:#fff;font-size:14px;font-weight:700;cursor:pointer;}
+.input-bar button:disabled{opacity:0.5;cursor:default;}
+.empty{display:flex;align-items:center;justify-content:center;flex:1;color:#666;font-size:15px;}
+.actions{display:flex;gap:8px;}
+.actions button{padding:6px 12px;border-radius:6px;border:1px solid #333;background:#222;color:#ccc;font-size:12px;font-weight:600;cursor:pointer;}
+.actions button:hover{background:#333;}
+.actions button.resolve{border-color:#22c55e;color:#22c55e;}
+.login-screen{display:flex;align-items:center;justify-content:center;min-height:100vh;padding:20px;}
+.login-box{background:#1a1a1a;border:1px solid #333;border-radius:16px;padding:32px;max-width:380px;width:100%;text-align:center;}
+.login-box h2{font-size:20px;margin-bottom:8px;}
+.login-box p{font-size:13px;color:#888;margin-bottom:24px;}
+.login-box input{width:100%;padding:12px 14px;background:#222;border:1px solid #333;border-radius:8px;color:#fff;font-size:14px;margin-bottom:12px;outline:none;}
+.login-box button{width:100%;padding:14px;background:#e8742a;border:none;border-radius:10px;color:#fff;font-size:15px;font-weight:700;cursor:pointer;}
+.login-box .err{color:#ef4444;font-size:12px;margin-bottom:12px;}
+@media(max-width:700px){.sidebar{width:100%;}.container{flex-direction:column;}.chat-area{height:60vh;}}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script src="https://cdn.jsdelivr.net/npm/react@18/umd/react.production.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@babel/standalone/babel.min.js"></script>
+<script type="text/babel">
+const SB_URL="https://wluvkmpncafugdbunlkw.supabase.co";
+const SB_KEY="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndsdXZrbXBuY2FmdWdkYnVubGt3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzIzMDU1MTUsImV4cCI6MjA4Nzg4MTUxNX0.HZpQ2xVGpf4EQ0BVDmIEuPqW5T_eNG5OqBNAqT03rH8";
+
+// Support agent emails — only these accounts can access the dashboard
+const SUPPORT_AGENTS=["inspector_jesse@outlook.com","jessesbillz@gmail.com","rachellegaciasquidasol@gmail.com","mydailyreportsz@gmail.com"];
+
+const {useState,useEffect,useRef}=React;
+
+function LoginScreen({onAuth}){
+  const [email,setEmail]=useState("");
+  const [pass,setPass]=useState("");
+  const [err,setErr]=useState("");
+  const [loading,setLoading]=useState(false);
+
+  const login=async()=>{
+    if(!email||!pass)return;
+    setLoading(true);setErr("");
+    try{
+      const r=await fetch(`${SB_URL}/auth/v1/token?grant_type=password`,{
+        method:"POST",
+        headers:{"apikey":SB_KEY,"Content-Type":"application/json"},
+        body:JSON.stringify({email,password:pass})
+      });
+      const d=await r.json();
+      if(d.error)throw new Error(d.error_description||d.error);
+      // Use the email they typed — we already know it's a valid login at this point
+      const loginEmail=email.toLowerCase().trim();
+      if(!SUPPORT_AGENTS.map(e=>e.toLowerCase().trim()).includes(loginEmail)){
+        setErr("Access denied — "+loginEmail+" is not a support agent");
+        return;
+      }
+      onAuth(d);
+    }catch(e){setErr(e.message);}
+    finally{setLoading(false);}
+  };
+
+  return(
+    <div className="login-screen">
+      <div className="login-box">
+        <h2>MDR Support</h2>
+        <p>Sign in with your support agent account</p>
+        {err&&<div className="err">{err}</div>}
+        <input type="email" placeholder="Email" value={email} onChange={e=>setEmail(e.target.value)} onKeyDown={e=>e.key==="Enter"&&login()}/>
+        <input type="password" placeholder="Password" value={pass} onChange={e=>setPass(e.target.value)} onKeyDown={e=>e.key==="Enter"&&login()}/>
+        <button onClick={login} disabled={loading}>{loading?"Signing in...":"Sign In"}</button>
+      </div>
+    </div>
+  );
+}
+
+function Dashboard({session}){
+  const [convs,setConvs]=useState([]);
+  const [selConv,setSelConv]=useState(null);
+  const [msgs,setMsgs]=useState([]);
+  const [draft,setDraft]=useState("");
+  const [sending,setSending]=useState(false);
+  const scrollRef=useRef(null);
+  const pollRef=useRef(null);
+
+  const h=()=>({"apikey":SB_KEY,"Authorization":"Bearer "+session.access_token,"Content-Type":"application/json"});
+  const hGet=()=>({"apikey":SB_KEY,"Authorization":"Bearer "+session.access_token});
+
+  // Load conversations
+  const loadConvs=async()=>{
+    try{
+      const r=await fetch(`${SB_URL}/rest/v1/support_conversations?order=updated_at.desc&select=*`,{headers:hGet()});
+      if(r.ok){const data=await r.json();console.log("[support] convs loaded:",data.length);setConvs(data);}
+      else{console.error("[support] convs fetch failed:",r.status,await r.text());}
+    }catch(e){console.error("[support] convs error:",e);}
+  };
+
+  // Load messages for selected conversation
+  const loadMsgs=async(cid)=>{
+    try{
+      const r=await fetch(`${SB_URL}/rest/v1/support_messages?conversation_id=eq.${cid}&order=created_at.asc`,{headers:hGet()});
+      if(r.ok)setMsgs(await r.json());
+    }catch(e){}
+  };
+
+  useEffect(()=>{
+    loadConvs();
+    const t=setInterval(loadConvs,5000);
+    return()=>clearInterval(t);
+  },[]);
+
+  useEffect(()=>{
+    if(!selConv)return;
+    loadMsgs(selConv.id);
+    if(pollRef.current)clearInterval(pollRef.current);
+    pollRef.current=setInterval(()=>loadMsgs(selConv.id),3000);
+    return()=>{if(pollRef.current)clearInterval(pollRef.current);};
+  },[selConv?.id]);
+
+  useEffect(()=>{if(scrollRef.current)scrollRef.current.scrollTop=scrollRef.current.scrollHeight;},[msgs]);
+
+  const sendMsg=async()=>{
+    if(!draft.trim()||sending||!selConv)return;
+    setSending(true);
+    try{
+      await fetch(`${SB_URL}/rest/v1/support_messages`,{method:"POST",headers:h(),body:JSON.stringify({conversation_id:selConv.id,sender:"agent",body:draft.trim()})});
+      setDraft("");
+      loadMsgs(selConv.id);
+    }catch(e){console.error(e);}
+    finally{setSending(false);}
+  };
+
+  const updateStatus=async(status)=>{
+    if(!selConv)return;
+    try{
+      await fetch(`${SB_URL}/rest/v1/support_conversations?id=eq.${selConv.id}`,{method:"PATCH",headers:h(),body:JSON.stringify({status})});
+      setSelConv(p=>({...p,status}));
+      loadConvs();
+    }catch(e){console.error(e);}
+  };
+
+  const openCount=convs.filter(c=>c.status==="open").length;
+
+  const getName=(c)=>{
+    if(c.guest_name)return c.guest_name;
+    if(c.user_id)return "User "+c.user_id.slice(0,8);
+    return "Anonymous";
+  };
+
+  const fmtTime=(ts)=>{
+    const d=new Date(ts);
+    const now=new Date();
+    if(d.toDateString()===now.toDateString())return d.toLocaleTimeString([],{hour:"numeric",minute:"2-digit"});
+    return d.toLocaleDateString([],{month:"short",day:"numeric"});
+  };
+
+  return(
+    <>
+      <div className="header">
+        <h1>MDR Support Dashboard</h1>
+        {openCount>0&&<span className="badge">{openCount} open</span>}
+      </div>
+      <div className="container">
+        <div className="sidebar">
+          {convs.length===0&&<div style={{padding:20,color:"#666",fontSize:13,textAlign:"center"}}>No conversations yet</div>}
+          {convs.map(c=>(
+            <div key={c.id} className={`conv-item${selConv?.id===c.id?" active":""}`} onClick={()=>setSelConv(c)}>
+              <div className="name">{getName(c)}</div>
+              {c.guest_email&&<div className="preview">{c.guest_email}</div>}
+              <div className="meta">
+                <span className={`status status-${c.status}`}>{c.status}</span>
+                <span className="time">{fmtTime(c.updated_at)}</span>
+              </div>
+            </div>
+          ))}
+        </div>
+        <div className="chat-area">
+          {!selConv?(
+            <div className="empty">Select a conversation</div>
+          ):(
+            <>
+              <div className="chat-header">
+                <div>
+                  <div className="info">{getName(selConv)}</div>
+                  {selConv.guest_email&&<div className="email">{selConv.guest_email}</div>}
+                </div>
+                <div className="actions">
+                  {selConv.status==="open"&&<button className="resolve" onClick={()=>updateStatus("resolved")}>✓ Resolve</button>}
+                  {selConv.status!=="open"&&<button onClick={()=>updateStatus("open")}>Reopen</button>}
+                  <button onClick={()=>updateStatus("closed")}>Close</button>
+                </div>
+              </div>
+              <div className="messages" ref={scrollRef}>
+                {msgs.length===0&&<div style={{textAlign:"center",color:"#666",marginTop:40}}>No messages yet</div>}
+                {msgs.map(m=>(
+                  <div key={m.id} className={`msg ${m.sender}`}>
+                    {m.body}
+                    <div className="ts">{new Date(m.created_at).toLocaleTimeString([],{hour:"numeric",minute:"2-digit"})}</div>
+                  </div>
+                ))}
+              </div>
+              <div className="input-bar">
+                <input type="text" value={draft} onChange={e=>setDraft(e.target.value)} onKeyDown={e=>{if(e.key==="Enter")sendMsg();}} placeholder="Type a reply..."/>
+                <button onClick={sendMsg} disabled={sending||!draft.trim()}>Send</button>
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+    </>
+  );
+}
+
+function App(){
+  const [session,setSession]=useState(null);
+  if(!session)return<LoginScreen onAuth={setSession}/>;
+  return<Dashboard session={session}/>;
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+</script>
+</body>
+</html>

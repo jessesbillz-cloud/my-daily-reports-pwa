@@ -1,0 +1,310 @@
+import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers":
+    "authorization, x-client-info, apikey, content-type",
+};
+
+function escapeICS(text: string): string {
+  return (text || "")
+    .replace(/\\/g, "\\\\")
+    .replace(/;/g, "\\;")
+    .replace(/,/g, "\\,")
+    .replace(/\n/g, "\\n");
+}
+
+// RFC 5545 requires lines to be no longer than 75 octets.
+// Fold long lines to prevent breaking Outlook / old Apple Calendar.
+function foldLine(line: string): string {
+  if (line.length <= 75) return line;
+  const parts: string[] = [];
+  parts.push(line.substring(0, 75));
+  let rest = line.substring(75);
+  while (rest.length > 0) {
+    parts.push(" " + rest.substring(0, 74));
+    rest = rest.substring(74);
+  }
+  return parts.join("\r\n");
+}
+
+function formatICSDate(dateStr: string, timeStr?: string): string {
+  const d = dateStr.replace(/-/g, "");
+  if (timeStr) {
+    const parts = timeStr.split(":");
+    const t = parts[0] + parts[1] + "00";
+    return d + "T" + t;
+  }
+  return d;
+}
+
+function generateUID(id: string): string {
+  return `${id}@mydailyreports.org`;
+}
+
+serve(async (req) => {
+  if (req.method === "OPTIONS") {
+    return new Response("ok", { headers: corsHeaders });
+  }
+
+  try {
+    const url = new URL(req.url);
+    const userId = url.searchParams.get("user_id");
+    const slug = url.searchParams.get("slug");
+    const project = url.searchParams.get("project");
+    const token = url.searchParams.get("token");
+
+    if (!userId && !slug && !project) {
+      return new Response("Missing user_id, slug, or project parameter", {
+        status: 400,
+        headers: corsHeaders,
+      });
+    }
+
+    const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+    const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+    const supabase = createClient(supabaseUrl, supabaseKey);
+
+    // Token-based security: if the profile has a calendar_token set,
+    // require it as a query parameter to prevent unauthorized access
+    const lookupId = userId || null;
+    if (lookupId || slug) {
+      let profileId = lookupId;
+      if (slug && !profileId) {
+        const { data: p } = await supabase.from("profiles").select("id").eq("slug", slug).single();
+        if (p) profileId = p.id;
+      }
+      if (profileId) {
+        const { data: tokenCheck } = await supabase
+          .from("profiles")
+          .select("calendar_token")
+          .eq("id", profileId)
+          .single();
+        if (tokenCheck?.calendar_token && tokenCheck.calendar_token !== token) {
+          return new Response("Unauthorized — invalid or missing calendar token", {
+            status: 401,
+            headers: corsHeaders,
+          });
+        }
+      }
+    }
+
+    let calendarName = "My Daily Reports";
+    let requests: any[] = [];
+    let userTimezone = "America/Los_Angeles";
+
+    if (project) {
+      calendarName = `${project.replace(/-/g, " ")} — Schedule`;
+
+      const { data, error } = await supabase
+        .from("inspection_requests")
+        .select("*")
+        .eq("project", project)
+        .neq("status", "cancelled")
+        .neq("status", "deleted")
+        .order("inspection_date", { ascending: true });
+
+      if (error) {
+        return new Response(JSON.stringify({ error: error.message }), {
+          status: 500,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      requests = data || [];
+    } else {
+      let resolvedUserId = userId;
+
+      if (slug && !userId) {
+        const { data: profile } = await supabase
+          .from("profiles")
+          .select("id, full_name, timezone")
+          .eq("slug", slug)
+          .single();
+
+        if (!profile) {
+          return new Response("Inspector not found", {
+            status: 404,
+            headers: corsHeaders,
+          });
+        }
+        resolvedUserId = profile.id;
+        calendarName = `${profile.full_name || "Inspector"} — Scheduling`;
+        if (profile.timezone) userTimezone = profile.timezone;
+      } else if (userId) {
+        const { data: profile } = await supabase
+          .from("profiles")
+          .select("full_name, timezone")
+          .eq("id", userId)
+          .single();
+
+        if (profile?.full_name) {
+          calendarName = `${profile.full_name} — Scheduling`;
+        }
+        if (profile?.timezone) userTimezone = profile.timezone;
+      }
+
+      const { data, error } = await supabase
+        .from("inspection_requests")
+        .select("*, jobs(name, site_address)")
+        .eq("user_id", resolvedUserId)
+        .neq("status", "cancelled")
+        .neq("status", "deleted")
+        .order("requested_date", { ascending: true });
+
+      if (error) {
+        return new Response(JSON.stringify({ error: error.message }), {
+          status: 500,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      requests = data || [];
+    }
+
+    const TZ = userTimezone;
+
+    // US timezone offset map for VTIMEZONE generation
+    const TZ_OFFSETS: Record<string, { std: string; dst: string; stdName: string; dstName: string }> = {
+      "America/New_York":     { std: "-0500", dst: "-0400", stdName: "EST", dstName: "EDT" },
+      "America/Chicago":      { std: "-0600", dst: "-0500", stdName: "CST", dstName: "CDT" },
+      "America/Denver":       { std: "-0700", dst: "-0600", stdName: "MST", dstName: "MDT" },
+      "America/Phoenix":      { std: "-0700", dst: "-0700", stdName: "MST", dstName: "MST" },
+      "America/Los_Angeles":  { std: "-0800", dst: "-0700", stdName: "PST", dstName: "PDT" },
+      "America/Anchorage":    { std: "-0900", dst: "-0800", stdName: "AKST", dstName: "AKDT" },
+      "Pacific/Honolulu":     { std: "-1000", dst: "-1000", stdName: "HST", dstName: "HST" },
+    };
+    const tzInfo = TZ_OFFSETS[TZ] || TZ_OFFSETS["America/Los_Angeles"];
+
+    const lines: string[] = [
+      "BEGIN:VCALENDAR",
+      "VERSION:2.0",
+      "PRODID:-//My Daily Reports//Scheduling//EN",
+      `X-WR-CALNAME:${escapeICS(calendarName)}`,
+      "CALSCALE:GREGORIAN",
+      "METHOD:PUBLISH",
+      `X-WR-TIMEZONE:${TZ}`,
+      "BEGIN:VTIMEZONE",
+      `TZID:${TZ}`,
+      "BEGIN:STANDARD",
+      "DTSTART:19701101T020000",
+      "RRULE:FREQ=YEARLY;BYMONTH=11;BYDAY=1SU",
+      `TZOFFSETFROM:${tzInfo.dst}`,
+      `TZOFFSETTO:${tzInfo.std}`,
+      `TZNAME:${tzInfo.stdName}`,
+      "END:STANDARD",
+      "BEGIN:DAYLIGHT",
+      "DTSTART:19700308T020000",
+      "RRULE:FREQ=YEARLY;BYMONTH=3;BYDAY=2SU",
+      `TZOFFSETFROM:${tzInfo.std}`,
+      `TZOFFSETTO:${tzInfo.dst}`,
+      `TZNAME:${tzInfo.dstName}`,
+      "END:DAYLIGHT",
+      "END:VTIMEZONE",
+    ];
+
+    const now = new Date()
+      .toISOString()
+      .replace(/[-:]/g, "")
+      .replace(/\.\d{3}/, "");
+
+    for (const r of requests) {
+      const dateField = r.inspection_date || r.requested_date;
+      if (!dateField) continue;
+
+      const timeField = r.inspection_time || null;
+      const projectName = r.project || r.jobs?.name || "Job";
+      const siteAddr = r.location_detail || r.jobs?.site_address || "";
+
+      const inspType =
+        r.inspection_type || (r.inspection_types || [])[0] || "Visit";
+      const specialType = r.special_type ? ` — ${r.special_type}` : "";
+      const summary = `${inspType}${specialType}: ${projectName.replace(/-/g, " ")}`;
+
+      const statusEmoji =
+        r.status === "scheduled" || r.status === "confirmed" ? "✅ " : "⏳ ";
+      const duration = parseInt(r.duration) || 60;
+
+      const isFlexible = r.flexible_display === "flexible";
+      const hasTime = !!timeField && !isFlexible;
+
+      lines.push("BEGIN:VEVENT");
+      lines.push(`UID:${generateUID(r.id)}`);
+      lines.push(`DTSTAMP:${now}`);
+
+      if (hasTime) {
+        const dtStart = formatICSDate(dateField, timeField);
+        lines.push(`DTSTART;TZID=${TZ}:${dtStart}`);
+
+        const timeParts = timeField.split(":").map(Number);
+        const totalMin = timeParts[0] * 60 + timeParts[1] + duration;
+        const endH = String(Math.floor(totalMin / 60)).padStart(2, "0");
+        const endM = String(totalMin % 60).padStart(2, "0");
+        const dtEnd = formatICSDate(dateField, `${endH}:${endM}`);
+        lines.push(`DTEND;TZID=${TZ}:${dtEnd}`);
+      } else {
+        const dtStart = formatICSDate(dateField);
+        lines.push(`DTSTART;VALUE=DATE:${dtStart}`);
+
+        const nextDay = new Date(dateField + "T12:00:00");
+        nextDay.setDate(nextDay.getDate() + 1);
+        const nd = nextDay.toISOString().split("T")[0];
+        lines.push(`DTEND;VALUE=DATE:${formatICSDate(nd)}`);
+      }
+
+      lines.push(foldLine(`SUMMARY:${escapeICS(statusEmoji + summary)}`));
+
+      const descParts: string[] = [];
+      if (r.inspection_identifier)
+        descParts.push(`Request #: ${r.inspection_identifier}`);
+      if (r.requester_name || r.requester_company) {
+        const who = [r.requester_name, r.requester_company].filter(Boolean).join(" — ");
+        descParts.push(`Requested by: ${who}`);
+      }
+      if (r.subcontractor) descParts.push(`Subcontractor: ${r.subcontractor}`);
+      if (r.special_type) descParts.push(`Type: ${r.special_type}`);
+      descParts.push(`Status: ${r.status || "pending"}`);
+      descParts.push(`Duration: ${duration} min`);
+      if (isFlexible) descParts.push("Time: Flexible — anytime today");
+      if (r.notes) descParts.push(`Notes: ${r.notes}`);
+      lines.push(foldLine(`DESCRIPTION:${escapeICS(descParts.join("\n"))}`));
+
+      if (siteAddr) {
+        lines.push(foldLine(`LOCATION:${escapeICS(siteAddr)}`));
+      }
+
+      // Attach file URLs if present
+      const attachUrls = r.file_urls || [];
+      for (const url of attachUrls) {
+        if (url) lines.push(foldLine(`ATTACH:${url}`));
+      }
+
+      if (r.status === "scheduled" || r.status === "confirmed") {
+        lines.push("CATEGORIES:Confirmed");
+      } else {
+        lines.push("CATEGORIES:Pending");
+      }
+
+      lines.push("END:VEVENT");
+    }
+
+    lines.push("END:VCALENDAR");
+
+    const icsContent = lines.join("\r\n");
+
+    return new Response(icsContent, {
+      headers: {
+        ...corsHeaders,
+        "Content-Type": "text/calendar; charset=utf-8",
+        "Content-Disposition": 'attachment; filename="schedule.ics"',
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+      },
+    });
+  } catch (error) {
+    return new Response(JSON.stringify({ error: error.message }), {
+      status: 500,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+  }
+});

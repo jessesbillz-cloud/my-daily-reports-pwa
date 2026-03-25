@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Scheduling Request</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: 'Segoe UI', Roboto, -apple-system, sans-serif; background: #0f0f0f; color: #fff; padding: 20px; text-align: center; }
+.header { margin-bottom: 40px; margin-top: 20px; }
+.header h1 { font-size: 26px; color: #fff; margin-bottom: 5px; font-weight: 800; }
+.header p { color: #5a8fc0; font-size: 16px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; }
+.container { max-width: 500px; margin: 0 auto; }
+.instruction { font-size: 14px; color: #888; font-weight: 600; margin-bottom: 25px; text-transform: uppercase; letter-spacing: 2px; }
+.project-list { display: flex; flex-direction: column; gap: 15px; }
+.project-btn {
+  background: #1a1a1a;
+  border: 1px solid #333;
+  border-left: 6px solid #5a8fc0;
+  padding: 25px 20px;
+  border-radius: 12px;
+  text-decoration: none;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  transition: 0.2s;
+}
+.project-btn:hover { background: #222; border-left-color: #e8742a; transform: translateY(-2px); }
+.project-info { text-align: left; }
+.project-name { font-size: 18px; font-weight: 700; color: #fff; display: block; }
+.project-location { font-size: 13px; color: #aaa; display: block; }
+.chevron { color: #5a8fc0; font-size: 24px; }
+.footer-branding { margin-top: 80px; padding-top: 20px; border-top: 1px solid #333; }
+.footer-branding p { font-size: 12px; color: #444; font-weight: 600; text-transform: uppercase; }
+.loading { color: #888; font-size: 14px; padding: 40px; }
+.error { color: #ef4444; font-size: 14px; padding: 40px; }
+</style>
+</head>
+<body>
+<div class="container" id="app">
+  <div class="loading">Loading...</div>
+</div>
+
+<script>
+function esc(s){var d=document.createElement('div');d.textContent=s;return d.innerHTML;}
+
+var SB='https://wluvkmpncafugdbunlkw.supabase.co';
+var AK='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndsdXZrbXBuY2FmdWdkYnVubGt3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzIzMDU1MTUsImV4cCI6MjA4Nzg4MTUxNX0.HZpQ2xVGpf4EQ0BVDmIEuPqW5T_eNG5OqBNAqT03rH8';
+var hdrs={headers:{'apikey':AK,'Authorization':'Bearer '+AK}};
+
+var params=new URLSearchParams(window.location.search);
+var inspSlug=params.get('i');
+var isAdmin=params.get('admin')==='true';
+
+if(!inspSlug){
+  document.getElementById('app').innerHTML='<div class="error">No inspector specified. Check the URL.</div>';
+} else {
+  loadHub();
+}
+
+function loadHub(){
+  // Get inspector profile by slug
+  fetch(SB+'/rest/v1/profiles?slug=eq.'+encodeURIComponent(inspSlug)+'&select=*',hdrs)
+  .then(function(r){return r.json();})
+  .then(function(profiles){
+    if(!profiles||profiles.length===0){
+      document.getElementById('app').innerHTML='<div class="error">Inspector not found.</div>';
+      return;
+    }
+    var profile=profiles[0];
+    // Get their scheduling-enabled jobs
+    return fetch(SB+'/rest/v1/jobs?user_id=eq.'+profile.id+'&scheduling_enabled=eq.true&is_archived=eq.false&select=*&order=created_at.asc',hdrs)
+    .then(function(r){return r.json();})
+    .then(function(jobs){
+      renderHub(profile,jobs);
+    });
+  })
+  .catch(function(e){
+    document.getElementById('app').innerHTML='<div class="error">Failed to load. Try again.</div>';
+  });
+}
+
+function renderHub(profile,jobs){
+  var name=profile.full_name||'Inspector';
+  var html='';
+  // "Back to App" button — only show if opened from within the PWA (not shared externally)
+  var fromApp=document.referrer&&document.referrer.indexOf(window.location.origin)===0;
+  if(fromApp){
+    html+='<div style="text-align:left;margin-bottom:12px;">';
+    html+='<a href="index.html" style="background:#222;border:1px solid #333;border-radius:12px;color:#fff;font-size:26px;cursor:pointer;line-height:1;width:56px;height:56px;display:flex;align-items:center;justify-content:center;text-decoration:none;flex-shrink:0;" aria-label="Back to App">←</a>';
+    html+='</div>';
+  }
+  html+='<div class="header">';
+  html+='<h1>'+esc(name)+'</h1>';
+  html+='<p>Scheduling Request</p>';
+  html+='</div>';
+
+  if(jobs.length===0){
+    html+='<div style="color:#888;padding:40px;font-size:14px;">No projects available for scheduling.</div>';
+  } else {
+    html+='<div class="instruction">Select Your Project</div>';
+    html+='<div class="project-list">';
+    jobs.forEach(function(job){
+      var projSlug=job.name.replace(/\s+/g,'-').replace(/[^a-zA-Z0-9-]/g,'');
+      var url='schedule.html?i='+encodeURIComponent(inspSlug)+'&project='+encodeURIComponent(projSlug)+'&job_id='+job.id+(isAdmin?'&admin=true':'');
+      html+='<a href="'+url+'" class="project-btn">';
+      html+='<div class="project-info">';
+      html+='<span class="project-name">'+esc(job.name)+'</span>';
+      if(job.site_address) html+='<span class="project-location">'+esc(job.site_address)+'</span>';
+      html+='</div>';
+      html+='<div class="chevron">&rsaquo;</div>';
+      html+='</a>';
+    });
+    html+='</div>';
+  }
+
+  html+='<div class="footer-branding">';
+  html+='<div style="display:flex;align-items:center;justify-content:center;gap:10px;margin-bottom:8px;"><img src="logo.jpg" alt="Logo" style="width:30px;height:30px;border-radius:6px;"></div>';
+  html+='<p><a href="https://mydailyreports.org" style="color:#e8742a;text-decoration:none;font-weight:700;">Powered by My Daily Reports</a></p>';
+  html+='</div>';
+
+  document.getElementById('app').innerHTML=html;
+}
+</script>
+</body>
+</html>

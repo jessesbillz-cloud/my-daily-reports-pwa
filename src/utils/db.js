@@ -1102,6 +1102,39 @@ class Database {
     })
   }
 
+  // ── Time Card ──────────────────────────────────────────────
+  async fetchReportsForWeek(jobId, mondayDate, sundayDate) {
+    await this._ensureFresh()
+    // Include all reports for the date range (submitted, resubmitted, saved)
+    // so that resubmissions always show up on the time card
+    const r = await fetch(
+      `${SB_URL}/rest/v1/reports?job_id=eq.${jobId}&report_date=gte.${mondayDate}&report_date=lte.${sundayDate}&select=id,report_date,content,status,updated_at&order=report_date.asc`,
+      { headers: this._h() }
+    )
+    if (!r.ok) return []
+    const data = await r.json()
+    return data.map(rpt => ({
+      ...rpt,
+      content: typeof rpt.content === "string" ? JSON.parse(rpt.content) : rpt.content
+    }))
+  }
+
+  async updateTimeCardSettings(jobId, settings) {
+    await this._ensureFresh()
+    const r = await fetch(`${SB_URL}/rest/v1/jobs?id=eq.${jobId}`, {
+      method: "PATCH",
+      headers: this._h(),
+      body: JSON.stringify({
+        timecard_enabled: settings.timecard_enabled,
+        timecard_company_name: settings.timecard_company_name || null,
+        timecard_project_number: settings.timecard_project_number || null,
+        timecard_client_name: settings.timecard_client_name || null,
+        timecard_position: settings.timecard_position || null
+      })
+    })
+    if (!r.ok) { const e = await r.text(); throw new Error(e) }
+  }
+
 }
 
 export const db = new Database()

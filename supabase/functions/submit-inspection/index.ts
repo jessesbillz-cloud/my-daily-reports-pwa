@@ -149,14 +149,11 @@ serve(async (req) => {
     }
 
     // Server-side conflict detection
-    // Rules: Regular blocks across ALL projects. Special only blocks if type is Concrete, Shotcrete, or Grout.
-    // Other special types (Soils, Material ID, Bolting, etc.) do NOT block.
-    const BLOCKING_SPECIAL_TYPES = ["Concrete", "Shotcrete", "Grout"];
+    // Rules: Only Regular vs Regular blocks across projects.
+    // Special inspections (Concrete/Shotcrete/Grout/etc.) NO LONGER block — too many false conflicts.
     const isRegular = inspectionTypes.includes("Regular");
-    const isBlockingSpecial = BLOCKING_SPECIAL_TYPES.some(t => inspectionTypes.includes(t) || specialType === t);
-    const incomingBlocks = isRegular || isBlockingSpecial;
 
-    if (incomingBlocks && flexibleDisplay !== "flexible") {
+    if (isRegular && flexibleDisplay !== "flexible") {
       const reqStart = parseInt(actualTime.split(":")[0]) * 60 + parseInt(actualTime.split(":")[1]);
       const reqEnd = reqStart + duration;
 
@@ -173,10 +170,8 @@ serve(async (req) => {
       if (existing && existing.length > 0) {
         const conflict = existing.find((r: any) => {
           const rTypes = r.inspection_types || [];
-          const rIsRegular = rTypes.includes("Regular");
-          const rIsBlockingSpecial = BLOCKING_SPECIAL_TYPES.some((t: string) => rTypes.includes(t));
-          // Only conflict against other blocking types
-          if (!rIsRegular && !rIsBlockingSpecial) return false;
+          // Only Regular vs Regular conflicts
+          if (!rTypes.includes("Regular")) return false;
           // Flexible existing requests block all day
           if (r.flexible_display === "flexible") return true;
           const rStart = parseInt((r.inspection_time || "08:00").split(":")[0]) * 60 + parseInt((r.inspection_time || "08:00").split(":")[1]);

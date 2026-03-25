@@ -1,0 +1,76 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html {
+  overflow-x: hidden;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  background: #0f0f0f;
+  color: #fff;
+  min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
+  overflow-x: hidden;
+  position: relative;
+  width: 100%;
+}
+
+html,
+body {
+  overscroll-behavior-x: none;
+  touch-action: pan-y;
+}
+
+#root {
+  min-height: 100vh;
+  overflow-x: hidden;
+  max-width: 100vw;
+}
+
+input:focus,
+select:focus,
+textarea:focus {
+  border-color: #e8742a !important;
+  outline: none;
+}
+
+button:focus-visible {
+  outline: 2px solid #e8742a;
+  outline-offset: 2px;
+}
+
+.btn-o:hover:not(:disabled) {
+  background: #b8570f !important;
+}
+
+button,
+input,
+select,
+textarea {
+  transition: all 0.2s ease;
+}
+
+@keyframes fadeSlideIn {
+  from {
+    opacity: 0;
+    transform: translateX(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.page-in {
+  animation: fadeSlideIn 0.18s ease-out;
+}

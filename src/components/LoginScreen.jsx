@@ -37,7 +37,8 @@ function LoginScreen({ onAuth }) {
           "nshehata@tyrior.com",
           "ysobhi1@msn.com",
           "dsobhi@tyrior.com",
-          "marktash@outlook.com"
+          "marktash@outlook.com",
+          "mslabosz94@gmail.com"
         ];
         if (!WHITELIST.includes(email.trim().toLowerCase())) {
           setErr("Registration is currently invite-only. Contact support@mydailyreports.org for access.");

@@ -1,0 +1,990 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MDR Admin</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#0a0a0a;color:#e0e0e0;min-height:100vh}
+a{color:#60a5fa;text-decoration:none}
+a:hover{text-decoration:underline}
+/* Login */
+.login-wrap{display:flex;align-items:center;justify-content:center;min-height:100vh;padding:20px}
+.login-box{background:#161616;border:1px solid #2a2a2a;border-radius:16px;padding:32px;max-width:380px;width:100%;text-align:center}
+.login-box h2{font-size:20px;margin-bottom:8px;color:#fff}
+.login-box p{font-size:13px;color:#888;margin-bottom:24px}
+.login-box input{width:100%;padding:12px 14px;background:#1a1a1a;border:1px solid #333;border-radius:8px;color:#fff;font-size:14px;margin-bottom:12px;outline:none}
+.login-box input:focus{border-color:#e8742a}
+.login-box button{width:100%;padding:14px;background:#e8742a;border:none;border-radius:10px;color:#fff;font-size:15px;font-weight:700;cursor:pointer}
+.login-box .err{color:#ef4444;font-size:12px;margin-bottom:12px}
+/* Shell */
+.shell{display:flex;min-height:100vh}
+.sidebar{width:220px;background:#111;border-right:1px solid #222;padding:16px 0;display:flex;flex-direction:column;position:fixed;top:0;bottom:0;z-index:10}
+.sidebar .logo{padding:12px 20px 20px;font-size:18px;font-weight:800;color:#e8742a;border-bottom:1px solid #222;margin-bottom:8px}
+.sidebar .nav-item{padding:10px 20px;font-size:14px;font-weight:600;color:#888;cursor:pointer;border-left:3px solid transparent;transition:all 0.15s}
+.sidebar .nav-item:hover{color:#ccc;background:#1a1a1a}
+.sidebar .nav-item.active{color:#e8742a;border-left-color:#e8742a;background:#1a1a1a}
+.sidebar .nav-item .badge{background:#e8742a;color:#fff;font-size:10px;font-weight:700;padding:1px 7px;border-radius:8px;margin-left:6px}
+.sidebar .spacer{flex:1}
+.sidebar .user-info{padding:12px 20px;border-top:1px solid #222;font-size:12px;color:#666}
+.sidebar .user-info strong{color:#ccc;display:block;margin-bottom:2px}
+.main{margin-left:220px;flex:1;padding:24px;min-height:100vh}
+/* Cards & Tables */
+.page-title{font-size:22px;font-weight:800;color:#fff;margin-bottom:20px}
+.stat-row{display:flex;gap:12px;margin-bottom:24px;flex-wrap:wrap}
+.stat-card{background:#161616;border:1px solid #2a2a2a;border-radius:12px;padding:16px 20px;flex:1;min-width:140px}
+.stat-card .label{font-size:12px;color:#888;font-weight:600;margin-bottom:4px}
+.stat-card .val{font-size:28px;font-weight:800;color:#fff}
+.stat-card .sub{font-size:11px;color:#666;margin-top:2px}
+.card{background:#161616;border:1px solid #2a2a2a;border-radius:12px;padding:20px;margin-bottom:16px}
+.card h3{font-size:15px;font-weight:700;color:#ccc;margin-bottom:14px}
+.tbl{width:100%;border-collapse:collapse;font-size:13px}
+.tbl th{text-align:left;padding:8px 10px;border-bottom:2px solid #333;color:#888;font-weight:600;font-size:12px}
+.tbl td{padding:8px 10px;border-bottom:1px solid #1a1a1a;color:#ccc}
+.tbl tr:hover td{background:#1a1a1a}
+.tbl .clickable{cursor:pointer}
+.badge-sm{font-size:11px;padding:2px 8px;border-radius:6px;font-weight:600;display:inline-block}
+.badge-green{background:#14332b;color:#22c55e}
+.badge-orange{background:#3b2815;color:#f59e0b}
+.badge-blue{background:#1e3a5f;color:#60a5fa}
+.badge-red{background:#3b1515;color:#ef4444}
+.badge-gray{background:#222;color:#888}
+/* Forms */
+.inp{width:100%;padding:10px 14px;background:#1a1a1a;border:1px solid #333;border-radius:8px;color:#e0e0e0;font-size:14px;margin-bottom:10px;outline:none}
+.inp:focus{border-color:#e8742a}
+select.inp{cursor:pointer}
+textarea.inp{font-family:inherit;resize:vertical}
+.btn{padding:10px 20px;border:none;border-radius:8px;font-size:14px;font-weight:700;cursor:pointer;display:inline-flex;align-items:center;gap:6px}
+.btn-primary{background:#e8742a;color:#fff}
+.btn-primary:hover{background:#d4691f}
+.btn-secondary{background:#333;color:#ccc}
+.btn-secondary:hover{background:#444}
+.btn-danger{background:#7f1d1d;color:#fca5a5}
+.btn-danger:hover{background:#991b1b}
+.btn-sm{padding:6px 12px;font-size:12px}
+.btn:disabled{opacity:0.4;cursor:not-allowed}
+.row{display:flex;gap:12px;align-items:center;margin-bottom:10px}
+.hint{font-size:11px;color:#666;margin-top:-6px;margin-bottom:10px}
+/* Support chat */
+.chat-messages{max-height:400px;overflow-y:auto;display:flex;flex-direction:column;gap:8px;padding:8px 0}
+.chat-msg{max-width:75%;padding:8px 12px;border-radius:12px;font-size:13px;line-height:1.5}
+.chat-msg.user{align-self:flex-end;background:#e8742a;color:#fff;border-bottom-right-radius:4px}
+.chat-msg.agent{align-self:flex-start;background:#333;color:#fff;border-bottom-left-radius:4px}
+.chat-msg .ts{font-size:10px;opacity:0.6;margin-top:4px}
+/* Detail panel */
+.detail-panel{background:#111;border:1px solid #2a2a2a;border-radius:12px;padding:20px}
+.detail-header{display:flex;align-items:center;gap:12px;margin-bottom:16px}
+.detail-header .back{background:none;border:none;color:#888;font-size:22px;cursor:pointer;padding:4px 8px}
+.detail-header .back:hover{color:#fff}
+.detail-header h3{font-size:17px;font-weight:700;color:#fff}
+.detail-row{display:flex;gap:20px;margin-bottom:12px;font-size:13px}
+.detail-row .lbl{color:#888;min-width:120px;font-weight:600}
+.detail-row .val{color:#ccc}
+/* Responsive */
+@media(max-width:768px){
+  .sidebar{width:60px;overflow:hidden}
+  .sidebar .logo{font-size:14px;padding:12px}
+  .sidebar .nav-item{padding:10px;font-size:12px;white-space:nowrap;overflow:hidden}
+  .sidebar .user-info{display:none}
+  .main{margin-left:60px;padding:16px}
+  .stat-row{flex-direction:column}
+}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script src="https://cdn.jsdelivr.net/npm/react@18/umd/react.production.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@babel/standalone/babel.min.js"></script>
+<script type="text/babel">
+const SB_URL="https://wluvkmpncafugdbunlkw.supabase.co";
+const SB_KEY="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndsdXZrbXBuY2FmdWdkYnVubGt3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzIzMDU1MTUsImV4cCI6MjA4Nzg4MTUxNX0.HZpQ2xVGpf4EQ0BVDmIEuPqW5T_eNG5OqBNAqT03rH8";
+
+// Role: "owner" for Jesse/Ava (full access), "agent" for Rachelle (no billing)
+const ADMIN_ROLES={"inspector_jesse@outlook.com":"owner","jessesbillz@gmail.com":"owner","rachellegaciasquidasol@gmail.com":"agent","mydailyreportsz@gmail.com":"owner"};
+
+const {useState,useEffect,useRef,useMemo}=React;
+
+/* ── Login ── */
+function LoginScreen({onAuth}){
+  const [email,setEmail]=useState("");
+  const [pass,setPass]=useState("");
+  const [err,setErr]=useState("");
+  const [loading,setLoading]=useState(false);
+  const login=async()=>{
+    if(!email||!pass)return;
+    setLoading(true);setErr("");
+    try{
+      const r=await fetch(`${SB_URL}/auth/v1/token?grant_type=password`,{method:"POST",headers:{"apikey":SB_KEY,"Content-Type":"application/json"},body:JSON.stringify({email,password:pass})});
+      const d=await r.json();
+      if(d.error)throw new Error(d.error_description||d.error);
+      const role=ADMIN_ROLES[email.toLowerCase().trim()];
+      if(!role){setErr("Access denied — not an admin account");return;}
+      onAuth({...d,role,email:email.toLowerCase().trim()});
+    }catch(e){setErr(e.message);}
+    finally{setLoading(false);}
+  };
+  return(
+    <div className="login-wrap">
+      <div className="login-box">
+        <h2>MDR Admin</h2>
+        <p>Sign in with your admin account</p>
+        {err&&<div className="err">{err}</div>}
+        <input type="email" placeholder="Email" value={email} onChange={e=>setEmail(e.target.value)} onKeyDown={e=>e.key==="Enter"&&login()}/>
+        <input type="password" placeholder="Password" value={pass} onChange={e=>setPass(e.target.value)} onKeyDown={e=>e.key==="Enter"&&login()}/>
+        <button onClick={login} disabled={loading}>{loading?"Signing in...":"Sign In"}</button>
+      </div>
+    </div>
+  );
+}
+
+/* ── Main Admin App ── */
+function AdminApp({session}){
+  const [tab,setTab]=useState("overview");
+  const isOwner=session.role==="owner";
+  const h=()=>({"apikey":SB_KEY,"Authorization":"Bearer "+session.access_token,"Content-Type":"application/json"});
+  const hGet=()=>({"apikey":SB_KEY,"Authorization":"Bearer "+session.access_token});
+
+  // Overview stats
+  const [stats,setStats]=useState({users:0,jobs:0,reports:0,openTickets:0,companies:0,activeUsers:0,trialingUsers:0,expiredUsers:0});
+  const [loadingStats,setLoadingStats]=useState(true);
+
+  const loadStats=async()=>{
+    setLoadingStats(true);
+    try{
+      const [usersR,jobsR,repsR,ticketsR,companiesR]=await Promise.all([
+        fetch(`${SB_URL}/rest/v1/profiles?select=id,subscription_status`,{headers:hGet()}),
+        fetch(`${SB_URL}/rest/v1/jobs?select=id&is_archived=is.false`,{headers:hGet()}),
+        fetch(`${SB_URL}/rest/v1/reports?select=id&status=eq.submitted`,{headers:hGet()}),
+        fetch(`${SB_URL}/rest/v1/support_conversations?select=id&status=eq.open`,{headers:hGet()}),
+        fetch(`${SB_URL}/rest/v1/companies?select=id`,{headers:hGet()}),
+      ]);
+      const users=usersR.ok?await usersR.json():[];
+      const jobs=jobsR.ok?await jobsR.json():[];
+      const reps=repsR.ok?await repsR.json():[];
+      const tickets=ticketsR.ok?await ticketsR.json():[];
+      const companies=companiesR.ok?await companiesR.json():[];
+      setStats({
+        users:users.length,
+        jobs:jobs.length,
+        reports:reps.length,
+        openTickets:tickets.length,
+        companies:companies.length,
+        activeUsers:users.filter(u=>u.subscription_status==="active").length,
+        trialingUsers:users.filter(u=>u.subscription_status==="trialing"||!u.subscription_status).length,
+        expiredUsers:users.filter(u=>u.subscription_status==="expired").length,
+      });
+    }catch(e){console.error("Stats:",e);}
+    finally{setLoadingStats(false);}
+  };
+  useEffect(()=>{loadStats();},[]);
+
+  return(
+    <div className="shell">
+      <div className="sidebar">
+        <div className="logo">MDR Admin</div>
+        <div className={`nav-item${tab==="overview"?" active":""}`} onClick={()=>setTab("overview")}>Overview</div>
+        <div className={`nav-item${tab==="users"?" active":""}`} onClick={()=>setTab("users")}>Users</div>
+        <div className={`nav-item${tab==="companies"?" active":""}`} onClick={()=>setTab("companies")}>Companies</div>
+        <div className={`nav-item${tab==="support"?" active":""}`} onClick={()=>setTab("support")}>
+          Support{stats.openTickets>0&&<span className="badge">{stats.openTickets}</span>}
+        </div>
+        <div className={`nav-item${tab==="templates"?" active":""}`} onClick={()=>setTab("templates")}>Templates</div>
+        {isOwner&&<div className={`nav-item${tab==="billing"?" active":""}`} onClick={()=>setTab("billing")}>Billing</div>}
+        <div className={`nav-item${tab==="emails"?" active":""}`} onClick={()=>setTab("emails")}>Emails</div>
+        <div className="spacer"/>
+        <div className="user-info">
+          <strong>{session.email}</strong>
+          {isOwner?"Owner":"Support Agent"}
+        </div>
+      </div>
+      <div className="main">
+        {tab==="overview"&&<OverviewTab stats={stats} loading={loadingStats} onRefresh={loadStats}/>}
+        {tab==="users"&&<UsersTab hGet={hGet} h={h} isOwner={isOwner}/>}
+        {tab==="companies"&&<CompaniesTab hGet={hGet} h={h}/>}
+        {tab==="support"&&<SupportTab hGet={hGet} h={h} onRefresh={loadStats}/>}
+        {tab==="templates"&&<TemplatesTab hGet={hGet} h={h} session={session}/>}
+        {tab==="billing"&&isOwner&&<BillingTab hGet={hGet} h={h}/>}
+        {tab==="emails"&&<EmailsTab hGet={hGet} h={h}/>}
+      </div>
+    </div>
+  );
+}
+
+/* ── Overview ── */
+function OverviewTab({stats,loading,onRefresh}){
+  return(
+    <div>
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:20}}>
+        <h2 className="page-title" style={{margin:0}}>Dashboard</h2>
+        <button className="btn btn-secondary btn-sm" onClick={onRefresh} disabled={loading}>{loading?"Loading...":"Refresh"}</button>
+      </div>
+      <div className="stat-row">
+        <div className="stat-card"><div className="label">Total Users</div><div className="val">{stats.users}</div></div>
+        <div className="stat-card"><div className="label">Active Subs</div><div className="val" style={{color:"#22c55e"}}>{stats.activeUsers}</div></div>
+        <div className="stat-card"><div className="label">Trialing</div><div className="val" style={{color:"#f59e0b"}}>{stats.trialingUsers}</div></div>
+        <div className="stat-card"><div className="label">Expired</div><div className="val" style={{color:"#ef4444"}}>{stats.expiredUsers}</div></div>
+      </div>
+      <div className="stat-row">
+        <div className="stat-card"><div className="label">Active Jobs</div><div className="val">{stats.jobs}</div></div>
+        <div className="stat-card"><div className="label">Reports Submitted</div><div className="val">{stats.reports}</div></div>
+        <div className="stat-card"><div className="label">Companies</div><div className="val">{stats.companies}</div></div>
+        <div className="stat-card"><div className="label">Open Tickets</div><div className="val" style={{color:stats.openTickets>0?"#e8742a":"#22c55e"}}>{stats.openTickets}</div></div>
+      </div>
+    </div>
+  );
+}
+
+/* ── Users ── */
+function UsersTab({hGet,h,isOwner}){
+  const [users,setUsers]=useState([]);
+  const [loading,setLoading]=useState(true);
+  const [search,setSearch]=useState("");
+  const [selUser,setSelUser]=useState(null);
+  const [userJobs,setUserJobs]=useState([]);
+  const [userReports,setUserReports]=useState([]);
+  const [editing,setEditing]=useState(false);
+  const [editForm,setEditForm]=useState({});
+  const [saving,setSaving]=useState(false);
+
+  const loadUsers=async()=>{
+    setLoading(true);
+    try{
+      const r=await fetch(`${SB_URL}/rest/v1/profiles?select=*&order=created_at.desc&limit=500`,{headers:hGet()});
+      if(r.ok)setUsers(await r.json());
+    }catch(e){console.error(e);}
+    finally{setLoading(false);}
+  };
+  useEffect(()=>{loadUsers();},[]);
+
+  const selectUser=async(u)=>{
+    setSelUser(u);setEditing(false);
+    setEditForm({subscription_status:u.subscription_status||"trialing",subscription_plan:u.subscription_plan||"",company_name:u.company_name||"",company_role:u.company_role||"member",full_name:u.full_name||""});
+    // Load their jobs and recent reports
+    try{
+      const [jr,rr]=await Promise.all([
+        fetch(`${SB_URL}/rest/v1/jobs?user_id=eq.${u.id}&select=*&order=created_at.desc`,{headers:hGet()}),
+        fetch(`${SB_URL}/rest/v1/reports?user_id=eq.${u.id}&select=*&order=created_at.desc&limit=20`,{headers:hGet()}),
+      ]);
+      if(jr.ok)setUserJobs(await jr.json());
+      if(rr.ok)setUserReports(await rr.json());
+    }catch(e){console.error(e);}
+  };
+
+  const saveUser=async()=>{
+    if(!selUser)return;
+    setSaving(true);
+    try{
+      const body={...editForm};
+      // Only owner can edit billing fields
+      if(!isOwner){delete body.subscription_status;delete body.subscription_plan;}
+      const r=await fetch(`${SB_URL}/rest/v1/profiles?id=eq.${selUser.id}`,{method:"PATCH",headers:h(),body:JSON.stringify(body)});
+      if(!r.ok)throw new Error(await r.text());
+      alert("Saved");
+      loadUsers();
+      setSelUser({...selUser,...body});
+      setEditing(false);
+    }catch(e){alert("Save failed: "+e.message);}
+    finally{setSaving(false);}
+  };
+
+  const filtered=users.filter(u=>{
+    if(!search.trim())return true;
+    const q=search.toLowerCase();
+    return(u.full_name||"").toLowerCase().includes(q)||(u.email||"").toLowerCase().includes(q)||(u.company_name||"").toLowerCase().includes(q);
+  });
+
+  const statusBadge=(s)=>{
+    if(s==="active")return<span className="badge-sm badge-green">Active</span>;
+    if(s==="trialing"||!s)return<span className="badge-sm badge-orange">Trialing</span>;
+    if(s==="expired")return<span className="badge-sm badge-red">Expired</span>;
+    if(s==="past_due")return<span className="badge-sm badge-red">Past Due</span>;
+    if(s==="cancelled")return<span className="badge-sm badge-gray">Cancelled</span>;
+    if(s==="trial_abused")return<span className="badge-sm badge-red">Abuse</span>;
+    return<span className="badge-sm badge-gray">{s||"—"}</span>;
+  };
+
+  if(selUser)return(
+    <div>
+      <div className="detail-panel">
+        <div className="detail-header">
+          <button className="back" onClick={()=>setSelUser(null)}>←</button>
+          <h3>{selUser.full_name||"No Name"}</h3>
+          <div style={{flex:1}}/>
+          {!editing&&<button className="btn btn-secondary btn-sm" onClick={()=>setEditing(true)}>Edit</button>}
+        </div>
+
+        {!editing?(
+          <div>
+            <div className="detail-row"><div className="lbl">Email</div><div className="val">{selUser.email||"—"}</div></div>
+            <div className="detail-row"><div className="lbl">ID</div><div className="val" style={{fontSize:11,color:"#666",fontFamily:"monospace"}}>{selUser.id}</div></div>
+            <div className="detail-row"><div className="lbl">Company</div><div className="val">{selUser.company_name||"—"}</div></div>
+            <div className="detail-row"><div className="lbl">Role</div><div className="val">{selUser.company_role||"—"}</div></div>
+            <div className="detail-row"><div className="lbl">Subscription</div><div className="val">{statusBadge(selUser.subscription_status)}</div></div>
+            <div className="detail-row"><div className="lbl">Plan</div><div className="val">{selUser.subscription_plan||"—"}</div></div>
+            <div className="detail-row"><div className="lbl">Trial Ends</div><div className="val">{selUser.trial_ends_at?new Date(selUser.trial_ends_at).toLocaleDateString():"—"}</div></div>
+            <div className="detail-row"><div className="lbl">Slug</div><div className="val">{selUser.slug||"—"}</div></div>
+            <div className="detail-row"><div className="lbl">Timezone</div><div className="val">{selUser.timezone||"—"}</div></div>
+            <div className="detail-row"><div className="lbl">Joined</div><div className="val">{selUser.created_at?new Date(selUser.created_at).toLocaleDateString():"—"}</div></div>
+          </div>
+        ):(
+          <div style={{maxWidth:400}}>
+            <label style={{fontSize:12,color:"#888",fontWeight:600,display:"block",marginBottom:4}}>Full Name</label>
+            <input className="inp" value={editForm.full_name} onChange={e=>setEditForm({...editForm,full_name:e.target.value})}/>
+            <label style={{fontSize:12,color:"#888",fontWeight:600,display:"block",marginBottom:4}}>Company Name</label>
+            <input className="inp" value={editForm.company_name} onChange={e=>setEditForm({...editForm,company_name:e.target.value})}/>
+            <label style={{fontSize:12,color:"#888",fontWeight:600,display:"block",marginBottom:4}}>Company Role</label>
+            <select className="inp" value={editForm.company_role} onChange={e=>setEditForm({...editForm,company_role:e.target.value})}>
+              <option value="member">Member</option>
+              <option value="admin">Admin</option>
+            </select>
+            {isOwner&&(
+              <>
+                <label style={{fontSize:12,color:"#888",fontWeight:600,display:"block",marginBottom:4}}>Subscription Status</label>
+                <select className="inp" value={editForm.subscription_status} onChange={e=>setEditForm({...editForm,subscription_status:e.target.value})}>
+                  <option value="trialing">Trialing</option>
+                  <option value="active">Active</option>
+                  <option value="expired">Expired</option>
+                  <option value="past_due">Past Due</option>
+                  <option value="cancelled">Cancelled</option>
+                  <option value="trial_abused">Trial Abused</option>
+                </select>
+                <label style={{fontSize:12,color:"#888",fontWeight:600,display:"block",marginBottom:4}}>Subscription Plan</label>
+                <input className="inp" value={editForm.subscription_plan} onChange={e=>setEditForm({...editForm,subscription_plan:e.target.value})} placeholder="price_id from Stripe"/>
+              </>
+            )}
+            <div style={{display:"flex",gap:8,marginTop:8}}>
+              <button className="btn btn-primary" onClick={saveUser} disabled={saving}>{saving?"Saving...":"Save"}</button>
+              <button className="btn btn-secondary" onClick={()=>setEditing(false)}>Cancel</button>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* User's Jobs */}
+      <div className="card" style={{marginTop:16}}>
+        <h3>Jobs ({userJobs.length})</h3>
+        {userJobs.length===0?<div style={{color:"#666",fontSize:13}}>No jobs</div>:(
+          <table className="tbl">
+            <thead><tr><th>Name</th><th>Type</th><th>Schedule</th><th>Archived</th><th>Created</th></tr></thead>
+            <tbody>
+              {userJobs.map(j=>(
+                <tr key={j.id}>
+                  <td style={{color:"#fff",fontWeight:600}}>{j.name}</td>
+                  <td>{j.job_type||"template"}</td>
+                  <td>{j.schedule||"as_needed"}</td>
+                  <td>{j.is_archived?"Yes":"No"}</td>
+                  <td style={{color:"#666",fontSize:11}}>{new Date(j.created_at).toLocaleDateString()}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      {/* User's Reports */}
+      <div className="card" style={{marginTop:16}}>
+        <h3>Recent Reports ({userReports.length})</h3>
+        {userReports.length===0?<div style={{color:"#666",fontSize:13}}>No reports</div>:(
+          <table className="tbl">
+            <thead><tr><th>Date</th><th>Status</th><th>#</th><th>PDF</th></tr></thead>
+            <tbody>
+              {userReports.map(r=>(
+                <tr key={r.id}>
+                  <td>{r.report_date||"—"}</td>
+                  <td>{r.status==="submitted"?<span className="badge-sm badge-green">Submitted</span>:<span className="badge-sm badge-orange">Working</span>}</td>
+                  <td>{r.report_number||"—"}</td>
+                  <td style={{fontSize:11,color:"#666"}}>{r.pdf_filename||"—"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+    </div>
+  );
+
+  return(
+    <div>
+      <h2 className="page-title">Users</h2>
+      <input className="inp" style={{maxWidth:400,marginBottom:16}} placeholder="Search by name, email, or company..." value={search} onChange={e=>setSearch(e.target.value)}/>
+      {loading?<div style={{color:"#888"}}>Loading...</div>:(
+        <table className="tbl">
+          <thead><tr><th>Name</th><th>Email</th><th>Company</th><th>Status</th><th>Joined</th></tr></thead>
+          <tbody>
+            {filtered.map(u=>(
+              <tr key={u.id} className="clickable" onClick={()=>selectUser(u)}>
+                <td style={{color:"#fff",fontWeight:600}}>{u.full_name||"—"}</td>
+                <td>{u.email||"—"}</td>
+                <td>{u.company_name||"—"}</td>
+                <td>{statusBadge(u.subscription_status)}</td>
+                <td style={{color:"#666",fontSize:11}}>{u.created_at?new Date(u.created_at).toLocaleDateString():""}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </div>
+  );
+}
+
+/* ── Companies ── */
+function CompaniesTab({hGet,h}){
+  const [companies,setCompanies]=useState([]);
+  const [loading,setLoading]=useState(true);
+  const [selCo,setSelCo]=useState(null);
+  const [coMembers,setCoMembers]=useState([]);
+  const [coTemplates,setCoTemplates]=useState([]);
+  const [newName,setNewName]=useState("");
+  const [creating,setCreating]=useState(false);
+
+  const loadCompanies=async()=>{
+    setLoading(true);
+    try{
+      const r=await fetch(`${SB_URL}/rest/v1/companies?select=*&order=name.asc`,{headers:hGet()});
+      if(r.ok)setCompanies(await r.json());
+    }catch(e){console.error(e);}
+    finally{setLoading(false);}
+  };
+  useEffect(()=>{loadCompanies();},[]);
+
+  const selectCo=async(c)=>{
+    setSelCo(c);
+    try{
+      const [mr,tr]=await Promise.all([
+        fetch(`${SB_URL}/rest/v1/profiles?company_id=eq.${c.id}&select=id,full_name,email,company_role`,{headers:hGet()}),
+        fetch(`${SB_URL}/rest/v1/company_templates?company_id=eq.${c.id}&select=*&order=created_at.desc`,{headers:hGet()}),
+      ]);
+      if(mr.ok)setCoMembers(await mr.json());
+      if(tr.ok)setCoTemplates(await tr.json());
+    }catch(e){console.error(e);}
+  };
+
+  const createCompany=async()=>{
+    if(!newName.trim())return;
+    setCreating(true);
+    try{
+      const r=await fetch(`${SB_URL}/rest/v1/companies`,{method:"POST",headers:{...h(),"Prefer":"return=representation"},body:JSON.stringify({name:newName.trim()})});
+      if(!r.ok)throw new Error(await r.text());
+      setNewName("");
+      loadCompanies();
+    }catch(e){alert("Failed: "+e.message);}
+    finally{setCreating(false);}
+  };
+
+  const deleteTpl=async(tpl)=>{
+    if(!confirm(`Delete template "${tpl.template_name}"?`))return;
+    try{
+      await fetch(`${SB_URL}/rest/v1/company_templates?id=eq.${tpl.id}`,{method:"DELETE",headers:hGet()});
+      selectCo(selCo);
+    }catch(e){alert(e.message);}
+  };
+
+  if(selCo)return(
+    <div>
+      <div className="detail-panel">
+        <div className="detail-header">
+          <button className="back" onClick={()=>setSelCo(null)}>←</button>
+          <h3>{selCo.name}</h3>
+        </div>
+        <div className="detail-row"><div className="lbl">ID</div><div className="val" style={{fontSize:11,fontFamily:"monospace",color:"#666"}}>{selCo.id}</div></div>
+        <div className="detail-row"><div className="lbl">Created</div><div className="val">{selCo.created_at?new Date(selCo.created_at).toLocaleDateString():"—"}</div></div>
+      </div>
+
+      <div className="card" style={{marginTop:16}}>
+        <h3>Members ({coMembers.length})</h3>
+        {coMembers.length===0?<div style={{color:"#666",fontSize:13}}>No members</div>:(
+          <table className="tbl">
+            <thead><tr><th>Name</th><th>Email</th><th>Role</th></tr></thead>
+            <tbody>
+              {coMembers.map(m=>(
+                <tr key={m.id}>
+                  <td style={{color:"#fff",fontWeight:600}}>{m.full_name||"—"}</td>
+                  <td>{m.email||"—"}</td>
+                  <td>{m.company_role==="admin"?<span className="badge-sm badge-orange">Admin</span>:<span className="badge-sm badge-gray">Member</span>}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      <div className="card" style={{marginTop:16}}>
+        <h3>Templates ({coTemplates.length})</h3>
+        {coTemplates.map(t=>(
+          <div key={t.id} style={{display:"flex",alignItems:"center",gap:10,padding:"8px 10px",background:"#1a1a1a",border:"1px solid #222",borderRadius:8,marginBottom:4}}>
+            <span style={{fontSize:16}}>📄</span>
+            <div style={{flex:1}}>
+              <div style={{fontSize:13,fontWeight:600,color:"#fff"}}>{t.template_name||t.file_name}</div>
+              <div style={{fontSize:11,color:"#666"}}>{t.file_name} • {(t.field_config||[]).length} fields</div>
+            </div>
+            <button className="btn btn-danger btn-sm" onClick={()=>deleteTpl(t)}>Delete</button>
+          </div>
+        ))}
+        <div style={{borderTop:"1px solid #333",marginTop:12,paddingTop:12}}>
+          <h4 style={{fontSize:13,color:"#888",marginBottom:8}}>Upload Template</h4>
+          <input type="file" accept=".pdf,.docx" id="coTplFile" style={{marginBottom:8,fontSize:13}}/>
+          <div className="row" style={{gap:8}}>
+            <input className="inp" style={{flex:1,marginBottom:0}} id="coTplName" placeholder="Template name..."/>
+            <button className="btn btn-primary btn-sm" onClick={async()=>{
+              const fileInput=document.getElementById("coTplFile");
+              const nameInput=document.getElementById("coTplName");
+              const file=fileInput?.files?.[0];
+              const tplName=nameInput?.value?.trim();
+              if(!file){alert("Select a file first");return;}
+              if(!tplName){alert("Enter a template name");return;}
+              try{
+                const ext=file.name.split(".").pop().toLowerCase();
+                const u8=new Uint8Array(await file.arrayBuffer());
+                const storagePath=selCo.id+"/"+Date.now()+"_"+file.name;
+                const ct=ext==="pdf"?"application/pdf":"application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+                let upR=await fetch(SB_URL+"/storage/v1/object/company-templates/"+storagePath,{method:"POST",headers:{"apikey":SB_KEY,"Authorization":"Bearer "+session.access_token,"Content-Type":ct},body:new Blob([u8],{type:ct})});
+                if(!upR.ok)upR=await fetch(SB_URL+"/storage/v1/object/company-templates/"+storagePath,{method:"PUT",headers:{"apikey":SB_KEY,"Authorization":"Bearer "+session.access_token,"Content-Type":ct},body:new Blob([u8],{type:ct})});
+                if(!upR.ok)throw new Error("Upload failed: "+upR.status);
+                const saveR=await fetch(SB_URL+"/rest/v1/company_templates",{method:"POST",headers:{...h(),"Prefer":"return=representation"},body:JSON.stringify({company_id:selCo.id,template_name:tplName,file_name:file.name,file_type:ext,storage_path:"company-templates/"+storagePath,field_config:null,mode:"template"})});
+                if(!saveR.ok)throw new Error("Insert failed: "+await saveR.text());
+                alert("Template uploaded!");
+                fileInput.value="";nameInput.value="";
+                selectCo(selCo);
+              }catch(e){alert("Error: "+e.message);}
+            }}>Upload</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+
+  return(
+    <div>
+      <h2 className="page-title">Companies</h2>
+      <div className="card">
+        <h3>Create Company</h3>
+        <div className="row">
+          <input className="inp" style={{flex:1,marginBottom:0}} placeholder="Company name..." value={newName} onChange={e=>setNewName(e.target.value)} onKeyDown={e=>e.key==="Enter"&&createCompany()}/>
+          <button className="btn btn-primary btn-sm" onClick={createCompany} disabled={creating}>{creating?"Creating...":"Create"}</button>
+        </div>
+      </div>
+      {loading?<div style={{color:"#888"}}>Loading...</div>:(
+        <table className="tbl">
+          <thead><tr><th>Name</th><th>ID</th><th>Created</th></tr></thead>
+          <tbody>
+            {companies.map(c=>(
+              <tr key={c.id} className="clickable" onClick={()=>selectCo(c)}>
+                <td style={{color:"#fff",fontWeight:600}}>{c.name}</td>
+                <td style={{fontSize:11,color:"#666",fontFamily:"monospace"}}>{c.id.slice(0,8)}...</td>
+                <td style={{color:"#666",fontSize:11}}>{c.created_at?new Date(c.created_at).toLocaleDateString():""}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </div>
+  );
+}
+
+/* ── Support ── */
+function SupportTab({hGet,h,onRefresh}){
+  const [convs,setConvs]=useState([]);
+  const [selConv,setSelConv]=useState(null);
+  const [msgs,setMsgs]=useState([]);
+  const [draft,setDraft]=useState("");
+  const [sending,setSending]=useState(false);
+  const scrollRef=useRef(null);
+  const pollRef=useRef(null);
+
+  const loadConvs=async()=>{
+    try{
+      const r=await fetch(`${SB_URL}/rest/v1/support_conversations?order=updated_at.desc&select=*`,{headers:hGet()});
+      if(r.ok)setConvs(await r.json());
+    }catch(e){console.error(e);}
+  };
+  const loadMsgs=async(cid)=>{
+    try{
+      const r=await fetch(`${SB_URL}/rest/v1/support_messages?conversation_id=eq.${cid}&order=created_at.asc`,{headers:hGet()});
+      if(r.ok){const m=await r.json();setMsgs(m);}
+    }catch(e){}
+  };
+  useEffect(()=>{loadConvs();const t=setInterval(loadConvs,15000);return()=>clearInterval(t);},[]);
+  useEffect(()=>{
+    if(!selConv)return;
+    loadMsgs(selConv.id);
+    if(pollRef.current)clearInterval(pollRef.current);
+    pollRef.current=setInterval(()=>loadMsgs(selConv.id),8000);
+    return()=>{if(pollRef.current)clearInterval(pollRef.current);};
+  },[selConv?.id]);
+  useEffect(()=>{if(scrollRef.current)scrollRef.current.scrollTop=scrollRef.current.scrollHeight;},[msgs]);
+
+  const [supportErr,setSupportErr]=useState("");
+  const flashErr=(msg)=>{setSupportErr(msg);setTimeout(()=>setSupportErr(""),5000);};
+  const sendMsg=async()=>{
+    if(!draft.trim()||sending||!selConv)return;
+    setSending(true);
+    try{
+      const r=await fetch(`${SB_URL}/rest/v1/support_messages`,{method:"POST",headers:h(),body:JSON.stringify({conversation_id:selConv.id,sender:"agent",body:draft.trim()})});
+      if(!r.ok){const d=await r.json().catch(()=>({}));flashErr("Send failed: "+(d.message||r.status));return;}
+      setDraft("");loadMsgs(selConv.id);
+    }catch(e){flashErr("Network error: "+e.message);}
+    finally{setSending(false);}
+  };
+  const updateStatus=async(status)=>{
+    if(!selConv)return;
+    const prevStatus=selConv.status;
+    try{
+      const r=await fetch(`${SB_URL}/rest/v1/support_conversations?id=eq.${selConv.id}`,{method:"PATCH",headers:h(),body:JSON.stringify({status})});
+      if(!r.ok){const d=await r.json().catch(()=>({}));flashErr("Update failed: "+(d.message||r.status));return;}
+      setSelConv(p=>({...p,status}));loadConvs();onRefresh();
+    }catch(e){flashErr("Network error: "+e.message);}
+  };
+  const getName=(c)=>c.guest_name||("User "+((c.user_id||"").slice(0,8)||"anon"));
+  const fmtTime=(ts)=>{const d=new Date(ts);const now=new Date();if(d.toDateString()===now.toDateString())return d.toLocaleTimeString([],{hour:"numeric",minute:"2-digit"});return d.toLocaleDateString([],{month:"short",day:"numeric"});};
+
+  return(
+    <div>
+      <h2 className="page-title">Support</h2>
+      {supportErr&&<div style={{background:"#2a1515",border:"1px solid #ef4444",borderRadius:8,padding:"10px 16px",marginBottom:16,color:"#ef4444",fontSize:13,fontWeight:600}}>{supportErr}</div>}
+      <div style={{display:"flex",gap:16,height:"calc(100vh - 120px)"}}>
+        {/* Conversation list */}
+        <div style={{width:280,borderRight:"1px solid #222",overflowY:"auto",flexShrink:0}}>
+          {convs.length===0&&<div style={{padding:20,color:"#666",fontSize:13}}>No conversations</div>}
+          {convs.map(c=>(
+            <div key={c.id} onClick={()=>setSelConv(c)} style={{padding:"12px 14px",borderBottom:"1px solid #1a1a1a",cursor:"pointer",background:selConv?.id===c.id?"#1a1a1a":"transparent"}}>
+              <div style={{fontSize:14,fontWeight:600,color:"#fff"}}>{getName(c)}</div>
+              {c.guest_email&&<div style={{fontSize:11,color:"#888",marginTop:2}}>{c.guest_email}</div>}
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:4}}>
+                <span className={`badge-sm ${c.status==="open"?"badge-green":c.status==="resolved"?"badge-blue":"badge-gray"}`}>{c.status}</span>
+                <span style={{fontSize:11,color:"#666"}}>{fmtTime(c.updated_at)}</span>
+              </div>
+            </div>
+          ))}
+        </div>
+        {/* Chat area */}
+        <div style={{flex:1,display:"flex",flexDirection:"column"}}>
+          {!selConv?<div style={{flex:1,display:"flex",alignItems:"center",justifyContent:"center",color:"#666"}}>Select a conversation</div>:(
+            <>
+              <div style={{padding:"10px 0",borderBottom:"1px solid #222",display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:8}}>
+                <div>
+                  <div style={{fontSize:14,fontWeight:600,color:"#fff"}}>{getName(selConv)}</div>
+                  {selConv.guest_email&&<div style={{fontSize:12,color:"#888"}}>{selConv.guest_email}</div>}
+                </div>
+                <div style={{display:"flex",gap:6}}>
+                  {selConv.status==="open"&&<button className="btn btn-sm btn-secondary" style={{borderColor:"#22c55e",color:"#22c55e"}} onClick={()=>updateStatus("resolved")}>Resolve</button>}
+                  {selConv.status!=="open"&&<button className="btn btn-sm btn-secondary" onClick={()=>updateStatus("open")}>Reopen</button>}
+                  <button className="btn btn-sm btn-secondary" onClick={()=>updateStatus("closed")}>Close</button>
+                </div>
+              </div>
+              <div ref={scrollRef} className="chat-messages" style={{flex:1}}>
+                {msgs.length===0&&<div style={{textAlign:"center",color:"#666",marginTop:40}}>No messages</div>}
+                {msgs.map(m=>(
+                  <div key={m.id} className={`chat-msg ${m.sender}`}>
+                    {m.body}
+                    <div className="ts">{new Date(m.created_at).toLocaleTimeString([],{hour:"numeric",minute:"2-digit"})}</div>
+                  </div>
+                ))}
+              </div>
+              <div style={{display:"flex",gap:8,paddingTop:10,borderTop:"1px solid #222"}}>
+                <input className="inp" style={{flex:1,marginBottom:0}} value={draft} onChange={e=>setDraft(e.target.value)} onKeyDown={e=>{if(e.key==="Enter")sendMsg();}} placeholder="Type a reply..."/>
+                <button className="btn btn-primary btn-sm" onClick={sendMsg} disabled={sending||!draft.trim()}>Send</button>
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ── Templates (Drop to User / Company) ── */
+function TemplatesTab({hGet,h,session}){
+  const [mode,setMode]=useState("user"); // user or company
+  const [userEmail,setUserEmail]=useState("");
+  const [userId,setUserId]=useState("");
+  const [userName,setUserName]=useState("");
+  const [tplName,setTplName]=useState("");
+  const [fieldJson,setFieldJson]=useState("");
+  const [file,setFile]=useState(null);
+  const [log,setLog]=useState([]);
+  const [working,setWorking]=useState(false);
+  // Company mode
+  const [coSearch,setCoSearch]=useState("");
+  const [coResults,setCoResults]=useState([]);
+  const [selCo,setSelCo]=useState(null);
+  const searchTimeout=useRef(null);
+
+  const addLog=(msg,cls="")=>setLog(p=>[...p,{msg,cls}]);
+
+  const lookupUser=async()=>{
+    if(!userEmail.trim())return;
+    const emailLower=userEmail.toLowerCase().trim();
+    try{
+      // Check profiles first (by email column)
+      const r=await fetch(`${SB_URL}/rest/v1/profiles?email=eq.${encodeURIComponent(emailLower)}&select=id,full_name,email&limit=1`,{headers:hGet()});
+      const data=await r.json();
+      if(data&&data[0]){setUserId(data[0].id);setUserName(data[0].full_name||data[0].email);return;}
+      // Check profiles by slug (in case they search by name)
+      const sr=await fetch(`${SB_URL}/rest/v1/profiles?or=(full_name.ilike.*${encodeURIComponent(emailLower)}*,slug.ilike.*${encodeURIComponent(emailLower)}*)&select=id,full_name,email&limit=1`,{headers:hGet()});
+      const sd=await sr.json();
+      if(sd&&sd[0]){setUserId(sd[0].id);setUserName(sd[0].full_name||sd[0].email||"User");return;}
+      // Fall back to auth admin API (searches actual login email)
+      const ar=await fetch(`${SB_URL}/auth/v1/admin/users?page=1&per_page=50`,{headers:{"apikey":SB_KEY,"Authorization":"Bearer "+session.access_token}});
+      if(ar.ok){const ad=await ar.json();const u=(ad.users||ad).find(u=>u.email?.toLowerCase()===emailLower);if(u){setUserId(u.id);setUserName(u.user_metadata?.full_name||u.email);return;}}
+      alert("User not found");
+    }catch(e){alert(e.message);}
+  };
+
+  const searchCompanies=async(q)=>{
+    if(q.length<2){setCoResults([]);return;}
+    clearTimeout(searchTimeout.current);
+    searchTimeout.current=setTimeout(async()=>{
+      try{
+        const r=await fetch(`${SB_URL}/rest/v1/companies?name=ilike.*${encodeURIComponent(q)}*&select=id,name&limit=10`,{headers:hGet()});
+        if(r.ok)setCoResults(await r.json());
+      }catch(e){}
+    },300);
+  };
+
+  const dropToUser=async()=>{
+    if(!userId||!file||!tplName)return;
+    setWorking(true);setLog([]);
+    try{
+      const ext=file.name.split(".").pop().toLowerCase();
+      const u8=new Uint8Array(await file.arrayBuffer());
+      const storagePath=`${userId}/saved-templates/${Date.now()}_${file.name}`;
+      const ct=ext==="pdf"?"application/pdf":"application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+      addLog("Uploading to storage...","info");
+      let upR=await fetch(`${SB_URL}/storage/v1/object/report-source-docs/${storagePath}`,{method:"POST",headers:{"apikey":SB_KEY,"Authorization":"Bearer "+session.access_token,"Content-Type":ct},body:new Blob([u8],{type:ct})});
+      if(!upR.ok)upR=await fetch(`${SB_URL}/storage/v1/object/report-source-docs/${storagePath}`,{method:"PUT",headers:{"apikey":SB_KEY,"Authorization":"Bearer "+session.access_token,"Content-Type":ct},body:new Blob([u8],{type:ct})});
+      if(!upR.ok)throw new Error("Storage upload failed: "+upR.status);
+      addLog("File uploaded","ok");
+
+      let fc=null;
+      if(fieldJson.trim()){try{fc=JSON.parse(fieldJson);}catch(e){throw new Error("Bad JSON: "+e.message);}}
+
+      addLog("Inserting saved_templates record...","info");
+      const saveR=await fetch(`${SB_URL}/rest/v1/saved_templates`,{method:"POST",headers:{...h(),"Prefer":"return=representation"},body:JSON.stringify({user_id:userId,name:tplName,original_filename:file.name,file_type:ext,field_config:fc,storage_path:storagePath})});
+      if(!saveR.ok)throw new Error("Insert failed: "+await saveR.text());
+      addLog("Template dropped to "+userName,"ok");
+    }catch(e){addLog("ERROR: "+e.message,"err");}
+    finally{setWorking(false);}
+  };
+
+  const dropToCompany=async()=>{
+    if(!selCo||!file||!tplName)return;
+    setWorking(true);setLog([]);
+    try{
+      const ext=file.name.split(".").pop().toLowerCase();
+      const u8=new Uint8Array(await file.arrayBuffer());
+      const storagePath=`${selCo.id}/${Date.now()}_${file.name}`;
+      const ct=ext==="pdf"?"application/pdf":"application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+      addLog("Uploading to company-templates...","info");
+      let upR=await fetch(`${SB_URL}/storage/v1/object/company-templates/${storagePath}`,{method:"POST",headers:{"apikey":SB_KEY,"Authorization":"Bearer "+session.access_token,"Content-Type":ct},body:new Blob([u8],{type:ct})});
+      if(!upR.ok)upR=await fetch(`${SB_URL}/storage/v1/object/company-templates/${storagePath}`,{method:"PUT",headers:{"apikey":SB_KEY,"Authorization":"Bearer "+session.access_token,"Content-Type":ct},body:new Blob([u8],{type:ct})});
+      if(!upR.ok)throw new Error("Storage upload failed: "+upR.status);
+      addLog("File uploaded","ok");
+
+      let fc=null;
+      if(fieldJson.trim()){try{fc=JSON.parse(fieldJson);}catch(e){throw new Error("Bad JSON: "+e.message);}}
+
+      addLog("Inserting company_templates record...","info");
+      const saveR=await fetch(`${SB_URL}/rest/v1/company_templates`,{method:"POST",headers:{...h(),"Prefer":"return=representation"},body:JSON.stringify({company_id:selCo.id,template_name:tplName,file_name:file.name,file_type:ext,storage_path:`company-templates/${storagePath}`,field_config:fc,mode:"template"})});
+      if(!saveR.ok)throw new Error("Insert failed: "+await saveR.text());
+      addLog("Template added to "+selCo.name,"ok");
+    }catch(e){addLog("ERROR: "+e.message,"err");}
+    finally{setWorking(false);}
+  };
+
+  return(
+    <div>
+      <h2 className="page-title">Templates</h2>
+      <div style={{display:"flex",gap:4,background:"#161616",border:"1px solid #2a2a2a",borderRadius:12,padding:4,marginBottom:20,maxWidth:300}}>
+        <button className={`btn btn-sm ${mode==="user"?"btn-primary":"btn-secondary"}`} style={{flex:1}} onClick={()=>setMode("user")}>Drop to User</button>
+        <button className={`btn btn-sm ${mode==="company"?"btn-primary":"btn-secondary"}`} style={{flex:1}} onClick={()=>setMode("company")}>Company</button>
+      </div>
+
+      {mode==="user"?(
+        <div className="card">
+          <h3>Drop Template to User</h3>
+          <label style={{fontSize:12,color:"#888",fontWeight:600}}>User Email</label>
+          <div className="row">
+            <input className="inp" style={{flex:1,marginBottom:0}} value={userEmail} onChange={e=>setUserEmail(e.target.value)} placeholder="user@example.com" onKeyDown={e=>e.key==="Enter"&&lookupUser()}/>
+            <button className="btn btn-secondary btn-sm" onClick={lookupUser}>Lookup</button>
+          </div>
+          {userId&&<div style={{padding:"8px 12px",background:"#1a1a1a",border:"1px solid #333",borderRadius:8,fontSize:13,marginBottom:10}}><strong style={{color:"#fff"}}>{userName}</strong> <span style={{color:"#666",fontSize:11}}>({userId.slice(0,8)}...)</span></div>}
+          <label style={{fontSize:12,color:"#888",fontWeight:600,marginTop:8}}>Template File</label>
+          <input type="file" accept=".pdf,.docx" onChange={e=>setFile(e.target.files?.[0]||null)} style={{marginBottom:10,fontSize:13}}/>
+          <label style={{fontSize:12,color:"#888",fontWeight:600}}>Template Name</label>
+          <input className="inp" value={tplName} onChange={e=>setTplName(e.target.value)} placeholder="Daily Inspection Report"/>
+          <label style={{fontSize:12,color:"#888",fontWeight:600}}>Field Config JSON (optional)</label>
+          <textarea className="inp" rows={6} value={fieldJson} onChange={e=>setFieldJson(e.target.value)} placeholder='[{"name":"Date","mode":"auto-date",...}]'/>
+          <button className="btn btn-primary" onClick={dropToUser} disabled={working||!userId||!file||!tplName}>{working?"Dropping...":"Drop Template"}</button>
+        </div>
+      ):(
+        <div className="card">
+          <h3>Upload Company Template</h3>
+          <label style={{fontSize:12,color:"#888",fontWeight:600}}>Search Company</label>
+          <input className="inp" value={coSearch} onChange={e=>{setCoSearch(e.target.value);searchCompanies(e.target.value);}} placeholder="Type company name..."/>
+          {coResults.length>0&&!selCo&&(
+            <div style={{marginBottom:10}}>
+              {coResults.map(c=>(
+                <button key={c.id} className="btn btn-secondary btn-sm" style={{display:"block",width:"100%",textAlign:"left",marginBottom:4}} onClick={()=>{setSelCo(c);setCoSearch(c.name);setCoResults([]);}}>
+                  {c.name}
+                </button>
+              ))}
+            </div>
+          )}
+          {selCo&&<div style={{padding:"8px 12px",background:"#1a1a1a",border:"1px solid #333",borderRadius:8,fontSize:13,marginBottom:10}}><strong style={{color:"#fff"}}>{selCo.name}</strong> <button onClick={()=>{setSelCo(null);setCoSearch("");}} style={{background:"none",border:"none",color:"#888",cursor:"pointer",marginLeft:8}}>✕</button></div>}
+          <label style={{fontSize:12,color:"#888",fontWeight:600}}>Template File</label>
+          <input type="file" accept=".pdf,.docx" onChange={e=>setFile(e.target.files?.[0]||null)} style={{marginBottom:10,fontSize:13}}/>
+          <label style={{fontSize:12,color:"#888",fontWeight:600}}>Template Name</label>
+          <input className="inp" value={tplName} onChange={e=>setTplName(e.target.value)} placeholder="Daily Inspection Report"/>
+          <label style={{fontSize:12,color:"#888",fontWeight:600}}>Field Config JSON (optional)</label>
+          <textarea className="inp" rows={6} value={fieldJson} onChange={e=>setFieldJson(e.target.value)} placeholder='[{"name":"Date","mode":"auto-date",...}]'/>
+          <button className="btn btn-primary" onClick={dropToCompany} disabled={working||!selCo||!file||!tplName}>{working?"Uploading...":"Upload to Company"}</button>
+        </div>
+      )}
+
+      {log.length>0&&(
+        <div className="card" style={{marginTop:16}}>
+          <h3>Log</h3>
+          <div style={{background:"#0d0d0d",border:"1px solid #222",borderRadius:8,padding:12,fontFamily:"monospace",fontSize:12,lineHeight:1.6,maxHeight:200,overflowY:"auto"}}>
+            {log.map((l,i)=><div key={i} style={{color:l.cls==="ok"?"#22c55e":l.cls==="err"?"#ef4444":l.cls==="info"?"#60a5fa":"#ccc"}}>{l.msg}</div>)}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ── Billing (Owner only) ── */
+function BillingTab({hGet,h}){
+  const [events,setEvents]=useState([]);
+  const [loading,setLoading]=useState(true);
+
+  useEffect(()=>{
+    (async()=>{
+      try{
+        const r=await fetch(`${SB_URL}/rest/v1/subscription_events?select=*&order=created_at.desc&limit=50`,{headers:hGet()});
+        if(r.ok)setEvents(await r.json());
+      }catch(e){console.error(e);}
+      finally{setLoading(false);}
+    })();
+  },[]);
+
+  return(
+    <div>
+      <h2 className="page-title">Billing & Subscriptions</h2>
+      <div className="card">
+        <h3>Recent Subscription Events</h3>
+        {loading?<div style={{color:"#888"}}>Loading...</div>:events.length===0?<div style={{color:"#666",fontSize:13}}>No events yet</div>:(
+          <table className="tbl">
+            <thead><tr><th>Date</th><th>Event</th><th>Status</th><th>Plan</th><th>User</th></tr></thead>
+            <tbody>
+              {events.map(e=>(
+                <tr key={e.id}>
+                  <td style={{fontSize:11,color:"#666"}}>{new Date(e.created_at).toLocaleString()}</td>
+                  <td style={{color:"#fff",fontWeight:600,fontSize:12}}>{e.event_type}</td>
+                  <td><span className={`badge-sm ${e.status==="active"?"badge-green":e.status==="trialing"?"badge-orange":"badge-red"}`}>{e.status||"—"}</span></td>
+                  <td style={{fontSize:11,color:"#888"}}>{e.plan||"—"}</td>
+                  <td style={{fontSize:11,color:"#666",fontFamily:"monospace"}}>{(e.user_id||"").slice(0,8)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ── Emails ── */
+function EmailsTab({hGet,h}){
+  const [counter,setCounter]=useState(null);
+  const [suppressions,setSuppressions]=useState([]);
+  const [events,setEvents]=useState([]);
+  const [loading,setLoading]=useState(true);
+
+  useEffect(()=>{
+    (async()=>{
+      try{
+        const mo=new Date().toISOString().slice(0,7);
+        const [cr,sr,er]=await Promise.all([
+          fetch(`${SB_URL}/rest/v1/email_send_counter?month=eq.${mo}&select=*`,{headers:hGet()}),
+          fetch(`${SB_URL}/rest/v1/email_suppressions?select=*&order=updated_at.desc&limit=50`,{headers:hGet()}),
+          fetch(`${SB_URL}/rest/v1/email_events?select=*&order=created_at.desc&limit=50`,{headers:hGet()}),
+        ]);
+        if(cr.ok){const d=await cr.json();setCounter(d[0]||{month:mo,send_count:0});}
+        if(sr.ok)setSuppressions(await sr.json());
+        if(er.ok)setEvents(await er.json());
+      }catch(e){console.error(e);}
+      finally{setLoading(false);}
+    })();
+  },[]);
+
+  return(
+    <div>
+      <h2 className="page-title">Email Monitoring</h2>
+      <div className="stat-row">
+        <div className="stat-card">
+          <div className="label">Emails This Month</div>
+          <div className="val">{counter?.send_count||0}</div>
+          <div className="sub">{counter?.month||"—"}{counter?.alert_sent?" (alert sent)":""}</div>
+        </div>
+        <div className="stat-card">
+          <div className="label">Suppressions</div>
+          <div className="val" style={{color:suppressions.length>0?"#ef4444":"#22c55e"}}>{suppressions.length}</div>
+          <div className="sub">Bounced/complained addresses</div>
+        </div>
+      </div>
+
+      {suppressions.length>0&&(
+        <div className="card">
+          <h3>Suppressed Emails</h3>
+          <table className="tbl">
+            <thead><tr><th>Email</th><th>Events</th><th>Last Updated</th></tr></thead>
+            <tbody>
+              {suppressions.map(s=>(
+                <tr key={s.email}>
+                  <td style={{color:"#fff"}}>{s.email}</td>
+                  <td>{s.event_count||1}</td>
+                  <td style={{fontSize:11,color:"#666"}}>{s.updated_at?new Date(s.updated_at).toLocaleString():""}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      <div className="card">
+        <h3>Recent Email Events</h3>
+        {loading?<div style={{color:"#888"}}>Loading...</div>:events.length===0?<div style={{color:"#666",fontSize:13}}>No events</div>:(
+          <table className="tbl">
+            <thead><tr><th>Date</th><th>Type</th><th>To</th><th>Subject</th></tr></thead>
+            <tbody>
+              {events.map(e=>(
+                <tr key={e.id}>
+                  <td style={{fontSize:11,color:"#666"}}>{new Date(e.created_at).toLocaleString()}</td>
+                  <td><span className={`badge-sm ${e.event_type==="bounce"||e.event_type==="complaint"?"badge-red":e.event_type==="delivery"?"badge-green":"badge-blue"}`}>{e.event_type}</span></td>
+                  <td style={{fontSize:12}}>{e.to_email||"—"}</td>
+                  <td style={{fontSize:11,color:"#888",maxWidth:200,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{e.subject||"—"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ── App Root ── */
+function App(){
+  const [session,setSession]=useState(null);
+  if(!session)return<LoginScreen onAuth={setSession}/>;
+  return<AdminApp session={session}/>;
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+</script>
+</body>
+</html>

@@ -1,0 +1,932 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Scheduling Request</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0;}
+body{font-family:-apple-system,sans-serif;max-width:500px;margin:0 auto;padding:12px;background:#111;}
+.header{display:flex;align-items:center;gap:12px;margin-bottom:12px;}
+.header img{width:45px;height:45px;border-radius:6px;}
+.header h2{font-size:18px;margin-bottom:2px;color:#fff;}
+.header p{color:#888;font-size:13px;}
+.tabs{display:flex;border-bottom:2px solid #333;margin-bottom:0;}
+.tab{flex:1;text-align:center;padding:10px;font-size:14px;font-weight:600;cursor:pointer;color:#666;border-bottom:2px solid transparent;margin-bottom:-2px;}
+.tab.active{color:#e8742a;border-bottom-color:#e8742a;}
+.card{background:#1a1a1a;border:1px solid #333;border-radius:8px;overflow:hidden;margin-bottom:12px;}
+.card-top{border-radius:8px 8px 0 0;border-top:none;}
+/* CALENDAR & DAY DETAIL */
+.cal-nav{display:flex;justify-content:space-between;align-items:center;padding:10px 14px;border-bottom:1px solid #333;}
+.cal-nav button{background:none;border:none;font-size:18px;cursor:pointer;padding:4px 10px;color:#5a8fc0;}
+.cal-nav strong{font-size:15px;color:#5a8fc0;}
+.week-row{display:grid;grid-template-columns:repeat(7,1fr);text-align:center;}
+.week-header{font-size:11px;color:#666;padding:6px 0;font-weight:600;}
+.day-cell{padding:8px 4px;font-size:13px;cursor:pointer;min-height:40px;color:#ccc;}
+.day-cell.selected{background:#1e2a3a;border-radius:6px;}
+.day-cell.today .day-num{background:#5a8fc0;color:#fff;border-radius:50%;width:26px;height:26px;display:inline-flex;align-items:center;justify-content:center;}
+.day-detail{padding:12px 14px;border-top:1px solid #333;display:none;}
+.day-detail-header{font-size:16px;font-weight:bold;color:#5a8fc0;margin-bottom:12px;}
+.evt-row{padding:12px;margin-bottom:8px;background:rgba(255,255,255,0.05);border-radius:6px;border-left:3px solid #5a8fc0;font-size:13px;color:#fff;}
+/* EVENT ACTIONS (EDIT/CANCEL) */
+.evt-actions { display: flex; gap: 8px; margin-top: 8px; }
+.btn-edit, .btn-cancel { padding: 5px 12px; border-radius: 4px; font-size: 11px; font-weight: 700; cursor: pointer; background: transparent; text-transform: uppercase; }
+.btn-edit { color: #e8742a; border: 1px solid #e8742a; }
+.btn-cancel { color: #c44; border: 1px solid #c44; }
+.btn-scheduled { color: #4a4; border: 1px solid #4a4; padding: 5px 12px; border-radius: 4px; font-size: 11px; font-weight: 700; cursor: pointer; background: transparent; text-transform: uppercase; }
+/* MULTI-FILE GRID */
+.photo-box{border:2px dashed #444;border-radius:8px;padding:20px 16px;text-align:center;background:#1a1a1a;cursor:pointer;margin-bottom:14px;color:#888;}
+.file-list-container { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 14px; }
+.file-item { position: relative; aspect-ratio: 1/1; background: #222; border: 1px solid #333; border-radius: 6px; overflow: hidden; display: flex; align-items: center; justify-content: center; }
+.file-item img { width: 100%; height: 100%; object-fit: cover; }
+.file-item .pdf-indicator { text-align: center; color: #5a8fc0; font-size: 10px; font-weight: bold; padding: 4px; }
+.file-item .remove-btn { position: absolute; top: 0; right: 0; background: #e8742a; color: #fff; border: none; width: 22px; height: 22px; font-size: 16px; font-weight: bold; cursor: pointer; border-bottom-left-radius: 6px; line-height: 1; }
+/* FORM ELEMENTS */
+.form-wrap{background:#1a1a1a;border:1px solid #333;border-top:none;border-radius:0 0 8px 8px;padding:16px;display:none;}
+.field-label{display:block;font-weight:bold;font-size:13px;margin-bottom:5px;color:#ccc;}
+.field-input{width:100%;padding:10px;font-size:15px;border:1px solid #444;border-radius:6px;margin-bottom:14px;background:#222;color:#fff;}
+select.field-input{background:#222;color:#fff;}
+.type-btns{display:flex;gap:8px;margin-bottom:14px;}
+.type-btn{flex:1;padding:12px;font-size:14px;font-weight:bold;border:2px solid #444;border-radius:8px;background:#222;cursor:pointer;text-align:center;color:#ccc;}
+.type-btn.active{background:#e8742a;color:#fff;border-color:#5a8fc0;}
+.dur-btns{display:flex;gap:6px;margin-bottom:14px;flex-wrap:wrap;}
+.dur-btn{padding:10px 0;font-size:13px;font-weight:600;border:2px solid #444;border-radius:8px;background:#222;cursor:pointer;text-align:center;color:#ccc;flex:1;min-width:55px;}
+.dur-btn.active{background:#e8742a;color:#fff;border-color:#5a8fc0;}
+.special-sub{display:none;margin-bottom:14px;}
+.special-sub.show{display:block;}
+.email-list{background:#222;border:1px solid #333;border-radius:6px;padding:8px 12px;margin-bottom:16px;}
+.email-row{display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid #333;font-size:13px;color:#ccc;}
+/* COLLAPSIBLE LINKS */
+.collapsible-section { border-top: 1px solid #333; margin-top: 10px; padding: 5px 0; }
+.collapsible-summary { padding: 10px 0; font-size: 13px; color: #5a8fc0; font-weight: 600; cursor: pointer; list-style: none; display: flex; justify-content: space-between; align-items: center; }
+.collapsible-summary::-webkit-details-marker { display: none; }
+.collapsible-summary::after { content: '+'; font-size: 16px; font-weight: bold; }
+details[open] .collapsible-summary::after { content: '−'; }
+.submit-btn{width:100%;padding:14px;font-size:15px;font-weight:bold;color:#fff;background:#e8742a;border:none;border-radius:8px;cursor:pointer;margin-top:20px;}
+.submit-btn:disabled,.evt-actions button:disabled{opacity:0.5;cursor:not-allowed;pointer-events:none;}
+.success-view{display:none;text-align:center;padding:60px 20px;color:#fff;}
+.reset-btn{margin-top:16px;padding:10px 20px;font-size:14px;font-weight:bold;color:#5a8fc0;background:none;border:2px solid #5a8fc0;border-radius:8px;cursor:pointer;}
+/* ADD PERSON INLINE */
+.add-person-row{display:flex;align-items:center;gap:8px;padding:10px 0;border-bottom:1px solid #333;}
+.add-person-row .person-icon{width:32px;height:32px;border-radius:8px;background:#222;border:1px solid #444;display:flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0;}
+.add-person-row .person-info{flex:1;min-width:0;}
+.add-person-row .person-name{font-size:14px;font-weight:600;color:#ccc;}
+.add-person-row .person-detail{font-size:12px;color:#888;word-break:break-all;}
+.add-person-row .remove-person{background:none;border:none;color:#c44;cursor:pointer;font-size:16px;padding:0 4px;}
+</style>
+</head>
+<body>
+<!-- SCHEDULING HEADER (primary) -->
+<div class="header" style="display:flex;align-items:center;gap:12px;margin-bottom:12px;">
+    <a id="backToHub" href="hub.html" style="background:#222;border:1px solid #333;border-radius:12px;color:#fff;font-size:26px;cursor:pointer;line-height:1;width:56px;height:56px;display:flex;align-items:center;justify-content:center;text-decoration:none;flex-shrink:0;">←</a>
+    <img src="logo.jpg" alt="Logo" style="width:45px;height:45px;border-radius:6px;">
+    <div>
+        <h2>Scheduling Request</h2>
+        <p id="projectSubtitle">Loading...</p>
+    </div>
+</div>
+<div style="display:flex;justify-content:center;gap:8px;margin-bottom:12px;">
+    <button id="shareCopyBtn" onclick="shareCalendarLink()" style="padding:8px 14px;font-size:12px;font-weight:700;color:#fff;background:#5a8fc0;border:none;border-radius:20px;cursor:pointer;white-space:nowrap;">Share</button>
+    <button onclick="document.getElementById('shareCalSection').style.display='block';" style="padding:8px 14px;font-size:12px;font-weight:700;color:#fff;background:#5a8fc0;border:none;border-radius:20px;cursor:pointer;white-space:nowrap;">Subscribe</button>
+</div>
+<div class="tabs" id="tabBar">
+<div class="tab active" onclick="switchTab('calendar')">Calendar</div>
+<div class="tab" onclick="switchTab('request')">New Request</div>
+</div>
+<div id="calendarView">
+<div class="card card-top" style="border-radius:0;">
+<div class="cal-nav">
+<button onclick="changeMonth(-1)">&larr;</button>
+<strong id="monthLabel"></strong>
+<button onclick="changeMonth(1)">&rarr;</button>
+</div>
+<div class="week-row" style="padding:0 8px;">
+<div class="week-header">Su</div><div class="week-header">Mo</div><div class="week-header">Tu</div><div class="week-header">We</div><div class="week-header">Th</div><div class="week-header">Fr</div><div class="week-header">Sa</div>
+</div>
+<div id="calGrid" class="week-row" style="padding:0 8px;"></div>
+<div class="day-detail" id="dayDetail">
+<div class="day-detail-header" id="dayDetailHeader"></div>
+<div id="dayDetailList"></div>
+</div>
+</div>
+<!-- SUBSCRIBE TO CALENDAR (below the calendar, initially hidden — toggled by Share Calendar button) -->
+<div id="shareCalSection" class="card" style="display:none;">
+<div style="padding:16px;position:relative;">
+<button onclick="document.getElementById('shareCalSection').style.display='none';" style="position:absolute;top:10px;right:10px;background:#333;border:1px solid #555;color:#fff;width:32px;height:32px;border-radius:50%;font-size:18px;cursor:pointer;display:flex;align-items:center;justify-content:center;line-height:1;">&times;</button>
+<div style="text-align:center;margin-bottom:12px;">
+<div style="color:#5a8fc0;font-weight:600;font-size:14px;">Subscribe to Calendar</div>
+<div style="color:#888;font-size:12px;margin-top:4px;">Sync this schedule to your phone or computer</div>
+</div>
+<div style="background:#222;border:1px solid #444;border-radius:6px;padding:8px 10px;margin-bottom:12px;display:flex;align-items:center;gap:8px;">
+<div id="calURLText" style="flex:1;font-size:10px;color:#888;word-break:break-all;line-height:1.3;font-family:monospace;"></div>
+<button id="copyBtn" onclick="copyCalendarURL()" style="background:#5a8fc0;color:#fff;border:none;border-radius:4px;padding:6px 10px;font-size:11px;font-weight:700;cursor:pointer;white-space:nowrap;">Copy</button>
+</div>
+<details class="collapsible-section" style="border-top:none;"><summary class="collapsible-summary">iPhone Setup</summary><div style="padding:10px;font-size:14px;color:#ccc;line-height:1.5;">1. Settings &rarr; Calendar &rarr; Accounts<br>2. "Add Account" &rarr; "Other"<br>3. "Add Subscribed Calendar"<br>4. Paste the URL above<br>5. Done!</div></details>
+<details class="collapsible-section"><summary class="collapsible-summary">iPad Setup</summary><div style="padding:10px;font-size:14px;color:#ccc;line-height:1.5;">1. Settings &rarr; Calendar &rarr; Accounts<br>2. "Add Account" &rarr; "Other"<br>3. "Add Subscribed Calendar"<br>4. Paste the URL above<br>5. Tap "Save" &mdash; the calendar will appear in your Calendar app</div></details>
+<details class="collapsible-section"><summary class="collapsible-summary">Mac (Apple Calendar)</summary><div style="padding:10px;font-size:14px;color:#ccc;line-height:1.5;">1. Open the Calendar app on your Mac<br>2. File &rarr; "New Calendar Subscription..." (or press &#8997;&#8984;S)<br>3. Paste the URL above into the Calendar URL field<br>4. Click "Subscribe"<br>5. Choose a name and refresh interval (every 15 minutes recommended)<br>6. Click "OK"</div></details>
+<details class="collapsible-section"><summary class="collapsible-summary">Android / Google Calendar</summary><div style="padding:10px;font-size:14px;color:#ccc;line-height:1.5;">1. Open Google Calendar on desktop<br>2. Next to "Other calendars," click (+)<br>3. Select "From URL"<br>4. Paste the URL above</div></details>
+<details class="collapsible-section"><summary class="collapsible-summary">Outlook Desktop</summary><div style="padding:10px;font-size:14px;color:#ccc;line-height:1.5;">1. Open Outlook &rarr; Calendar view<br>2. Click "Add Calendar" &rarr; "From Internet"<br>3. Paste the URL above<br>4. Click "OK" and name the calendar</div></details>
+<details class="collapsible-section"><summary class="collapsible-summary">Outlook Mobile</summary><div style="padding:10px;font-size:14px;color:#ccc;line-height:1.5;">1. Open Outlook app &rarr; tap the calendar icon<br>2. Tap the gear icon (Settings)<br>3. Tap your account &rarr; "Add Shared Calendar"<br>4. Select "Add from link" or "Subscribe"<br>5. Paste the URL above and save</div></details>
+<details class="collapsible-section"><summary class="collapsible-summary">Outlook Web (outlook.com)</summary><div style="padding:10px;font-size:14px;color:#ccc;line-height:1.5;">1. Go to outlook.com &rarr; Calendar<br>2. Click "Add calendar" in the left sidebar<br>3. Select "Subscribe from web"<br>4. Paste the URL above<br>5. Name it and click "Import"</div></details>
+</div>
+</div>
+</div>
+<div id="requestView" class="form-wrap">
+<label class="field-label" for="photoIn">Photos or PDFs *</label>
+<div class="photo-box" onclick="document.getElementById('photoIn').click()">
+    <div id="photoPrompt">&#128247; Tap to select multiple photos or PDFs</div>
+</div>
+<input type="file" id="photoIn" onchange="handleFileSelection(this)" multiple accept="image/*,.pdf" style="display:none;">
+<div id="filePreviewGrid" class="file-list-container"></div>
+<label class="field-label" for="iDate">Date *</label>
+<input type="date" id="iDate" class="field-input" min="">
+<div id="dateWarning" style="display:none;color:#ef4444;font-size:12px;font-weight:600;margin-top:-10px;margin-bottom:10px;"></div>
+<label class="field-label" for="iTime">Time *</label>
+<select id="iTime" class="field-input">
+<option value="">Select time</option>
+<option value="flexible">Flexible — anytime today</option>
+<option value="05:00">5:00 AM</option><option value="05:30">5:30 AM</option>
+<option value="06:00">6:00 AM</option><option value="06:30">6:30 AM</option>
+<option value="07:00">7:00 AM</option><option value="07:30">7:30 AM</option>
+<option value="08:00">8:00 AM</option><option value="08:30">8:30 AM</option>
+<option value="09:00">9:00 AM</option><option value="09:30">9:30 AM</option>
+<option value="10:00">10:00 AM</option><option value="10:30">10:30 AM</option>
+<option value="11:00">11:00 AM</option><option value="11:30">11:30 AM</option>
+<option value="12:00">12:00 PM</option><option value="12:30">12:30 PM</option>
+<option value="13:00">1:00 PM</option><option value="13:30">1:30 PM</option>
+<option value="14:00">2:00 PM</option><option value="14:30">2:30 PM</option>
+<option value="15:00">3:00 PM</option><option value="15:30">3:30 PM</option>
+<option value="16:00">4:00 PM</option><option value="16:30">4:30 PM</option>
+<option value="17:00">5:00 PM</option>
+</select>
+<label class="field-label" for="iIdentifier">Scheduling Request #/Title (Optional)</label>
+<input type="text" id="iIdentifier" class="field-input" maxlength="50">
+<label class="field-label">Duration *</label>
+<div class="dur-btns" id="durBtns">
+<div class="dur-btn" onclick="setDur('30',event)">30 min</div>
+<div class="dur-btn" onclick="setDur('60',event)">1 hr</div>
+<div class="dur-btn" onclick="setDur('120',event)">2 hr</div>
+<div class="dur-btn" onclick="setDur('240',event)">4 hr</div>
+<div class="dur-btn" onclick="setDur('480',event)">All Day</div>
+</div>
+<label class="field-label">Type *</label>
+<div class="type-btns">
+<div class="type-btn" id="btnSpecial" onclick="setType('Special')">Special</div>
+<div class="type-btn" id="btnRegular" onclick="setType('Regular')">Regular</div>
+</div>
+<div class="special-sub" id="specialSub">
+<label class="field-label" for="specialType">Special Visit Type *</label>
+<select class="field-input" id="specialType">
+<option value="">Select type</option>
+<option value="Welding">Welding</option><option value="Bolting">Bolting</option><option value="Concrete">Concrete</option>
+<option value="Grout">Grout</option><option value="Epoxy">Epoxy</option><option value="Soils">Soils</option>
+<option value="Material ID">Material ID</option><option value="Material ID CWI">Material ID CWI</option>
+<option value="UT/MP">UT/MP</option><option value="Pull Test">Pull Test</option><option value="Post Inst. Anchor">Post Inst. Anchor</option>
+<option value="Fireproofing">Fireproofing</option><option value="Shotcrete">Shotcrete</option>
+</select>
+</div>
+<label class="field-label" for="iName">Submitted By *</label>
+<select id="iName" class="field-input">
+<option value="">Select your name</option>
+</select>
+<div id="nameHint" style="display:none;color:#e8742a;font-size:12px;font-weight:600;margin-top:-10px;margin-bottom:10px;">Add yourself below first, then select your name</div>
+
+<!-- ADD PERSON SECTION — matches job settings pattern -->
+<div style="background:#1a1a1a;border:1px solid #333;border-radius:8px;padding:14px;margin-bottom:14px;">
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
+        <span style="font-size:14px;">👤</span>
+        <span style="font-size:13px;font-weight:600;color:#5a8fc0;">Scheduling Contacts</span>
+    </div>
+    <div id="teamListContainer"></div>
+    <div style="display:flex;flex-direction:column;gap:8px;margin-top:10px;">
+        <input type="text" id="iNewName" class="field-input" placeholder="Name" style="margin-bottom:0;" autocomplete="off">
+        <div style="display:flex;gap:8px;">
+            <input type="email" id="iNewEmail" class="field-input" placeholder="Email" style="margin-bottom:0;flex:1;" autocomplete="off" onkeydown="if(event.key==='Enter')addPersonToTeam();">
+            <button onclick="addPersonToTeam()" style="padding:10px 16px;background:#5a8fc0;border:none;border-radius:6px;color:#fff;font-size:13px;font-weight:700;cursor:pointer;white-space:nowrap;">Add</button>
+        </div>
+        <input type="text" id="iNewCompany" class="field-input" placeholder="Company/Role (optional)" style="margin-bottom:0;" autocomplete="off">
+    </div>
+</div>
+
+<label class="field-label" for="iNotes">Notes</label>
+<textarea id="iNotes" class="field-input" rows="3" placeholder="Optional details"></textarea>
+<label class="field-label">Send a copy to:</label>
+<div class="email-list" id="emailListContainer">
+</div>
+<details class="collapsible-section" id="addlEmailSection">
+    <summary class="collapsible-summary">Additional Email Recipients <span id="addlCount" style="color:#888;font-size:11px;font-weight:400;"></span></summary>
+    <div style="padding-bottom:10px;">
+        <div id="addlEmailList" style="margin-bottom:8px;"></div>
+        <div style="display:flex;flex-direction:column;gap:6px;">
+            <input type="text" id="addlName" class="field-input" placeholder="Name" style="margin-bottom:0;" autocomplete="off">
+            <div style="display:flex;gap:8px;align-items:center;">
+                <input type="email" id="addlEmail" class="field-input" placeholder="Email" style="margin-bottom:0;flex:1;" autocomplete="off" onkeydown="if(event.key==='Enter')addAdditionalRecipient();">
+                <button onclick="addAdditionalRecipient()" style="padding:10px 16px;background:#5a8fc0;border:none;border-radius:6px;color:#fff;font-size:13px;font-weight:700;cursor:pointer;white-space:nowrap;">Add</button>
+            </div>
+        </div>
+    </div>
+</details>
+<div id="submitWarning" style="display:none;color:#ef4444;font-size:13px;font-weight:600;margin-top:12px;padding:12px;background:#2a1515;border:1px solid #ef4444;border-radius:8px;text-align:center;"></div>
+<button onclick="submitIR()" id="submitBtn" class="submit-btn">Submit Scheduling Request</button>
+</div>
+<div class="success-view" id="successView" style="display:none; text-align:center; padding:60px 20px; color:#fff;">
+<div style="font-size:48px;">&#9989;</div>
+<h2>Request Submitted</h2>
+<button onclick="resetForm()" style="background:none; border:2px solid #5a8fc0; color:#5a8fc0; padding:10px 20px; border-radius:8px; margin-top:20px; cursor:pointer;">Submit Another</button>
+</div>
+<!-- BRANDING (always at bottom) -->
+<div style="display:flex;align-items:center;justify-content:center;gap:10px;padding:12px 0;margin-bottom:8px;">
+    <img src="logo.jpg" alt="Logo" style="width:30px;height:30px;border-radius:6px;">
+    <span style="font-size:13px;color:#888;">Powered by</span>
+    <a href="https://mydailyreports.org" target="_blank" style="font-size:13px;font-weight:700;color:#e8742a;text-decoration:none;">My Daily Reports</a>
+</div>
+<script>
+var SB='https://wluvkmpncafugdbunlkw.supabase.co';
+var params=new URLSearchParams(window.location.search);
+var hashSlug=window.location.hash?window.location.hash.substring(1):'';
+var PROJ=params.get('project')||hashSlug||'';
+var inspSlug=params.get('i')||'';
+var cleanName=PROJ.replace(/-/g,' ');
+var AK='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndsdXZrbXBuY2FmdWdkYnVubGt3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzIzMDU1MTUsImV4cCI6MjA4Nzg4MTUxNX0.HZpQ2xVGpf4EQ0BVDmIEuPqW5T_eNG5OqBNAqT03rH8';
+var isAdmin=params.get('admin')==='true';
+var JOB_ID=params.get('job_id')||'';
+var teamMembers=[];
+var OWNER_USER_ID='';
+
+// If no project selected, redirect to hub to pick one
+if(!PROJ && inspSlug){
+    window.location.href='hub.html?i='+encodeURIComponent(inspSlug);
+} else if(!PROJ && !inspSlug){
+    document.getElementById('projectSubtitle').textContent='No project selected';
+}
+
+// Set up back button with inspector slug
+if(inspSlug){
+    document.getElementById('backToHub').href='hub.html?i='+encodeURIComponent(inspSlug);
+}
+
+document.getElementById('projectSubtitle').textContent=cleanName||'Loading...';
+document.title=(cleanName||'Schedule')+' - Scheduling Request';
+var allFiles=[], inspType='', inspDur='', cM=new Date().getMonth(), cY=new Date().getFullYear(), mD={};
+var savedContacts=[];
+
+// ══════════════════════════════════════════════════════════════════
+// SECURITY: HTML Escape function for safe innerHTML insertion
+// ══════════════════════════════════════════════════════════════════
+function esc(s){
+  var d=document.createElement('div');
+  d.textContent=s;
+  return d.innerHTML;
+}
+
+// Toast notification function
+function showToast(msg){
+  var t=document.createElement('div');
+  t.textContent=msg;
+  t.style.cssText='position:fixed;bottom:30px;left:50%;transform:translateX(-50%);background:#333;color:#fff;padding:12px 24px;border-radius:8px;font-size:14px;z-index:99999;opacity:0;transition:opacity 0.3s;max-width:90%;text-align:center;';
+  document.body.appendChild(t);
+  requestAnimationFrame(function(){t.style.opacity='1';});
+  setTimeout(function(){t.style.opacity='0';setTimeout(function(){t.remove();},300);},3000);
+}
+
+// ══════════════════════════════════════════════════════════════════
+// UX: Modal functions to replace prompt() and confirm()
+// ══════════════════════════════════════════════════════════════════
+function showPromptModal(label, callback){
+  var overlay=document.createElement('div');
+  overlay.style.cssText='position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.8);z-index:1001;display:flex;align-items:center;justify-content:center;padding:20px;';
+  var modal=document.createElement('div');
+  modal.style.cssText='background:#1e1e1e;border-radius:12px;padding:30px;max-width:400px;width:100%;border:1px solid #333;';
+  var title=document.createElement('h3');
+  title.style.cssText='color:#e8742a;margin-bottom:20px;';
+  title.textContent=label;
+  modal.appendChild(title);
+  var input=document.createElement('input');
+  input.type='text';
+  input.className='field-input';
+  input.style.cssText='width:100%;padding:10px;font-size:15px;border:1px solid #444;border-radius:6px;margin-bottom:20px;background:#222;color:#fff;';
+  modal.appendChild(input);
+  var btnContainer=document.createElement('div');
+  btnContainer.style.cssText='display:flex;gap:10px;';
+  var cancelBtn=document.createElement('button');
+  cancelBtn.textContent='Cancel';
+  cancelBtn.style.cssText='flex:1;background:#333;color:#fff;padding:12px;border:none;border-radius:8px;cursor:pointer;font-weight:600;';
+  cancelBtn.onclick=function(){overlay.remove();document.removeEventListener('keydown',escHandler);callback(null);};
+  var okBtn=document.createElement('button');
+  okBtn.textContent='OK';
+  okBtn.style.cssText='flex:1;background:#e8742a;color:#fff;padding:12px;border:none;border-radius:8px;cursor:pointer;font-weight:600;';
+  okBtn.onclick=function(){overlay.remove();document.removeEventListener('keydown',escHandler);callback(input.value);};
+  btnContainer.appendChild(cancelBtn);
+  btnContainer.appendChild(okBtn);
+  modal.appendChild(btnContainer);
+  var escHandler=function(e){if(e.key==='Escape'){overlay.remove();document.removeEventListener('keydown',escHandler);callback(null);}};
+  document.addEventListener('keydown',escHandler);
+  overlay.appendChild(modal);
+  document.body.appendChild(overlay);
+  input.focus();
+}
+
+function showConfirmModal(msg, callback){
+  var overlay=document.createElement('div');
+  overlay.style.cssText='position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.8);z-index:1001;display:flex;align-items:center;justify-content:center;padding:20px;';
+  var modal=document.createElement('div');
+  modal.style.cssText='background:#1e1e1e;border-radius:12px;padding:30px;max-width:400px;width:100%;border:1px solid #333;';
+  var msgEl=document.createElement('div');
+  msgEl.style.cssText='color:#ccc;font-size:15px;margin-bottom:25px;line-height:1.5;white-space:pre-wrap;word-wrap:break-word;';
+  msgEl.textContent=msg;
+  modal.appendChild(msgEl);
+  var btnContainer=document.createElement('div');
+  btnContainer.style.cssText='display:flex;gap:10px;';
+  var cancelBtn=document.createElement('button');
+  cancelBtn.textContent='Cancel';
+  cancelBtn.style.cssText='flex:1;background:#333;color:#fff;padding:12px;border:none;border-radius:8px;cursor:pointer;font-weight:600;';
+  cancelBtn.onclick=function(){overlay.remove();document.removeEventListener('keydown',escHandler);callback(false);};
+  var okBtn=document.createElement('button');
+  okBtn.textContent='OK';
+  okBtn.style.cssText='flex:1;background:#e8742a;color:#fff;padding:12px;border:none;border-radius:8px;cursor:pointer;font-weight:600;';
+  okBtn.onclick=function(){overlay.remove();document.removeEventListener('keydown',escHandler);callback(true);};
+  btnContainer.appendChild(cancelBtn);
+  btnContainer.appendChild(okBtn);
+  modal.appendChild(btnContainer);
+  var escHandler=function(e){if(e.key==='Escape'){overlay.remove();document.removeEventListener('keydown',escHandler);callback(false);}};
+  document.addEventListener('keydown',escHandler);
+  overlay.appendChild(modal);
+  document.body.appendChild(overlay);
+}
+
+function handleFileSelection(input) {
+    var files=Array.from(input.files);
+    files.forEach(function(file){
+        if(file.size>(file.type==='application/pdf'?25*1024*1024:10*1024*1024)){
+            showToast(file.name+" is too large."); return;
+        }
+        allFiles.push(file);
+    });
+    renderFileGrid(); input.value='';
+}
+function removeFile(index){ allFiles.splice(index,1); renderFileGrid(); }
+function renderFileGrid(){
+    var grid=document.getElementById('filePreviewGrid');
+    grid.innerHTML='';
+    allFiles.forEach(function(file,index){
+        var item=document.createElement('div');
+        item.className='file-item';
+        if(file.type==='application/pdf'){
+            item.innerHTML='<div class="pdf-indicator">PDF<br>'+esc(file.name.substring(0,8))+'...</div>';
+        } else {
+            var img=document.createElement('img');
+            img.src=URL.createObjectURL(file); item.appendChild(img);
+        }
+        var removeBtn=document.createElement('button');
+        removeBtn.className='remove-btn'; removeBtn.innerHTML='&times;';
+        removeBtn.onclick=function(){removeFile(index);};
+        item.appendChild(removeBtn); grid.appendChild(item);
+    });
+}
+function showDay(d){
+    var list=document.getElementById('dayDetailList');
+    var header=document.getElementById('dayDetailHeader');
+    header.textContent="Schedule for "+d;
+    // Filter out deleted, but keep cancelled (shown ghosted)
+    var evts=(mD[d]||[]).filter(function(e){return e.status!=='deleted';});
+    var tipHtml='<div style="font-size:11px;color:#5a8fc0;padding:6px 10px;margin-bottom:8px;background:rgba(90,143,192,0.08);border-radius:4px;">Tip: Allow travel time between visits when scheduling.</div>';
+    if(evts.length===0){
+        list.innerHTML=tipHtml+'<div style="color:#888;padding:10px;">No visits scheduled</div>';
+    } else {
+        var html=tipHtml;
+        evts.forEach(function(e){
+            var isCancelled=e.status==='cancelled';
+            var isScheduled=e.status==='scheduled';
+            var rowStyle=isCancelled?'opacity:0.45;text-decoration:line-through;':'';
+            html+='<div class="evt-row" style="'+rowStyle+'">';
+            html+='<span class="evt-time">'+(e.flexible_display==='flexible'?'Flexible':e.inspection_time.substring(0,5))+'</span>';
+            html+=' — <span class="evt-type">'+esc((e.inspection_types||[]).join(', '))+'</span>';
+            if(e.project!==PROJ) html+=' <span style="color:#888;font-size:11px;">('+esc(e.project)+')</span>';
+            if(e.inspection_identifier) html+='<div style="color:#e8742a;font-weight:700;font-size:13px;margin:4px 0;">'+esc(e.inspection_identifier)+'</div>';
+            html+='<div style="font-size:11px;color:#888;margin-top:4px;">By: '+esc(e.submitted_by)+'</div>';
+            if(e.location_detail) html+='<div style="font-size:11px;color:#5a8fc0;margin-top:2px;">📍 '+esc(e.location_detail)+'</div>';
+            if(e.duration) html+='<div style="font-size:11px;color:#888;margin-top:2px;">Duration: '+(parseInt(e.duration)>=480?'All Day':e.duration>=60?(e.duration/60)+'hr':e.duration+'min')+'</div>';
+            if(isCancelled){
+                html+='<div style="color:#c44;font-size:12px;font-weight:600;margin-top:4px;">Cancelled</div>';
+            } else if(isScheduled){
+                html+='<div style="color:#4a4;font-size:13px;font-weight:700;margin-top:6px;padding:4px 10px;background:rgba(74,170,74,0.12);border:1px solid #4a4;border-radius:6px;display:inline-block;">✅ Scheduled</div>';
+            } else {
+                html+='<div style="color:#e8742a;font-size:12px;font-weight:600;margin-top:4px;">⏳ Pending</div>';
+            }
+            // Actions — admin sees buttons on all events, non-admin only for this project
+            if(!isCancelled && (isAdmin || e.project===PROJ)){
+                html+='<div class="evt-actions">';
+                if(isAdmin){
+                    if(!isScheduled){
+                        // Pending: green Confirm Schedule button
+                        html+='<button style="color:#fff;background:#4a4;border:none;padding:6px 14px;border-radius:6px;font-size:12px;font-weight:700;cursor:pointer;" onclick="scheduleInsp(\''+e.id+'\')">Confirm Schedule</button>';
+                    }
+                    // Admin always gets Edit / Delete / Cancel
+                    html+='<button class="btn-edit" onclick="editInspAdmin(\''+e.id+'\',\''+e.inspection_date+'\',\''+e.inspection_time.substring(0,5)+'\',\''+(e.duration||'')+'\')">Edit</button>';
+                    html+='<button style="color:#fff;background:#c44;border:none;padding:5px 12px;border-radius:4px;font-size:11px;font-weight:700;cursor:pointer;text-transform:uppercase;" onclick="deleteInsp(\''+e.id+'\')">Delete</button>';
+                    html+='<button class="btn-cancel" onclick="cancelInsp(\''+e.id+'\',\''+e.project+'\',\'Regular\',\''+e.inspection_date+'\',\''+e.inspection_time.substring(0,5)+'\')">Cancel</button>';
+                } else {
+                    // Non-admin: Edit + Cancel (for own submissions)
+                    html+='<button class="btn-edit" onclick="editInsp(\''+e.id+'\',\''+e.inspection_date+'\',\''+e.inspection_time.substring(0,5)+'\')">Edit</button>';
+                    html+='<button class="btn-cancel" onclick="cancelInsp(\''+e.id+'\',\''+e.project+'\',\'Regular\',\''+e.inspection_date+'\',\''+e.inspection_time.substring(0,5)+'\')">Cancel</button>';
+                }
+                html+='</div>';
+            }
+            html+='</div>';
+        });
+        list.innerHTML=html;
+    }
+    document.getElementById('dayDetail').style.display='block';
+}
+function showActionModal(title,names,callback){
+var overlay=document.createElement('div');
+overlay.style.cssText='position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.7);z-index:999;display:flex;align-items:center;justify-content:center;';
+var box=document.createElement('div');
+box.style.cssText='background:#1a1a1a;border:1px solid #333;border-radius:10px;padding:20px;width:280px;';
+var h=document.createElement('div'); h.style.cssText='font-size:14px;font-weight:bold;color:#fff;margin-bottom:12px;'; h.textContent=title; box.appendChild(h);
+names.forEach(function(n){
+var btn=document.createElement('button'); btn.style.cssText='display:block;width:100%;padding:12px;margin-bottom:8px;font-size:14px;font-weight:600;color:#fff;background:#222;border:1px solid #444;border-radius:6px;cursor:pointer;text-align:left;'; btn.textContent=n;
+btn.onclick=function(){document.body.removeChild(overlay);callback(n);}; box.appendChild(btn);
+});
+var cancel=document.createElement('button'); cancel.style.cssText='display:block;width:100%;padding:10px;font-size:13px;color:#888;background:transparent;border:1px solid #333;border-radius:6px;cursor:pointer;margin-top:4px;'; cancel.textContent='Never mind';
+cancel.onclick=function(){document.body.removeChild(overlay);document.removeEventListener('keydown',escHandler);}; box.appendChild(cancel);
+overlay.onclick=function(e){if(e.target===overlay){document.body.removeChild(overlay);document.removeEventListener('keydown',escHandler);}};
+var escHandler=function(e){if(e.key==='Escape'){document.body.removeChild(overlay);document.removeEventListener('keydown',escHandler);}};
+document.addEventListener('keydown',escHandler);
+overlay.appendChild(box); document.body.appendChild(overlay);
+}
+function cancelInsp(id,proj,ty,date,time){
+var team=teamMembers.map(function(m){return m.name;}).filter(Boolean).concat(savedContacts.map(function(c){return c.name;}));
+team=team.filter(function(n,i){return team.indexOf(n)===i;}); // deduplicate
+if(team.length===0) team=["(no saved contacts)"];
+showActionModal('Who is cancelling this?',team,function(who){
+showPromptModal('Reason (optional):', function(reason){
+var btns=document.querySelectorAll('.evt-actions button');btns.forEach(function(b){b.disabled=true;b.style.opacity='0.5';});
+fetch(SB+'/functions/v1/update-inspection',{method:'POST',headers:{'Authorization':'Bearer '+AK,'apikey':AK,'Content-Type':'application/json'},body:JSON.stringify({request_id:id,action:'cancel',action_by:who,reason:reason||'',notify:true})})
+.then(function(r){return r.json();}).then(function(data){if(data.success){showToast('Cancelled. Notifications sent.'); loadMD();} else {showToast('Error — try again');btns.forEach(function(b){b.disabled=false;b.style.opacity='1';});}})
+.catch(function(err){showToast('Failed — try again');btns.forEach(function(b){b.disabled=false;b.style.opacity='1';});});
+});
+});
+}
+function editInsp(id,oldDate,oldTime){
+var team=teamMembers.map(function(m){return m.name;}).filter(Boolean).concat(savedContacts.map(function(c){return c.name;}));
+team=team.filter(function(n,i){return team.indexOf(n)===i;});
+if(team.length===0) team=["(no saved contacts)"];
+showActionModal('Who is editing this?',team,function(who){ showEditModal(id,oldDate,oldTime,who); });
+}
+function showEditModal(id,oldDate,oldTime,who){
+var overlay=document.createElement('div'); overlay.style.cssText='position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.8);z-index:1000;display:flex;align-items:center;justify-content:center;padding:20px;';
+var modal=document.createElement('div'); modal.style.cssText='background:#1a1a1a;border-radius:12px;padding:30px;max-width:400px;width:100%;border:1px solid #333;';
+modal.innerHTML='<h3 style="color:#e8742a;margin-bottom:20px;">Edit Request</h3><label style="color:#ccc;font-size:13px;">New Date</label><input type="date" id="eDate" value="'+esc(oldDate)+'" class="field-input"><label style="color:#ccc;font-size:13px;">New Time</label><input type="time" id="eTime" value="'+esc(oldTime)+'" class="field-input"><div style="display:flex;gap:10px;margin-top:20px;"><button id="cEdit" style="flex:1;background:#333;color:#fff;padding:12px;border:none;border-radius:8px;">Cancel</button><button id="sEdit" style="flex:1;background:#e8742a;color:#fff;padding:12px;border:none;border-radius:8px;">Save</button></div>';
+overlay.onclick=function(e){if(e.target===overlay){overlay.remove();document.removeEventListener('keydown',editEsc);}};
+var editEsc=function(e){if(e.key==='Escape'){overlay.remove();document.removeEventListener('keydown',editEsc);}};
+document.addEventListener('keydown',editEsc);
+overlay.appendChild(modal); document.body.appendChild(overlay);
+document.getElementById('cEdit').onclick=function(){overlay.remove();document.removeEventListener('keydown',editEsc);};
+document.getElementById('sEdit').onclick=function(){
+var nD=document.getElementById('eDate').value, nT=document.getElementById('eTime').value;
+var saveBtn=document.getElementById('sEdit');saveBtn.disabled=true;saveBtn.textContent='Saving...';saveBtn.style.opacity='0.5';
+fetch(SB+'/functions/v1/update-inspection',{method:'POST',headers:{'Authorization':'Bearer '+AK,'apikey':AK,'Content-Type':'application/json'},body:JSON.stringify({request_id:id,action:'edit',action_by:who,new_date:nD,new_time:nT,notify:true})})
+.then(function(r){return r.json();}).then(function(data){if(data.success){showToast('Updated. Notifications sent.'); overlay.remove(); loadMD();} else {showToast('Error — try again');saveBtn.disabled=false;saveBtn.textContent='Save';saveBtn.style.opacity='1';}})
+.catch(function(err){showToast('Failed — try again');saveBtn.disabled=false;saveBtn.textContent='Save';saveBtn.style.opacity='1';});
+};
+}
+function editInspAdmin(id,oldDate,oldTime,oldDur){
+    showEditModalAdmin(id,oldDate,oldTime,oldDur);
+}
+function showEditModalAdmin(id,oldDate,oldTime,oldDur){
+var overlay=document.createElement('div'); overlay.style.cssText='position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.8);z-index:1000;display:flex;align-items:center;justify-content:center;padding:20px;';
+var modal=document.createElement('div'); modal.style.cssText='background:#1a1a1a;border-radius:12px;padding:30px;max-width:400px;width:100%;border:1px solid #333;';
+var durOpts=['30','60','120','240','480'];
+var durLabels=['30 min','1 hr','2 hr','4 hr','All Day'];
+var durHtml='<select id="eDur" class="field-input">';
+durOpts.forEach(function(v,i){durHtml+='<option value="'+v+'"'+(v===oldDur?' selected':'')+'>'+durLabels[i]+'</option>';});
+durHtml+='</select>';
+modal.innerHTML='<h3 style="color:#e8742a;margin-bottom:20px;">Edit Request</h3>'
++'<label style="color:#ccc;font-size:13px;">Date</label><input type="date" id="eaDate" value="'+esc(oldDate)+'" class="field-input">'
++'<label style="color:#ccc;font-size:13px;">Time</label><input type="time" id="eaTime" value="'+esc(oldTime)+'" class="field-input">'
++'<label style="color:#ccc;font-size:13px;">Duration</label>'+durHtml
++'<label style="color:#ccc;font-size:13px;">Notes</label><textarea id="eaNotes" class="field-input" rows="3" placeholder="Optional notes"></textarea>'
++'<div style="display:flex;gap:10px;margin-top:20px;"><button id="caEdit" style="flex:1;background:#333;color:#fff;padding:12px;border:none;border-radius:8px;cursor:pointer;">Cancel</button><button id="saEdit" style="flex:1;background:#e8742a;color:#fff;padding:12px;border:none;border-radius:8px;cursor:pointer;">Save</button></div>';
+overlay.appendChild(modal); document.body.appendChild(overlay);
+document.getElementById('caEdit').onclick=function(){overlay.remove();};
+document.getElementById('saEdit').onclick=function(){
+var nD=document.getElementById('eaDate').value, nT=document.getElementById('eaTime').value;
+var nDur=document.getElementById('eDur').value, nNotes=document.getElementById('eaNotes').value;
+var saveBtn=document.getElementById('saEdit');saveBtn.disabled=true;saveBtn.textContent='Saving...';saveBtn.style.opacity='0.5';
+fetch(SB+'/functions/v1/update-inspection',{method:'POST',headers:{'Authorization':'Bearer '+AK,'apikey':AK,'Content-Type':'application/json'},body:JSON.stringify({request_id:id,action:'edit',action_by:'Admin',new_date:nD,new_time:nT,new_duration:nDur,new_notes:nNotes})})
+.then(function(r){return r.json();}).then(function(data){if(data.success){overlay.remove(); loadMD();} else {showToast('Error — try again');saveBtn.disabled=false;saveBtn.textContent='Save';saveBtn.style.opacity='1';}})
+.catch(function(err){showToast('Failed — try again');saveBtn.disabled=false;saveBtn.textContent='Save';saveBtn.style.opacity='1';});
+};
+}
+function deleteInsp(id){
+showConfirmModal('Delete this scheduling request? This cannot be undone.', function(confirmed){
+if(!confirmed) return;
+var btns=document.querySelectorAll('.evt-actions button');btns.forEach(function(b){b.disabled=true;b.style.opacity='0.5';});
+fetch(SB+'/functions/v1/update-inspection',{method:'POST',headers:{'Authorization':'Bearer '+AK,'apikey':AK,'Content-Type':'application/json'},body:JSON.stringify({request_id:id,action:'delete',action_by:'Admin'})})
+.then(function(r){return r.json();}).then(function(data){if(data.success){loadMD();} else {showToast('Error — try again');btns.forEach(function(b){b.disabled=false;b.style.opacity='1';});}})
+.catch(function(err){showToast('Failed — try again');btns.forEach(function(b){b.disabled=false;b.style.opacity='1';});});
+});
+}
+var calFeedURL=SB+'/functions/v1/calendar-feed?project='+encodeURIComponent(PROJ);
+setTimeout(function(){var el=document.getElementById('calURLText');if(el)el.textContent=calFeedURL;},100);
+function copyCalendarURL(){
+    navigator.clipboard.writeText(calFeedURL);
+    var btn=document.getElementById('copyBtn');
+    btn.textContent='Copied'; btn.style.background='#4a4';
+    setTimeout(function(){btn.textContent='Copy'; btn.style.background='#5a8fc0';},2000);
+}
+function shareCalendarLink(){
+    // Build a clean share URL — no UUIDs, just project slug and inspector slug
+    var base=window.location.origin+window.location.pathname;
+    var shareParams='?project='+encodeURIComponent(PROJ);
+    if(inspSlug) shareParams+='&i='+encodeURIComponent(inspSlug);
+    var shareURL=base+shareParams;
+    navigator.clipboard.writeText(shareURL);
+    var btn=document.getElementById('shareCopyBtn');
+    btn.textContent='Copied!'; btn.style.background='#4a4';
+    setTimeout(function(){ btn.textContent='Share'; btn.style.background='#5a8fc0'; },2000);
+}
+function switchTab(t){
+document.querySelectorAll('.tab')[0].classList.toggle('active',t==='calendar');
+document.querySelectorAll('.tab')[1].classList.toggle('active',t==='request');
+document.getElementById('calendarView').style.display=t==='calendar'?'block':'none';
+document.getElementById('requestView').style.display=t==='request'?'block':'none';
+}
+function changeMonth(dir){ cM+=dir; if(cM>11){cM=0;cY++;} if(cM<0){cM=11;cY--;} renderCal(); }
+function ds(y,m,d){return y+'-'+String(m+1).padStart(2,'0')+'-'+String(d).padStart(2,'0');}
+var _loadMDTimer=null;
+function loadMD(){
+    // Debounce: if called multiple times quickly, only the last one fires
+    if(_loadMDTimer)clearTimeout(_loadMDTimer);
+    _loadMDTimer=setTimeout(_doLoadMD,100);
+}
+function _doLoadMD(){
+    _loadMDTimer=null;
+    if(!OWNER_USER_ID){renderCal();return;}
+    var url=SB+'/rest/v1/inspection_requests?user_id=eq.'+OWNER_USER_ID+'&and=(status.neq.cancelled,status.neq.deleted)&select=*';
+    fetch(url,{headers:{'apikey':AK,'Authorization':'Bearer '+AK}})
+    .then(function(r){return r.json();})
+    .then(function(rows){
+        mD={};
+        rows.forEach(function(v){
+            var d=v.inspection_date||v.requested_date;
+            if(!d)return;
+            if(!mD[d])mD[d]=[];
+            mD[d].push(v);
+        });
+        renderCal();
+    }).catch(function(err){console.warn('loadMD fetch error:',err.message);renderCal();});
+}
+function renderCal(){
+    var g=document.getElementById('calGrid');g.innerHTML='';
+    document.getElementById('monthLabel').textContent=['January','February','March','April','May','June','July','August','September','October','November','December'][cM]+' '+cY;
+    var sd=new Date(cY,cM,1).getDay(),ld=new Date(cY,cM+1,0).getDate();
+    for(var i=0;i<sd;i++) g.appendChild(document.createElement('div')).className='day-cell other-month';
+    for(var d=1;d<=ld;d++){
+        var s=ds(cY,cM,d),c=document.createElement('div');
+        var todayStr=ds(new Date().getFullYear(),new Date().getMonth(),new Date().getDate());
+        c.className='day-cell'+(s===todayStr?' today':'');c.innerHTML='<span class="day-num">'+esc(String(d))+'</span>';
+        if(mD[s]){
+            var active=mD[s].filter(function(e){return e.status!=='cancelled';});
+            if(active.length>0){
+                var scheduled=active.filter(function(e){return e.status==='scheduled';}).length;
+                var pending=active.length-scheduled;
+                var dots='';
+                if(scheduled>0) dots+='<span style="color:#4a4;">✅ '+esc(String(scheduled))+'</span> ';
+                if(pending>0) dots+='<span style="color:#e8742a;">⏳ '+esc(String(pending))+'</span>';
+                c.innerHTML+='<div style="font-size:10px;font-weight:700;line-height:1.4;">'+dots+'</div>';
+            }
+        }
+        c.onclick=(function(x){return function(){showDay(x);};})(s);
+        g.appendChild(c);
+    }
+}
+function setType(t){inspType=t;document.getElementById('btnSpecial').classList.toggle('active',t==='Special');document.getElementById('btnRegular').classList.toggle('active',t==='Regular');document.getElementById('specialSub').classList.toggle('show',t==='Special');if(t!=='Special')document.getElementById('specialType').selectedIndex=0;}
+function setDur(d,e){inspDur=d;document.querySelectorAll('.dur-btn').forEach(function(b){b.classList.remove('active');});(e||event).target.classList.add('active');}
+function scheduleInsp(id){
+var btns=document.querySelectorAll('.evt-actions button');btns.forEach(function(b){b.disabled=true;b.style.opacity='0.5';});
+fetch(SB+'/functions/v1/update-inspection',{method:'POST',headers:{'Authorization':'Bearer '+AK,'apikey':AK,'Content-Type':'application/json'},body:JSON.stringify({request_id:id,action:'schedule'})})
+.then(function(r){return r.json();}).then(function(data){if(data.success){showToast('Marked as Scheduled — notifications sent.'); loadMD();} else {showToast('Error — try again');btns.forEach(function(b){b.disabled=false;b.style.opacity='1';});}})
+.catch(function(err){showToast('Failed — try again');btns.forEach(function(b){b.disabled=false;b.style.opacity='1';});});
+}
+// ── ADD PERSON TO TEAM (like job settings pattern) ──
+function addPersonToTeam(){
+    var name=document.getElementById('iNewName').value.trim();
+    var email=document.getElementById('iNewEmail').value.trim();
+    var company=document.getElementById('iNewCompany').value.trim();
+    if(!name){showToast('Name is required.');return;}
+    // Add to local list immediately
+    var newContact={name:name,email:email,company:company,project:PROJ};
+    savedContacts.push(newContact);
+    renderTeamList();
+    refreshDropdownAndEmails();
+    // Clear inputs
+    document.getElementById('iNewName').value='';
+    document.getElementById('iNewEmail').value='';
+    document.getElementById('iNewCompany').value='';
+    // Save to contacts table in background
+    fetch(SB+'/rest/v1/contacts',{method:'POST',headers:{'apikey':AK,'Authorization':'Bearer '+AK,'Content-Type':'application/json','Prefer':'resolution=merge-duplicates'},body:JSON.stringify({name:name,email:email||null,company:company||null,project:PROJ})}).catch(function(){});
+    // Also cache contacts locally
+    try{localStorage.setItem('mdr_contacts_'+PROJ,JSON.stringify(savedContacts));}catch(e){}
+    // Save scheduling_contacts on the job (separate from project team)
+    if(JOB_ID){
+        var allSched=teamMembers.concat(savedContacts).filter(function(m){return m.email;});
+        var seen={};var deduped=[];
+        allSched.forEach(function(m){var k=m.email.toLowerCase();if(!seen[k]){seen[k]=true;deduped.push({name:m.name||'',email:m.email});}});
+        fetch(SB+'/rest/v1/jobs?id=eq.'+JOB_ID,{method:'PATCH',headers:{'apikey':AK,'Authorization':'Bearer '+AK,'Content-Type':'application/json','Prefer':'return=minimal'},body:JSON.stringify({scheduling_contacts:deduped})}).catch(function(){});
+    }
+}
+function removePersonFromTeam(index){
+    savedContacts.splice(index,1);
+    renderTeamList();
+    refreshDropdownAndEmails();
+}
+function renderTeamList(){
+    var container=document.getElementById('teamListContainer');
+    container.innerHTML='';
+    savedContacts.forEach(function(c,i){
+        var row=document.createElement('div');
+        row.className='add-person-row';
+        row.innerHTML='<div class="person-icon">👤</div>'
+            +'<div class="person-info">'
+            +'<div class="person-name">'+esc(c.name)+(c.company?' ('+esc(c.company)+')':'')+'</div>'
+            +(c.email?'<div class="person-detail">'+esc(c.email)+'</div>':'')
+            +'</div>'
+            +'<button class="remove-person" onclick="removePersonFromTeam('+i+')">✕</button>';
+        container.appendChild(row);
+    });
+}
+function refreshDropdownAndEmails(){
+    // Update Submitted By dropdown
+    var sel=document.getElementById('iName');
+    var currentVal=sel.value;
+    // If no current val, try restoring from localStorage
+    if(!currentVal){try{currentVal=localStorage.getItem('mdr_last_submitter_'+PROJ)||'';}catch(e){}}
+    sel.innerHTML='<option value="">Select your name</option>';
+    var addedNames={};
+    // Team members first in the dropdown
+    teamMembers.forEach(function(m){
+        if(!m.name||addedNames[m.name.toLowerCase()])return;
+        addedNames[m.name.toLowerCase()]=true;
+        var o=document.createElement('option');
+        o.value=m.name;
+        o.textContent=esc(m.name);
+        sel.appendChild(o);
+    });
+    savedContacts.forEach(function(c){
+        if(addedNames[c.name.toLowerCase()])return;
+        addedNames[c.name.toLowerCase()]=true;
+        var o=document.createElement('option');
+        o.value=c.name;
+        o.textContent=esc(c.name)+(c.company?' ('+esc(c.company)+')':'');
+        sel.appendChild(o);
+    });
+    // Restore selection if still valid
+    if(currentVal){
+        for(var i=0;i<sel.options.length;i++){
+            if(sel.options[i].value===currentVal){sel.selectedIndex=i;break;}
+        }
+    }
+    // Show hint if dropdown has no real names
+    var hint=document.getElementById('nameHint');
+    if(hint) hint.style.display=(sel.options.length<=1)?'block':'none';
+    // Update email checkboxes — team members first, then contacts (deduplicated)
+    var emailContainer=document.getElementById('emailListContainer');
+    emailContainer.innerHTML='';
+    var addedEmails={};
+    // Scheduling contacts — shown first with "Saved" badge
+    teamMembers.forEach(function(m){
+        if(!m.email||addedEmails[m.email.toLowerCase()])return;
+        addedEmails[m.email.toLowerCase()]=true;
+        var lbl=document.createElement('label');
+        lbl.className='email-row';
+        lbl.innerHTML='<input type="checkbox" value="'+esc(m.email)+'" class="emailCheck" checked> '+esc(m.name)+' <span style="font-size:10px;color:#5a8fc0;font-weight:600;">(Saved)</span>';
+        emailContainer.appendChild(lbl);
+    });
+    // Saved contacts (skip duplicates already added from team)
+    savedContacts.forEach(function(c){
+        if(!c.email||addedEmails[c.email.toLowerCase()])return;
+        addedEmails[c.email.toLowerCase()]=true;
+        var lbl=document.createElement('label');
+        lbl.className='email-row';
+        lbl.innerHTML='<input type="checkbox" value="'+esc(c.email)+'" class="emailCheck" checked>'+esc(c.name)+(c.company?' ('+esc(c.company)+')':'');
+        emailContainer.appendChild(lbl);
+    });
+}
+function checkSchedulingConflicts(date,time,types,dur){
+    var dayEvents=(mD[date]||[]).filter(function(e){return e.status!=='cancelled' && e.status!=='deleted';});
+    if(dayEvents.length===0) return null;
+    var blockingTypes=['Concrete','Shotcrete','Grout'];
+    var isBlocking=types.some(function(t){return blockingTypes.indexOf(t)>=0;});
+    var reqMinutes=parseInt(time.split(':')[0])*60+parseInt(time.split(':')[1]);
+    var reqEnd=reqMinutes+parseInt(dur||60);
+    var warnings=[];
+    dayEvents.forEach(function(e){
+        // Same-project events never conflict — team members can stack inspections on their own job
+        if(e.project===PROJ) return;
+        var eTime=e.inspection_time?e.inspection_time.substring(0,5):'';
+        if(!eTime||e.flexible_display==='flexible') return;
+        var eMin=parseInt(eTime.split(':')[0])*60+parseInt(eTime.split(':')[1]);
+        var eDur=parseInt(e.duration||60);
+        var eEnd=eMin+eDur;
+        var overlaps=(reqMinutes<eEnd && reqEnd>eMin);
+        if(!overlaps) return;
+        var eTypes=e.inspection_types||[];
+        var eIsBlocking=eTypes.some(function(t){return blockingTypes.indexOf(t)>=0;});
+        // Rule 1: Blocking types cannot overlap anything (across different jobs only)
+        if(isBlocking || eIsBlocking){
+            warnings.push((eTypes.join('/')||'Inspection')+' at '+eTime+' ('+e.project+') — blocking type conflict');
+        }
+        // Rule 2: Regular cannot overlap Regular across different jobs
+        else if(types.indexOf('Regular')>=0 && eTypes.indexOf('Regular')>=0){
+            warnings.push('Regular at '+eTime+' ('+e.project+') — cannot overlap Regular across jobs');
+        }
+    });
+    return warnings.length>0?warnings:null;
+}
+// ── Additional Email Recipients (persistent, collapsible) ──
+var additionalRecipients=[];
+var ADDL_STORAGE_KEY='mdr_addl_recipients_'+PROJ;
+function loadAdditionalRecipients(){
+    try{var stored=localStorage.getItem(ADDL_STORAGE_KEY);if(stored)additionalRecipients=JSON.parse(stored);}catch(e){}
+    renderAdditionalRecipients();
+}
+function saveAdditionalRecipients(){
+    try{localStorage.setItem(ADDL_STORAGE_KEY,JSON.stringify(additionalRecipients));}catch(e){}
+}
+function renderAdditionalRecipients(){
+    var container=document.getElementById('addlEmailList');
+    var countEl=document.getElementById('addlCount');
+    if(countEl)countEl.textContent=additionalRecipients.length>0?'('+esc(String(additionalRecipients.length))+')':'';
+    if(!container)return;
+    if(additionalRecipients.length===0){container.innerHTML='';return;}
+    var html='';
+    additionalRecipients.forEach(function(r,i){
+        html+='<div style="display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid #333;">';
+        html+='<input type="checkbox" class="addlCheck" value="'+esc(r.email)+'" '+(r.checked!==false?'checked':'')+' onchange="toggleAddlRecipient('+i+',this.checked)" style="flex-shrink:0;">';
+        html+='<div style="flex:1;min-width:0;">';
+        html+='<div style="font-size:13px;color:#ccc;font-weight:600;">'+esc(r.name)+'</div>';
+        html+='<div style="font-size:11px;color:#888;word-break:break-all;">'+esc(r.email)+'</div>';
+        html+='</div>';
+        html+='<button onclick="removeAdditionalRecipient('+i+')" style="background:none;border:none;color:#c44;cursor:pointer;font-size:14px;padding:0 4px;flex-shrink:0;">✕</button>';
+        html+='</div>';
+    });
+    container.innerHTML=html;
+}
+function addAdditionalRecipient(){
+    var nameInput=document.getElementById('addlName');
+    var emailInput=document.getElementById('addlEmail');
+    var name=nameInput.value.trim();
+    var email=emailInput.value.trim();
+    if(!email||email.indexOf('@')<1){showToast('Please enter a valid email.');return;}
+    if(!name)name=email.split('@')[0];
+    // Check duplicate
+    var exists=additionalRecipients.some(function(r){return r.email===email;});
+    if(exists){showToast('This email is already in the list.');return;}
+    additionalRecipients.push({name:name,email:email,checked:true});
+    saveAdditionalRecipients();
+    renderAdditionalRecipients();
+    nameInput.value='';emailInput.value='';
+    nameInput.focus();
+}
+function removeAdditionalRecipient(index){
+    additionalRecipients.splice(index,1);
+    saveAdditionalRecipients();
+    renderAdditionalRecipients();
+}
+function toggleAddlRecipient(index,checked){
+    additionalRecipients[index].checked=checked;
+    saveAdditionalRecipients();
+}
+function submitIR(){
+    var d=document.getElementById('iDate').value, t=document.getElementById('iTime').value, nm=document.getElementById('iName').value;
+    var missing=[];
+    if(allFiles.length===0) missing.push('Photos/PDFs');
+    if(!d) missing.push('Date');
+    if(!t) missing.push('Time');
+    if(!inspDur) missing.push('Duration');
+    if(!inspType) missing.push('Inspection Type');
+    if(inspType==='Special'&&!document.getElementById('specialType').value) missing.push('Special Visit Type');
+    if(!nm) missing.push('Your Name');
+    if(missing.length>0){
+        var w=document.getElementById('submitWarning');
+        w.textContent='Missing: '+missing.join(', ');
+        w.style.display='block';
+        w.scrollIntoView({behavior:'smooth',block:'center'});
+        return;
+    }
+    document.getElementById('submitWarning').style.display='none';
+    // Persist selected submitter name
+    try{localStorage.setItem('mdr_last_submitter_'+PROJ,nm);}catch(e){}
+    // Conflict check (non-blocking warning)
+    if(t!=='flexible'){
+        var conflicts=checkSchedulingConflicts(d,t,[inspType],inspDur);
+        if(conflicts){
+            showConfirmModal('Scheduling conflict detected:\n\n'+conflicts.join('\n')+'\n\nSubmit anyway?', function(confirmed){
+                if(!confirmed) return;
+                submitIRContinue(d,t,nm);
+            });
+            return;
+        }
+    }
+    submitIRContinue(d,t,nm);
+}
+function submitIRContinue(d,t,nm){
+    var emails=[];
+    document.querySelectorAll('.emailCheck:checked').forEach(function(cb){emails.push(cb.value);});
+    // Add checked additional recipients
+    additionalRecipients.forEach(function(r){if(r.checked!==false&&r.email)emails.push(r.email);});
+    var btn=document.getElementById('submitBtn'); btn.textContent='Submitting...'; btn.disabled=true;
+    // Safety valve: re-enable button after 30s if something hangs
+    var safetyTimer=setTimeout(function(){btn.disabled=false;btn.textContent='Submit Scheduling Request';showToast('Request timed out — please try again');},30000);
+    var fd=new FormData();
+    allFiles.forEach(function(file,index){fd.append('file_'+index,file);});
+    fd.append('project',PROJ); fd.append('gc',cleanName); if(JOB_ID)fd.append('job_id',JOB_ID);
+    fd.append('inspection_date',d); fd.append('inspection_time',t);
+    var typesArr=[inspType];
+    var specialVal='';
+    if(inspType==='Special'){
+        specialVal=document.getElementById('specialType').value;
+        if(specialVal) typesArr.push(specialVal);
+    }
+    fd.append('inspection_types',JSON.stringify(typesArr)); fd.append('duration',inspDur);
+    if(specialVal) fd.append('special_type',specialVal);
+    fd.append('submitted_by',nm); fd.append('notes',document.getElementById('iNotes').value);
+    fd.append('subcontractor','');
+    fd.append('location_detail','');
+    // Look up requester email from contacts
+    var matchedContact=savedContacts.find(function(c){return c.name===nm;});
+    if(matchedContact&&matchedContact.email){
+        fd.append('requester_email',matchedContact.email);
+        fd.append('requester_name',matchedContact.name);
+        if(matchedContact.company) fd.append('requester_company',matchedContact.company);
+        if(emails.indexOf(matchedContact.email)===-1) emails.push(matchedContact.email);
+    }
+    if(emails.length>0) fd.append('email_recipients',JSON.stringify(emails));
+    var idnt=document.getElementById('iIdentifier').value.trim();
+    if(idnt) fd.append('inspection_identifier',idnt);
+    fetch(SB+'/functions/v1/submit-inspection',{method:'POST',headers:{'Authorization':'Bearer '+AK,'apikey':AK},body:fd})
+    .then(function(r){
+        return r.json().then(function(data){ data._status=r.status; return data; });
+    }).then(function(data){
+        clearTimeout(safetyTimer);
+        if(data.success){ document.getElementById('requestView').style.display='none'; document.getElementById('successView').style.display='block'; loadMD(); }
+        else if(data._status===409){
+            var w=document.getElementById('dateWarning');
+            w.textContent='⚠️ Scheduling conflict: this time slot is already booked on '+d+'. Please select a different time or date.';
+            w.style.display='block';
+            w.style.cssText='display:block;color:#ef4444;font-size:13px;font-weight:600;margin-bottom:12px;padding:12px;background:#2a1515;border:1px solid #ef4444;border-radius:8px;text-align:center;';
+            document.getElementById('iTime').focus();
+            btn.disabled=false; btn.textContent='Submit Scheduling Request';
+        }
+        else { showToast('Error — try again'); btn.disabled=false; btn.textContent='Submit Scheduling Request'; }
+    }).catch(function(err){
+        clearTimeout(safetyTimer);
+        showToast('Submit failed — try again');
+        btn.disabled=false; btn.textContent='Submit Scheduling Request';
+    });
+}
+function loadContacts(){
+    var cacheKey='mdr_contacts_'+PROJ;
+    var contactsP=fetch(SB+'/rest/v1/contacts?project=eq.'+encodeURIComponent(PROJ)+'&order=name.asc',{headers:{'apikey':AK,'Authorization':'Bearer '+AK}}).then(function(r){return r.json();}).catch(function(){return null;});
+    var teamP=JOB_ID?fetch(SB+'/rest/v1/jobs?id=eq.'+JOB_ID+'&select=scheduling_contacts,user_id',{headers:{'apikey':AK,'Authorization':'Bearer '+AK}}).then(function(r){return r.json();}).catch(function(){return null;}):Promise.resolve(null);
+    Promise.all([contactsP,teamP]).then(function(results){
+        var rows=results[0];
+        var jobData=results[1];
+        if(rows&&rows.length>0){
+            try{localStorage.setItem(cacheKey,JSON.stringify(rows));}catch(e){}
+            savedContacts=rows;
+        } else {
+            try{var cached=localStorage.getItem(cacheKey);if(cached)savedContacts=JSON.parse(cached);}catch(e){}
+        }
+        // Get owner user_id from job for calendar filtering
+        if(jobData&&jobData[0]&&jobData[0].user_id){
+            OWNER_USER_ID=jobData[0].user_id;
+        }
+        // Parse scheduling_contacts from the job (separate from project team)
+        teamMembers=[];
+        if(jobData&&jobData[0]&&jobData[0].scheduling_contacts){
+            var sc=jobData[0].scheduling_contacts;
+            if(typeof sc==='string')try{sc=JSON.parse(sc);}catch(e){sc=[];}
+            if(Array.isArray(sc)){
+                teamMembers=sc.map(function(m){return typeof m==='string'?{name:'',email:m}:{name:m.name||'',email:m.email||''};}).filter(function(m){return m.email;});
+            }
+        }
+        renderTeamList();
+        refreshDropdownAndEmails();
+        // Now that we have the user_id, load the calendar
+        loadMD();
+    });
+}
+function resetForm(){ location.reload(); }
+// Set min date to today to prevent past-date submissions
+document.getElementById('iDate').min=new Date().toISOString().split('T')[0];
+loadContacts(); // also triggers loadMD() after fetching user_id
+loadAdditionalRecipients();
+renderCal();
+// Auto-refresh calendar data every 30 seconds so status changes appear
+setInterval(function(){ loadMD(); }, 30000);
+</script>
+</body>
+</html>
