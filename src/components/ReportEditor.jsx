@@ -737,6 +737,48 @@ function ReportEditor({job, user, onBack, reportDate}){
     busyRef.current=true;
     setViewLoading(true);
     try{
+      // From-scratch generators don't need a template — generate PDF directly for preview
+      if(isFromScratch){
+        const allFields=buildEditableFields();
+        const genPhotos=[];
+        for(const p of photos){
+          const src=p.src||p;
+          if(typeof src==='string'&&src.startsWith('data:')){
+            try{const b64=src.split(',')[1];const bin=atob(b64);const bytes=new Uint8Array(bin.length);for(let i=0;i<bin.length;i++)bytes[i]=bin.charCodeAt(i);genPhotos.push({imageBytes:bytes,caption:p.caption||p.name||''});}catch(e){console.warn("Photo convert:",e);}
+          }
+        }
+        let genLogo=null;
+        try{
+          const cName=isTYR?'TYR Engineering':'VIS - Vital Inspection Services';
+          genLogo=await db.downloadTemplateBytes(`${cName}/logo.png`);
+        }catch(e){console.warn("Logo fetch:",e);}
+        let genSig=null;
+        try{
+          const prof=await db.getProfile(user.id);
+          if(prof?.signature_path){
+            const sigUrl=prof.signature_path.startsWith('http')?prof.signature_path:`${SB_URL}/storage/v1/object/public/${prof.signature_path}`;
+            const sigR=await fetch(sigUrl);if(sigR.ok)genSig=new Uint8Array(await sigR.arrayBuffer());
+          }
+        }catch(e){console.warn("Sig fetch:",e);}
+        const genDate=new Date((reportDate||todayISO)+"T12:00:00").toLocaleDateString("en-US",{timeZone:tz});
+        const genProfile={full_name:user?.user_metadata?.full_name||user?.email?.split("@")[0]||"",certification_number:""};
+        const rd={vals:{},photos:genPhotos,...(isTYR?{contractors:selectedContractors}:{})};
+        allFields.forEach(f=>{if(f.val)rd.vals[f.name]=f.val;});
+        const pdfBytes=isTYR?await generateTYR(rd,job,genProfile,genLogo,genSig,genDate):await generateVIS(rd,job,genProfile,genLogo,genSig,genDate);
+        // Render with pdf.js for canvas preview
+        const pdfjsLib=await ensurePdfJs();
+        const pdfDoc=await pdfjsLib.getDocument({data:pdfBytes}).promise;
+        const pages=[];
+        for(let i=1;i<=pdfDoc.numPages;i++){
+          const pg=await pdfDoc.getPage(i);
+          const vp=pg.getViewport({scale:2});
+          const cvs=document.createElement("canvas");cvs.width=vp.width;cvs.height=vp.height;
+          await pg.render({canvasContext:cvs.getContext("2d"),viewport:vp}).promise;
+          pages.push(cvs.toDataURL("image/png",0.92));
+        }
+        setViewingReport(pages);
+        return;
+      }
       const tplRecord=await db.getTemplate(job.id);
       // No template at all — show error with diagnostic context
       if(!tplRecord){
@@ -934,16 +976,6 @@ function ReportEditor({job, user, onBack, reportDate}){
       const PDFLib=await ensurePdfLib();
       const {PDFDocument,rgb,StandardFonts}=PDFLib;
 
-      // ── 1. Look up template ──
-      const tplRecord=await db.getTemplate(job.id);
-      if(!tplRecord){console.error("Submit: no template record for job:",job.id);throw new Error("No template record found. Go to Job Settings and re-upload your template.");}
-      if(!tplRecord.storage_path){console.error("Submit: template has no storage_path:",JSON.stringify(tplRecord));throw new Error("Template file is missing. Go to Job Settings and re-upload your template.");}
-      const tplBytes=await db.downloadTemplateBytes(tplRecord.storage_path);
-      if(!tplBytes||tplBytes.byteLength===0){throw new Error("Template download failed — file may be missing from storage. Go to Job Settings and re-upload your template.");}
-      const isPdfTemplate=tplRecord.file_type==="pdf";
-      const isDocxTemplate=tplRecord.file_type==="docx"||tplRecord.file_type==="doc";
-      // Company ID determines rendering path — no filename sniffing
-
       // ── 1b. Build fields + AI proofread (before any path) ──
       const allFields=buildEditableFields();
 
@@ -1064,6 +1096,15 @@ function ReportEditor({job, user, onBack, reportDate}){
         showToast("Report submitted!");
         return; // ← skip standard overlay path
       }
+
+      // ── 1. Look up template (only needed for non-from-scratch paths) ──
+      const tplRecord=await db.getTemplate(job.id);
+      if(!tplRecord){console.error("Submit: no template record for job:",job.id);throw new Error("No template record found. Go to Job Settings and re-upload your template.");}
+      if(!tplRecord.storage_path){console.error("Submit: template has no storage_path:",JSON.stringify(tplRecord));throw new Error("Template file is missing. Go to Job Settings and re-upload your template.");}
+      const tplBytes=await db.downloadTemplateBytes(tplRecord.storage_path);
+      if(!tplBytes||tplBytes.byteLength===0){throw new Error("Template download failed — file may be missing from storage. Go to Job Settings and re-upload your template.");}
+      const isPdfTemplate=tplRecord.file_type==="pdf";
+      const isDocxTemplate=tplRecord.file_type==="docx"||tplRecord.file_type==="doc";
 
       // ── DOCX path: send to edge function for XML editing ──
       setSubmitStep("Generating report...");
