@@ -2,7 +2,9 @@ import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { C } from '../constants/theme';
 import { db } from '../utils/db';
 import { AUTH_TOKEN, refreshAuthToken, authDiag, preflightCheck } from '../utils/auth';
-import { SB_URL, TYR_COMPANY_ID, ENHANCED_TYR_ID } from '../constants/supabase';
+import { SB_URL, VIS_COMPANY_ID, TYR_COMPANY_ID, ENHANCED_TYR_ID } from '../constants/supabase';
+import { generateTYR } from '../utils/tyr-generator';
+import { generateVIS } from '../utils/vis-generator';
 import { api } from '../utils/api';
 import { ensurePdfLib, ensurePdfJs, ensureMammoth } from '../utils/pdf';
 import { askConfirm } from './ConfirmOverlay';
@@ -131,6 +133,8 @@ function ReportEditor({job, user, onBack, reportDate}){
   const isTYR=job.company_id===TYR_COMPANY_ID;           // Original TYR template
   const isEnhancedTYR=job.company_id===ENHANCED_TYR_ID;  // V5 fixed template
   const isAnyTYR=isTYR||isEnhancedTYR;                   // Shared TYR behavior
+  const isVIS=job.company_id===VIS_COMPANY_ID;            // VIS - Vital Inspection Services
+  const isFromScratch=isTYR||isVIS;                       // From-scratch PDF generators
   const [jobContractors,setJobContractors]=useState([]);
   const [selectedContractors,setSelectedContractors]=useState([]);
   const toggleContractor=(name)=>{setSelectedContractors(p=>{const exists=p.find(c=>c.company_name===name);if(exists)return p.filter(c=>c.company_name!==name);return[...p,{company_name:name,manpower:0,hours_regular:0,hours_overtime:0}];});};
@@ -974,6 +978,91 @@ function ReportEditor({job, user, onBack, reportDate}){
         }
       }else{
         console.log("[submit] AI Proofreading is OFF for this job");
+      }
+
+      // ── FROM-SCRATCH generators (original TYR, VIS) ──
+      if(isFromScratch){
+        setSubmitStep("Generating report...");
+        // Convert photo dataUrls → imageBytes for generator
+        const genPhotos=[];
+        for(const p of photos){
+          const src=p.src||p;
+          if(typeof src==='string'&&src.startsWith('data:')){
+            try{const b64=src.split(',')[1];const bin=atob(b64);const bytes=new Uint8Array(bin.length);for(let i=0;i<bin.length;i++)bytes[i]=bin.charCodeAt(i);genPhotos.push({imageBytes:bytes,caption:p.caption||p.name||''});}catch(e){console.warn("Photo convert:",e);}
+          }
+        }
+        // Fetch logo from company-templates storage
+        let genLogo=null;
+        try{
+          const cName=isTYR?'TYR Engineering':'VIS - Vital Inspection Services';
+          genLogo=await db.downloadTemplateBytes(`${cName}/logo.png`);
+        }catch(e){console.warn("Logo fetch:",e);}
+        // Fetch signature bytes
+        let genSig=null;
+        try{
+          const prof=await db.getProfile(user.id);
+          if(prof?.signature_path){
+            const sigUrl=prof.signature_path.startsWith('http')?prof.signature_path:`${SB_URL}/storage/v1/object/public/${prof.signature_path}`;
+            const sigR=await fetch(sigUrl);if(sigR.ok)genSig=new Uint8Array(await sigR.arrayBuffer());
+          }
+        }catch(e){console.warn("Sig fetch:",e);}
+        const genDate=new Date(submitDate+"T12:00:00").toLocaleDateString("en-US",{timeZone:tz});
+        const genProfile={full_name:user?.user_metadata?.full_name||user?.email?.split("@")[0]||"",certification_number:""};
+        let scratchBytes;
+        if(isTYR){
+          const rd={vals:{},contractors:selectedContractors,photos:genPhotos};
+          allFields.forEach(f=>{if(f.val)rd.vals[f.name]=f.val;});
+          scratchBytes=await generateTYR(rd,job,genProfile,genLogo,genSig,genDate);
+        }else{
+          const rd={vals:{},photos:genPhotos};
+          allFields.forEach(f=>{if(f.val)rd.vals[f.name]=f.val;});
+          scratchBytes=await generateVIS(rd,job,genProfile,genLogo,genSig,genDate);
+        }
+        // Build blob + base64
+        const pdfBlob=new Blob([scratchBytes],{type:"application/pdf"});
+        const uint8=new Uint8Array(scratchBytes);const chunks=[];for(let i=0;i<uint8.length;i+=8192)chunks.push(String.fromCharCode.apply(null,uint8.subarray(i,i+8192)));
+        const pdfBase64=btoa(chunks.join(""));
+        // Build filename
+        let rptNumber=1;
+        try{const cntR=await fetch(`${SB_URL}/rest/v1/reports?select=report_number&job_id=eq.${job.id}&order=report_number.desc&limit=1`,{headers:db._h()});const topR=cntR.ok?await cntR.json():[];if(topR[0]?.report_number)rptNumber=topR[0].report_number+1;}catch(e){}
+        if(draftId){try{const exR=await fetch(`${SB_URL}/rest/v1/reports?select=report_number,report_date&id=eq.${draftId}`,{headers:db._h()});const exD=exR.ok?await exR.json():[];if(exD[0]?.report_number&&exD[0]?.report_date===submitDate)rptNumber=exD[0].report_number;}catch(e){}}
+        const conv=job.field_config?.filenameConvention||{};
+        const padding=conv.numberPadding||0;
+        const rptNum=padding>0?String(rptNumber).padStart(padding,"0"):String(rptNumber);
+        const now=new Date(submitDate+"T12:00:00");
+        const fmtMM=now.toLocaleDateString("en-US",{month:"2-digit",timeZone:tz});
+        const fmtDD=now.toLocaleDateString("en-US",{day:"2-digit",timeZone:tz});
+        const fmtYYYY=now.toLocaleDateString("en-US",{year:"numeric",timeZone:tz});
+        const monNames=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+        const monthIdx=now.toLocaleDateString("en-US",{month:"numeric",timeZone:tz})-1;
+        const fmtMon=monNames[monthIdx]||"";const fmtDay=String(parseInt(fmtDD));
+        let baseName;
+        if(filenameEdited&&editFilename.trim()){baseName=editFilename.trim().replace(/\.pdf$/i,"");}
+        else{
+          const pattern=conv.pattern||job.report_filename_pattern||job.name||"Report";
+          baseName=pattern.replace(/\.[^.]+$/,"").replace(/\{report_number\}/g,rptNum).replace(/\{date\}/g,now.toLocaleDateString("en-US",{timeZone:tz})).replace(/\{year\}/g,fmtYYYY).replace(/\{project\}/g,(job.name||"").replace(/\s+/g,"_"));
+          if(!baseName.includes(rptNum))baseName=rptNum+"_"+baseName;
+          const litDateRx=/(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[\s_]+\d{1,2}[,\s_]+\d{4}/;
+          if(litDateRx.test(baseName))baseName=baseName.replace(litDateRx,fmtMon+" "+fmtDay+"_"+fmtYYYY);
+          else if(!/\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}/.test(baseName))baseName+="_"+fmtMon+" "+fmtDay+"_"+fmtYYYY;
+        }
+        const pdfFilename=baseName+".pdf";
+        // Upload + save
+        setSubmitStep("Uploading report...");
+        const storagePath=`${user.id}/${job.id}/reports/${pdfFilename}`;
+        await api.uploadStorage(storagePath,pdfBlob,"application/pdf");
+        setSubmitStep("Saving report...");
+        const reportContent={vals,lockVals,photos,photoLayout,lockFields,editFields,sigTimestamps,...(isAnyTYR?{contractors:selectedContractors}:{})};
+        await db.saveReport({job_id:job.id,user_id:user.id,report_date:submitDate,status:"submitted",content:JSON.stringify(reportContent),updated_at:new Date().toISOString()});
+        if(isAnyTYR&&selectedContractors.length>0&&draftId)try{await db.saveReportContractors(draftId,job.id,user.id,selectedContractors);}catch(e){console.error("Save report contractors:",e);}
+        const userName=user.user_metadata?.full_name||user.email?.split("@")[0]||"Inspector";
+        const photoThumbs=photos.length>0?photos.slice(0,6).map(p=>{const src=typeof p==="string"?p:(p.src||p.dataUrl||p.url||"");return src?`<img src="${src}" style="width:80px;height:80px;object-fit:cover;border-radius:6px;border:1px solid #ddd;" alt="Site photo"/>`:"";}).filter(Boolean).join(""):"";
+        const photoSection=photoThumbs?`<div style="margin-top:16px;"><p style="color:#888;font-size:12px;margin:0 0 8px;">Site Photos (${photos.length}):</p><div style="display:flex;flex-wrap:wrap;gap:8px;">${photoThumbs}</div></div>`:"";
+        const emailHtml=`<div style="font-family:-apple-system,sans-serif;max-width:600px;margin:0 auto;"><div style="background:#e8742a;padding:20px 24px;border-radius:8px 8px 0 0;"><h1 style="color:#fff;margin:0;font-size:20px;">My Daily Reports</h1></div><div style="background:#f9f9f9;padding:24px;border:1px solid #e0e0e0;border-top:none;border-radius:0 0 8px 8px;"><p style="color:#333;font-size:16px;line-height:1.6;margin:0 0 8px;">Hi,</p><p style="color:#333;font-size:15px;line-height:1.6;margin:0 0 16px;">${userName} has submitted the daily field report for <strong>${job.name}</strong> on ${todayDisplay}.</p><p style="color:#555;font-size:14px;margin:0;">The full PDF report is attached to this email.</p>${photoSection}</div><p style="color:#999;font-size:11px;text-align:center;margin-top:16px;">Sent via My Daily Reports &bull; mydailyreports.org</p></div>`;
+        const rawTeam=job.team_emails||[];const teamEmails=rawTeam.map(m=>typeof m==="string"?m:m.email).filter(Boolean);
+        setSubmitSuccess({pdfBlob,pdfFilename,pdfBase64,emailHtml,teamEmails,jobName:job.name,todayDisplay,userName});
+        showToast("Report submitted!");
+        return; // ← skip standard overlay path
       }
 
       // ── DOCX path: send to edge function for XML editing ──
@@ -2161,6 +2250,7 @@ function ReportEditor({job, user, onBack, reportDate}){
             )}
           </div>
         )}
+
 
         {/* ── Editable fields ── */}
         {editFields.length>0&&(
