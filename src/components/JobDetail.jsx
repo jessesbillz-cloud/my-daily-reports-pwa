@@ -4,7 +4,7 @@ import { db } from '../utils/db';
 import { AUTH_TOKEN, refreshAuthToken, extractPdfTextStructure } from '../utils/auth';
 import { api } from '../utils/api';
 import TimeCardGenerator from './TimeCardGenerator';
-import { SB_URL, SB_KEY, TYR_COMPANY_ID, ENHANCED_TYR_ID } from '../constants/supabase';
+import { SB_URL, SB_KEY, VIS_COMPANY_ID, TYR_COMPANY_ID, ENHANCED_TYR_ID } from '../constants/supabase';
 import { ensurePdfLib, ensurePdfJs } from '../utils/pdf';
 import WorkLogEditor from './WorkLogEditor';
 import ReportEditor from './ReportEditor';
@@ -179,6 +179,8 @@ function JobDetail({job, user, onBack, onDeleted}){
   const isTYR=job.company_id===TYR_COMPANY_ID;
   const isEnhancedTYR=job.company_id===ENHANCED_TYR_ID;
   const isAnyTYR=isTYR||isEnhancedTYR;
+  const isVIS=job.company_id===VIS_COMPANY_ID;
+  const isFromScratch=isTYR||isVIS;
   const [showContractors,setShowContractors]=useState(false);
   const [jobContractors,setJobContractors]=useState([]);
   const [newContractorName,setNewContractorName]=useState("");
@@ -855,7 +857,7 @@ function JobDetail({job, user, onBack, onDeleted}){
               </div>
               <span style={{fontSize:11,color:C.mut,background:C.inp,borderRadius:10,padding:"2px 8px"}}>{teamMembers.length}</span>
             </button>
-            {job.company_id&&(
+            {job.company_id&&!isFromScratch&&(
               <button onClick={loadCompanyTemplates} disabled={loadingCompanyTpls} style={{width:"100%",display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,padding:"14px 18px",background:"none",border:"none",borderBottom:`1px solid ${C.brd}`,cursor:"pointer",textAlign:"left"}}>
                 <div style={{display:"flex",alignItems:"center",gap:10}}>
                   <span style={{fontSize:16}}>🏢</span><span style={{fontSize:14,fontWeight:600,color:C.lt}}>{loadingCompanyTpls?"Loading...":"Use Company Template"}</span>
