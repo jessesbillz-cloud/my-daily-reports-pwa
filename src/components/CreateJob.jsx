@@ -3,7 +3,7 @@ import { C } from '../constants/theme';
 import { db } from '../utils/db';
 import { AUTH_TOKEN, refreshAuthToken } from '../utils/auth';
 import { api } from '../utils/api';
-import { SB_URL, SB_KEY, TYR_COMPANY_ID, ENHANCED_TYR_ID } from '../constants/supabase';
+import { SB_URL, SB_KEY, VIS_COMPANY_ID, TYR_COMPANY_ID, ENHANCED_TYR_ID } from '../constants/supabase';
 import { askConfirm } from './ConfirmOverlay';
 import { extractPdfTextStructure, readAcroFormFields } from '../utils/auth';
 import { ensurePdfLib, ensureMammoth } from '../utils/pdf';
@@ -77,6 +77,33 @@ function CreateJob({user, onBack, onCreated}){
     setJobSelectedCompany(company);
     setJobCompanyName(company.name);
     setJobCompanyMatches([]);
+    // From-scratch generators (VIS, TYR) don't need a template file — set up default fields
+    const isFromScratchCompany=company.id===VIS_COMPANY_ID||company.id===TYR_COMPANY_ID;
+    if(isFromScratchCompany){
+      setJobCompanyTemplates([]);
+      // Set default editable fields for VIS
+      if(company.id===VIS_COMPANY_ID){
+        const visFields=[
+          {name:"Date",mode:"auto-date",value:"",page:0,x:0,y:0,w:0,h:0},
+          {name:"Project Name",mode:"lock",value:"",page:0,x:0,y:0,w:0,h:0},
+          {name:"Project No",mode:"lock",value:"",page:0,x:0,y:0,w:0,h:0},
+          {name:"Jurisdiction",mode:"lock",value:"",page:0,x:0,y:0,w:0,h:0},
+          {name:"DSA App",mode:"lock",value:"",page:0,x:0,y:0,w:0,h:0},
+          {name:"DSA File #",mode:"lock",value:"",page:0,x:0,y:0,w:0,h:0},
+          {name:"IOR",mode:"lock",value:"",page:0,x:0,y:0,w:0,h:0},
+          {name:"Project Manager",mode:"lock",value:"",page:0,x:0,y:0,w:0,h:0},
+          {name:"Architect",mode:"lock",value:"",page:0,x:0,y:0,w:0,h:0},
+          {name:"Contractor",mode:"lock",value:"",page:0,x:0,y:0,w:0,h:0},
+          {name:"Correction Notices Issued",mode:"edit",value:"",page:0,x:0,y:0,w:0,h:0},
+          {name:"Observation Letters Issued",mode:"edit",value:"",page:0,x:0,y:0,w:0,h:0},
+          {name:"IRs Received or Reviewed",mode:"edit",value:"",page:0,x:0,y:0,w:0,h:0},
+          {name:"Contractor Activity",mode:"edit",value:"",page:0,x:0,y:0,w:0,h:0},
+          {name:"IOR Notes",mode:"edit",value:"",page:0,x:0,y:0,w:0,h:0,multiline:true},
+        ];
+        setFields(visFields);
+      }
+      return;
+    }
     // Fetch company templates and copy to user's saved templates
     try{
       console.log("[CreateJob] fetching templates for company",company.id,company.name);
