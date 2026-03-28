@@ -1,0 +1,218 @@
+From 95c4caf483745525e311e45b3a01a71f99995821 Mon Sep 17 00:00:00 2001
+From: Jesse Saltzman <jessesbillz@gmail.com>
+Date: Thu, 26 Mar 2026 16:40:43 +0000
+Subject: [PATCH 1/3] Skip template load for from-scratch generators (VIS, TYR)
+
+viewReport and submitReport now bypass the template lookup
+entirely when the job uses a from-scratch PDF generator,
+fixing the "can't display" error for VIS and TYR jobs.
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
+---
+ src/components/ReportEditor.jsx | 61 +++++++++++++++++++++++++++------
+ 1 file changed, 51 insertions(+), 10 deletions(-)
+
+diff --git a/src/components/ReportEditor.jsx b/src/components/ReportEditor.jsx
+index d31343f..c857f49 100644
+--- a/src/components/ReportEditor.jsx
++++ b/src/components/ReportEditor.jsx
+@@ -737,6 +737,48 @@ function ReportEditor({job, user, onBack, reportDate}){
+     busyRef.current=true;
+     setViewLoading(true);
+     try{
++      // From-scratch generators don't need a template — generate PDF directly for preview
++      if(isFromScratch){
++        const allFields=buildEditableFields();
++        const genPhotos=[];
++        for(const p of photos){
++          const src=p.src||p;
++          if(typeof src==='string'&&src.startsWith('data:')){
++            try{const b64=src.split(',')[1];const bin=atob(b64);const bytes=new Uint8Array(bin.length);for(let i=0;i<bin.length;i++)bytes[i]=bin.charCodeAt(i);genPhotos.push({imageBytes:bytes,caption:p.caption||p.name||''});}catch(e){console.warn("Photo convert:",e);}
++          }
++        }
++        let genLogo=null;
++        try{
++          const cName=isTYR?'TYR Engineering':'VIS - Vital Inspection Services';
++          genLogo=await db.downloadTemplateBytes(`${cName}/logo.png`);
++        }catch(e){console.warn("Logo fetch:",e);}
++        let genSig=null;
++        try{
++          const prof=await db.getProfile(user.id);
++          if(prof?.signature_path){
++            const sigUrl=prof.signature_path.startsWith('http')?prof.signature_path:`${SB_URL}/storage/v1/object/public/${prof.signature_path}`;
++            const sigR=await fetch(sigUrl);if(sigR.ok)genSig=new Uint8Array(await sigR.arrayBuffer());
++          }
++        }catch(e){console.warn("Sig fetch:",e);}
++        const genDate=new Date((reportDate||todayISO)+"T12:00:00").toLocaleDateString("en-US",{timeZone:tz});
++        const genProfile={full_name:user?.user_metadata?.full_name||user?.email?.split("@")[0]||"",certification_number:""};
++        const rd={vals:{},photos:genPhotos,...(isTYR?{contractors:selectedContractors}:{})};
++        allFields.forEach(f=>{if(f.val)rd.vals[f.name]=f.val;});
++        const pdfBytes=isTYR?await generateTYR(rd,job,genProfile,genLogo,genSig,genDate):await generateVIS(rd,job,genProfile,genLogo,genSig,genDate);
++        // Render with pdf.js for canvas preview
++        const pdfjsLib=await ensurePdfJs();
++        const pdfDoc=await pdfjsLib.getDocument({data:pdfBytes}).promise;
++        const pages=[];
++        for(let i=1;i<=pdfDoc.numPages;i++){
++          const pg=await pdfDoc.getPage(i);
++          const vp=pg.getViewport({scale:2});
++          const cvs=document.createElement("canvas");cvs.width=vp.width;cvs.height=vp.height;
++          await pg.render({canvasContext:cvs.getContext("2d"),viewport:vp}).promise;
++          pages.push(cvs.toDataURL("image/png",0.92));
++        }
++        setViewingReport(pages);
++        return;
++      }
+       const tplRecord=await db.getTemplate(job.id);
+       // No template at all — show error with diagnostic context
+       if(!tplRecord){
+@@ -934,16 +976,6 @@ function ReportEditor({job, user, onBack, reportDate}){
+       const PDFLib=await ensurePdfLib();
+       const {PDFDocument,rgb,StandardFonts}=PDFLib;
+ 
+-      // ── 1. Look up template ──
+-      const tplRecord=await db.getTemplate(job.id);
+-      if(!tplRecord){console.error("Submit: no template record for job:",job.id);throw new Error("No template record found. Go to Job Settings and re-upload your template.");}
+-      if(!tplRecord.storage_path){console.error("Submit: template has no storage_path:",JSON.stringify(tplRecord));throw new Error("Template file is missing. Go to Job Settings and re-upload your template.");}
+-      const tplBytes=await db.downloadTemplateBytes(tplRecord.storage_path);
+-      if(!tplBytes||tplBytes.byteLength===0){throw new Error("Template download failed — file may be missing from storage. Go to Job Settings and re-upload your template.");}
+-      const isPdfTemplate=tplRecord.file_type==="pdf";
+-      const isDocxTemplate=tplRecord.file_type==="docx"||tplRecord.file_type==="doc";
+-      // Company ID determines rendering path — no filename sniffing
+-
+       // ── 1b. Build fields + AI proofread (before any path) ──
+       const allFields=buildEditableFields();
+ 
+@@ -1065,6 +1097,15 @@ function ReportEditor({job, user, onBack, reportDate}){
+         return; // ← skip standard overlay path
+       }
+ 
++      // ── 1. Look up template (only needed for non-from-scratch paths) ──
++      const tplRecord=await db.getTemplate(job.id);
++      if(!tplRecord){console.error("Submit: no template record for job:",job.id);throw new Error("No template record found. Go to Job Settings and re-upload your template.");}
++      if(!tplRecord.storage_path){console.error("Submit: template has no storage_path:",JSON.stringify(tplRecord));throw new Error("Template file is missing. Go to Job Settings and re-upload your template.");}
++      const tplBytes=await db.downloadTemplateBytes(tplRecord.storage_path);
++      if(!tplBytes||tplBytes.byteLength===0){throw new Error("Template download failed — file may be missing from storage. Go to Job Settings and re-upload your template.");}
++      const isPdfTemplate=tplRecord.file_type==="pdf";
++      const isDocxTemplate=tplRecord.file_type==="docx"||tplRecord.file_type==="doc";
++
+       // ── DOCX path: send to edge function for XML editing ──
+       setSubmitStep("Generating report...");
+       if(isDocxTemplate){
+-- 
+2.34.1
+
+
+From 7ec7e85a58503231fdb90ad0eda8a3a75f22a3a4 Mon Sep 17 00:00:00 2001
+From: Jesse Saltzman <jessesbillz@gmail.com>
+Date: Thu, 26 Mar 2026 16:48:58 +0000
+Subject: [PATCH 2/3] Skip template load for VIS/TYR in job creation
+
+From-scratch companies don't need a template file. When VIS is
+selected, pre-populate default fields matching the VIS report
+layout instead of trying to download a template.
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
+---
+ src/components/CreateJob.jsx | 29 ++++++++++++++++++++++++++++-
+ 1 file changed, 28 insertions(+), 1 deletion(-)
+
+diff --git a/src/components/CreateJob.jsx b/src/components/CreateJob.jsx
+index fc998df..bbe2c7c 100644
+--- a/src/components/CreateJob.jsx
++++ b/src/components/CreateJob.jsx
+@@ -3,7 +3,7 @@ import { C } from '../constants/theme';
+ import { db } from '../utils/db';
+ import { AUTH_TOKEN, refreshAuthToken } from '../utils/auth';
+ import { api } from '../utils/api';
+-import { SB_URL, SB_KEY, TYR_COMPANY_ID, ENHANCED_TYR_ID } from '../constants/supabase';
++import { SB_URL, SB_KEY, VIS_COMPANY_ID, TYR_COMPANY_ID, ENHANCED_TYR_ID } from '../constants/supabase';
+ import { askConfirm } from './ConfirmOverlay';
+ import { extractPdfTextStructure, readAcroFormFields } from '../utils/auth';
+ import { ensurePdfLib, ensureMammoth } from '../utils/pdf';
+@@ -77,6 +77,33 @@ function CreateJob({user, onBack, onCreated}){
+     setJobSelectedCompany(company);
+     setJobCompanyName(company.name);
+     setJobCompanyMatches([]);
++    // From-scratch generators (VIS, TYR) don't need a template file — set up default fields
++    const isFromScratchCompany=company.id===VIS_COMPANY_ID||company.id===TYR_COMPANY_ID;
++    if(isFromScratchCompany){
++      setJobCompanyTemplates([]);
++      // Set default editable fields for VIS
++      if(company.id===VIS_COMPANY_ID){
++        const visFields=[
++          {name:"Date",mode:"auto-date",value:"",page:0,x:0,y:0,w:0,h:0},
++          {name:"Project Name",mode:"lock",value:"",page:0,x:0,y:0,w:0,h:0},
++          {name:"Project No",mode:"lock",value:"",page:0,x:0,y:0,w:0,h:0},
++          {name:"Jurisdiction",mode:"lock",value:"",page:0,x:0,y:0,w:0,h:0},
++          {name:"DSA App",mode:"lock",value:"",page:0,x:0,y:0,w:0,h:0},
++          {name:"DSA File #",mode:"lock",value:"",page:0,x:0,y:0,w:0,h:0},
++          {name:"IOR",mode:"lock",value:"",page:0,x:0,y:0,w:0,h:0},
++          {name:"Project Manager",mode:"lock",value:"",page:0,x:0,y:0,w:0,h:0},
++          {name:"Architect",mode:"lock",value:"",page:0,x:0,y:0,w:0,h:0},
++          {name:"Contractor",mode:"lock",value:"",page:0,x:0,y:0,w:0,h:0},
++          {name:"Correction Notices Issued",mode:"edit",value:"",page:0,x:0,y:0,w:0,h:0},
++          {name:"Observation Letters Issued",mode:"edit",value:"",page:0,x:0,y:0,w:0,h:0},
++          {name:"IRs Received or Reviewed",mode:"edit",value:"",page:0,x:0,y:0,w:0,h:0},
++          {name:"Contractor Activity",mode:"edit",value:"",page:0,x:0,y:0,w:0,h:0},
++          {name:"IOR Notes",mode:"edit",value:"",page:0,x:0,y:0,w:0,h:0,multiline:true},
++        ];
++        setFields(visFields);
++      }
++      return;
++    }
+     // Fetch company templates and copy to user's saved templates
+     try{
+       console.log("[CreateJob] fetching templates for company",company.id,company.name);
+-- 
+2.34.1
+
+
+From 220b48b32bcaf29e57b418c2fdac3c24d0b46e34 Mon Sep 17 00:00:00 2001
+From: Jesse Saltzman <jessesbillz@gmail.com>
+Date: Thu, 26 Mar 2026 16:52:03 +0000
+Subject: [PATCH 3/3] Hide template UI for from-scratch companies in Job
+ Settings
+
+VIS and TYR jobs don't use template files, so hide the
+"Use Company Template" button in Job Settings to prevent
+errors when no template exists.
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
+---
+ src/components/JobDetail.jsx | 6 ++++--
+ 1 file changed, 4 insertions(+), 2 deletions(-)
+
+diff --git a/src/components/JobDetail.jsx b/src/components/JobDetail.jsx
+index 9cd04ec..2c5bff1 100644
+--- a/src/components/JobDetail.jsx
++++ b/src/components/JobDetail.jsx
+@@ -4,7 +4,7 @@ import { db } from '../utils/db';
+ import { AUTH_TOKEN, refreshAuthToken, extractPdfTextStructure } from '../utils/auth';
+ import { api } from '../utils/api';
+ import TimeCardGenerator from './TimeCardGenerator';
+-import { SB_URL, SB_KEY, TYR_COMPANY_ID, ENHANCED_TYR_ID } from '../constants/supabase';
++import { SB_URL, SB_KEY, VIS_COMPANY_ID, TYR_COMPANY_ID, ENHANCED_TYR_ID } from '../constants/supabase';
+ import { ensurePdfLib, ensurePdfJs } from '../utils/pdf';
+ import WorkLogEditor from './WorkLogEditor';
+ import ReportEditor from './ReportEditor';
+@@ -179,6 +179,8 @@ function JobDetail({job, user, onBack, onDeleted}){
+   const isTYR=job.company_id===TYR_COMPANY_ID;
+   const isEnhancedTYR=job.company_id===ENHANCED_TYR_ID;
+   const isAnyTYR=isTYR||isEnhancedTYR;
++  const isVIS=job.company_id===VIS_COMPANY_ID;
++  const isFromScratch=isTYR||isVIS;
+   const [showContractors,setShowContractors]=useState(false);
+   const [jobContractors,setJobContractors]=useState([]);
+   const [newContractorName,setNewContractorName]=useState("");
+@@ -855,7 +857,7 @@ function JobDetail({job, user, onBack, onDeleted}){
+               </div>
+               <span style={{fontSize:11,color:C.mut,background:C.inp,borderRadius:10,padding:"2px 8px"}}>{teamMembers.length}</span>
+             </button>
+-            {job.company_id&&(
++            {job.company_id&&!isFromScratch&&(
+               <button onClick={loadCompanyTemplates} disabled={loadingCompanyTpls} style={{width:"100%",display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,padding:"14px 18px",background:"none",border:"none",borderBottom:`1px solid ${C.brd}`,cursor:"pointer",textAlign:"left"}}>
+                 <div style={{display:"flex",alignItems:"center",gap:10}}>
+                   <span style={{fontSize:16}}>🏢</span><span style={{fontSize:14,fontWeight:600,color:C.lt}}>{loadingCompanyTpls?"Loading...":"Use Company Template"}</span>
+-- 
+2.34.1
+

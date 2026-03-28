@@ -262,7 +262,6 @@ function ReportEditor({job, user, onBack, reportDate}){
   const [fieldMode,setFieldMode]=useState(false);
   const [contractorsOpen,setContractorsOpen]=useState(true);
   const [autoFilledOpen,setAutoFilledOpen]=useState(false);
-  const [visProjectOpen,setVisProjectOpen]=useState(false);
   const fieldPhotoRef=useRef(null);
   const [cameraOpen,setCameraOpen]=useState(false);
   const videoRef=useRef(null);
@@ -2384,43 +2383,8 @@ function ReportEditor({job, user, onBack, reportDate}){
               </div>
             )}
 
-            {/* ── VIS: Custom sectioned editor matching vis-editor.html ── */}
-            {isVIS&&(<>
-              {/* Project Information — collapsible, shows locked field values */}
-              <div style={{...cardStyle}}>
-                <div onClick={()=>setVisProjectOpen(p=>!p)} style={{display:"flex",alignItems:"center",justifyContent:"space-between",cursor:"pointer",userSelect:"none"}}>
-                  <div style={{fontSize:16,fontWeight:700,color:C.org,textTransform:"uppercase",letterSpacing:0.8}}>Project Information</div>
-                  <span style={{fontSize:22,color:C.mut}}>{visProjectOpen?"−":"+"}</span>
-                </div>
-                {visProjectOpen&&<div style={{marginTop:18}}>
-                  <div style={{display:"flex",gap:12,marginBottom:14}}><div style={{flex:1}}><label style={{display:"block",fontSize:14,fontWeight:700,color:"#fff",marginBottom:7}}>Project Name</label><input value={lockVals["Project Name"]||vals["Project Name"]||""} onChange={e=>{setLockVal("Project Name",e.target.value);setVal("Project Name",e.target.value);}} placeholder="Hunter Hall" style={fs}/></div><div style={{flex:1}}><label style={{display:"block",fontSize:14,fontWeight:700,color:"#fff",marginBottom:7}}>Project No.</label><input value={lockVals["Project No"]||vals["Project No"]||""} onChange={e=>{setLockVal("Project No",e.target.value);setVal("Project No",e.target.value);}} style={fs}/></div></div>
-                  <div style={{display:"flex",gap:12,marginBottom:14}}><div style={{flex:1}}><label style={{display:"block",fontSize:14,fontWeight:700,color:"#fff",marginBottom:7}}>Jurisdiction</label><input value={lockVals["Jurisdiction"]||vals["Jurisdiction"]||""} onChange={e=>{setLockVal("Jurisdiction",e.target.value);setVal("Jurisdiction",e.target.value);}} placeholder="DSA" style={fs}/></div><div style={{flex:1}}><label style={{display:"block",fontSize:14,fontWeight:700,color:"#fff",marginBottom:7}}>DSA App</label><input value={lockVals["DSA App"]||vals["DSA App"]||""} onChange={e=>{setLockVal("DSA App",e.target.value);setVal("DSA App",e.target.value);}} style={fs}/></div></div>
-                  <div style={{display:"flex",gap:12,marginBottom:14}}><div style={{flex:1}}><label style={{display:"block",fontSize:14,fontWeight:700,color:"#fff",marginBottom:7}}>DSA File #</label><input value={lockVals["DSA File #"]||vals["DSA File #"]||""} onChange={e=>{setLockVal("DSA File #",e.target.value);setVal("DSA File #",e.target.value);}} style={fs}/></div><div style={{flex:1}}><label style={{display:"block",fontSize:14,fontWeight:700,color:"#fff",marginBottom:7}}>IOR</label><input value={lockVals["IOR"]||vals["IOR"]||""} onChange={e=>{setLockVal("IOR",e.target.value);setVal("IOR",e.target.value);}} style={fs}/></div></div>
-                  <div style={{display:"flex",gap:12,marginBottom:14}}><div style={{flex:1}}><label style={{display:"block",fontSize:14,fontWeight:700,color:"#fff",marginBottom:7}}>Project Manager</label><input value={lockVals["Project Manager"]||vals["Project Manager"]||""} onChange={e=>{setLockVal("Project Manager",e.target.value);setVal("Project Manager",e.target.value);}} style={fs}/></div><div style={{flex:1}}><label style={{display:"block",fontSize:14,fontWeight:700,color:"#fff",marginBottom:7}}>Architect</label><input value={lockVals["Architect"]||vals["Architect"]||""} onChange={e=>{setLockVal("Architect",e.target.value);setVal("Architect",e.target.value);}} style={fs}/></div></div>
-                  <div style={{marginBottom:14}}><label style={{display:"block",fontSize:14,fontWeight:700,color:"#fff",marginBottom:7}}>Contractor</label><input value={lockVals["Contractor"]||vals["Contractor"]||""} onChange={e=>{setLockVal("Contractor",e.target.value);setVal("Contractor",e.target.value);}} placeholder="CW Driver" style={fs}/></div>
-                </div>}
-              </div>
-
-              {/* Daily Activity */}
-              <div style={{...cardStyle}}>
-                <div style={{fontSize:16,fontWeight:700,color:C.org,textTransform:"uppercase",letterSpacing:0.8,marginBottom:18}}>Daily Activity</div>
-                <div style={{display:"flex",gap:12,marginBottom:14}}>
-                  <div style={{flex:1}}><label style={{display:"block",fontSize:14,fontWeight:700,color:"#fff",marginBottom:7}}>Correction Notices Issued</label><input value={vals["Correction Notices Issued"]||""} onChange={e=>setVal("Correction Notices Issued",e.target.value)} placeholder="CN-001" style={fs}/></div>
-                  <div style={{flex:1}}><label style={{display:"block",fontSize:14,fontWeight:700,color:"#fff",marginBottom:7}}>Observation Letters</label><input value={vals["Observation Letters Issued"]||""} onChange={e=>setVal("Observation Letters Issued",e.target.value)} style={fs}/></div>
-                </div>
-                <div style={{marginBottom:14}}><label style={{display:"block",fontSize:14,fontWeight:700,color:"#fff",marginBottom:7}}>IR's Received or Reviewed</label><input value={vals["IRs Received or Reviewed"]||""} onChange={e=>setVal("IRs Received or Reviewed",e.target.value)} placeholder="IR-2026-0041, IR-2026-0042" style={fs}/></div>
-                <div style={{marginBottom:14}}><label style={{display:"block",fontSize:14,fontWeight:700,color:"#fff",marginBottom:7}}>Contractor Activity</label><input value={vals["Contractor Activity"]||""} onChange={e=>setVal("Contractor Activity",e.target.value)} placeholder="Structural steel erection, MEP rough-in" style={fs}/></div>
-              </div>
-
-              {/* IOR Notes — big textarea */}
-              <div style={{...cardStyle}}>
-                <div style={{fontSize:16,fontWeight:700,color:C.org,textTransform:"uppercase",letterSpacing:0.8,marginBottom:16}}>IOR Notes</div>
-                <textarea value={vals["IOR Notes"]||""} onChange={e=>setVal("IOR Notes",e.target.value)} rows={14} placeholder={"Observed structural steel erection at south elevation.\n\nMonitored concrete pour for grade beam.\n\nReviewed MEP rough-in at second floor."} style={{...fs,resize:"vertical",minHeight:240,lineHeight:1.6}}/>
-              </div>
-            </>)}
-
-            {/* Regular editable fields — card wrapper (non-VIS) */}
-            {!isVIS&&<div style={{...cardStyle}}>
+            {/* Regular editable fields — card wrapper */}
+            <div style={{...cardStyle}}>
             {sectionLabel("📋","REPORT FIELDS")}
             {editFields.filter(f=>{
               if(f.autoFill==="date"||f.autoFill==="increment"||f.autoFill==="name")return false;
@@ -2478,7 +2442,7 @@ function ReportEditor({job, user, onBack, reportDate}){
                 </div>
               );
             })}
-          </div>}
+          </div>
           </div>
         )}
 
