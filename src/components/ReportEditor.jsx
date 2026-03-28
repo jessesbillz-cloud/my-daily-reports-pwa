@@ -750,7 +750,7 @@ function ReportEditor({job, user, onBack, reportDate}){
         }
         let genLogo=null;
         try{
-          const cName=isTYR?'TYR Engineering':'VIS - Vital Inspection Services';
+          const cName=isTYR?'TYR Engineering':'vis';
           genLogo=await db.downloadTemplateBytes(`${cName}/logo.png`);
         }catch(e){console.warn("Logo fetch:",e);}
         let genSig=null;
@@ -1027,7 +1027,7 @@ function ReportEditor({job, user, onBack, reportDate}){
         // Fetch logo from company-templates storage
         let genLogo=null;
         try{
-          const cName=isTYR?'TYR Engineering':'VIS - Vital Inspection Services';
+          const cName=isTYR?'TYR Engineering':'vis';
           genLogo=await db.downloadTemplateBytes(`${cName}/logo.png`);
         }catch(e){console.warn("Logo fetch:",e);}
         // Fetch signature bytes
